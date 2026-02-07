@@ -119,7 +119,9 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
-  const [userRole, setUserRole] = useState('student');
+  const [userRole, setUserRole] = useState('public');
+  const [userProfile, setUserProfile] = useState(null);
+  const [needsRolePick, setNeedsRolePick] = useState(false);
 
   // Time-aware greeting helper (keeps inside component scope)
   const getGreeting = () => {
@@ -163,24 +165,69 @@ export default function App() {
     });
   }, [user]);
 
-  // Load persisted user region preference
+  // Load persisted user region preference and extended role profile
   useEffect(() => {
     if (!user) return;
+
     (async () => {
       try {
         const uDoc = doc(db, 'artifacts', appId, 'users', user.uid);
         const snap = await getDoc(uDoc);
+
         if (snap.exists()) {
           const data = snap.data();
+
           if (data.region) setRegion(data.region);
-          // Determine role: prefer explicit `role`, else `isStaff` boolean
-          if (data.role) setUserRole(data.role);
-          else if (data.isStaff) setUserRole('staff');
-          else setUserRole('student');
+
+          // ✅ Primary role source
+          const role =
+            data.role ??
+            (data.isStaff ? 'staff' : null); // legacy support
+
+          // ✅ Default role if missing
+          if (!role) {
+            // If user doc exists but no role, treat as public until they choose
+            setUserRole('public');
+            setNeedsRolePick(true);
+          } else {
+            setUserRole(role);
+            setNeedsRolePick(false);
+          }
+
+          // ✅ Keep extra profile info (for student/institution later)
+          setUserProfile({
+            role: role ?? 'public',
+            studentType: data.studentType ?? null,
+            stage: data.stage ?? null,
+            verificationStatus: data.verificationStatus ?? null,
+            institutionId: data.institutionId ?? null,
+            admissionNumber: data.admissionNumber ?? null,
+          });
+        } else {
+          // ✅ If no user doc exists (common on anon auth), create a default PUBLIC profile
+          setUserRole('public');
+          setNeedsRolePick(true);
+
+          // Create minimal doc (don't block UI if this fails)
+          try {
+            await setDoc(uDoc, {
+              role: 'public',
+              createdAt: serverTimestamp(),
+            }, { merge: true });
+          } catch (e) {
+            console.warn('Could not create default user doc', e);
+          }
+
+          setUserProfile({ role: 'public' });
         }
-      } catch (e) { console.error('Error reading user prefs', e); }
+      } catch (e) {
+        console.error('Error reading user prefs', e);
+        // Safe fallback
+        setUserRole('public');
+        setNeedsRolePick(true);
+      }
     })();
-  }, [user]);
+  }, [user, appId]);
 
   // Persist region preference when changed
   useEffect(() => {
@@ -524,6 +571,19 @@ export default function App() {
     }
   };
 
+  // Handler to set and persist role choice
+  const setRoleAndPersist = async (role) => {
+    try {
+      const uDoc = doc(db, 'artifacts', appId, 'users', user.uid);
+      await setDoc(uDoc, { role }, { merge: true });
+      setUserRole(role);
+      setUserProfile(p => ({ ...(p || {}), role }));
+      setNeedsRolePick(false);
+    } catch (e) {
+      console.error('Failed to set role', e);
+    }
+  };
+
   const SidebarItem = ({ icon: Icon, label, onClick, active }) => (
     <button 
       onClick={onClick}
@@ -534,22 +594,69 @@ export default function App() {
     </button>
   );
 
+  // Role-aware sidebar title
+  const roleTitle =
+    userRole === 'student' ? 'Student Portal' :
+    userRole === 'institution' ? 'Institution Console' :
+    userRole === 'staff' ? 'Staff Console' :
+    'Public Explore';
+
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+      {/* Role Picker Modal (one-time) */}
+      {needsRolePick && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl bg-slate-900 border border-white/10 p-5">
+            <div className="text-white font-bold text-lg">Welcome to ElimuLink</div>
+            <div className="text-slate-300 text-sm mt-1">
+              Choose how you want to use the app. (You can change this later in Settings.)
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <button
+                className="w-full text-left p-3 rounded bg-white/5 hover:bg-white/10 text-slate-100"
+                onClick={() => setRoleAndPersist('student')}
+              >
+                🎓 I'm a Student
+              </button>
+
+              <button
+                className="w-full text-left p-3 rounded bg-white/5 hover:bg-white/10 text-slate-100"
+                onClick={() => setRoleAndPersist('institution')}
+              >
+                🏫 I represent an Institution
+              </button>
+
+              <button
+                className="w-full text-left p-3 rounded bg-white/5 hover:bg-white/10 text-slate-100"
+                onClick={() => setRoleAndPersist('public')}
+              >
+                🌍 I'm exploring (Public user)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Sidebar: Collapsible Menu */}
       <aside className={`${isSidebarOpen ? 'w-64' : 'w-0'} transition-all duration-300 bg-slate-900 border-r border-white/5 flex flex-col shrink-0`}>
-        <div className="p-4 border-b border-white/5 flex items-center justify-between">
+        <div className="p-4 border-b border-white/5 flex flex-col gap-2">
           <div className="flex items-center gap-2 font-bold text-sky-400">
             <div className="w-6 h-6 bg-sky-500 rounded flex items-center justify-center text-white text-[10px]">EL</div>
-            ElimuLink Pro
+            ElimuLink — {roleTitle}
+          </div>
+          <div className="text-[11px] text-slate-400">
+            {userRole === 'student' && 'Your academic tools are ready.'}
+            {userRole === 'institution' && 'Manage learning, students, and insights.'}
+            {userRole === 'staff' && 'Admin and operational controls.'}
+            {userRole === 'public' && 'Explore institutions, courses, and opportunities.'}
           </div>
         </div>
         
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           <SidebarItem icon={Plus} label="New Chat" onClick={() => { setMessages([]); setActiveChatId(null); }} />
           <SidebarItem icon={FolderHeart} label="My Stuff" onClick={() => { setShowMyStuff(!showMyStuff); }} />
-          {userRole === 'staff' && (
-            <SidebarItem icon={FolderHeart} label="Admin" onClick={() => { setShowAdmin(s=>!s); }} />
+          {(userRole === 'staff' || userRole === 'institution') && (
+            <SidebarItem icon={FolderHeart} label={userRole === 'institution' ? 'Institution' : 'Admin'} onClick={() => { setShowAdmin(s=>!s); }} />
           )}
           
           <div className="mt-6 mb-2 px-3 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Recent Chats</div>
