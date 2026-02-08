@@ -52,6 +52,31 @@ function apiUrl(path) {
   return API_BASE ? API_BASE.replace(/\/$/, '') + path : path;
 }
 
+// Helper to log API errors with context
+async function fetchWithErrorLog(url, options = {}) {
+  try {
+    console.log(`[API] Fetching: ${url}`);
+    const res = await fetch(url, options);
+    
+    if (!res.ok) {
+      const contentType = res.headers.get('content-type');
+      let errorBody = '';
+      if (contentType?.includes('application/json')) {
+        try { errorBody = await res.json(); } catch (e) { errorBody = await res.text(); }
+      } else {
+        errorBody = await res.text();
+      }
+      console.error(`[API] Error ${res.status}:`, url, errorBody);
+      throw new Error(`${res.status}: ${typeof errorBody === 'string' ? errorBody : errorBody?.error || 'Unknown error'}`);
+    }
+    
+    return res;
+  } catch (err) {
+    console.error(`[API] Failed to fetch ${url}:`, err.message);
+    throw err;
+  }
+}
+
 // PCM to WAV converter for TTS
 function encodeWAV(samples, sampleRate) {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
@@ -98,9 +123,19 @@ export default function App() {
     const fbProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || '';
     
     console.log('[ENV] MODE:', mode);
-    console.log('[ENV] VITE_API_BASE:', apiBase ? apiBase.substring(0, 6) + '...' : '(empty)');
+    console.log('[ENV] VITE_API_BASE:', apiBase || '(empty - using direct Firestore)');
     console.log('[ENV] VITE_FIREBASE_API_KEY:', fbKey ? fbKey.substring(0, 6) + '...' : '(empty)');
     console.log('[ENV] VITE_FIREBASE_PROJECT_ID:', fbProjectId ? fbProjectId.substring(0, 6) + '...' : '(empty)');
+    
+    // If API_BASE is set, log the endpoints we'll be calling
+    if (apiBase) {
+      console.log('[API] Will call:', {
+        chat: `${apiBase}/api/ai/student`,
+        admin: `${apiBase}/api/admin/auth`,
+        libraries: `${apiBase}/api/libraries/sync`,
+        image: `${apiBase}/api/image`
+      });
+    }
     
     // Check for critical missing env vars
     const missing = [];
@@ -494,7 +529,7 @@ export default function App() {
     try {
       const idToken = user ? await user.getIdToken() : null;
 
-      const res = await fetch(apiUrl('/api/ai/student'), {
+      const res = await fetchWithErrorLog(apiUrl('/api/ai/student'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -559,7 +594,7 @@ export default function App() {
           try {
             const idToken = user ? await user.getIdToken() : null;
             const bodyText = `${filesSummary}\n\n${rulePrefix} ${text}`;
-            const res = await fetch(apiUrl('/api/ai/student'), {
+            const res = await fetchWithErrorLog(apiUrl('/api/ai/student'), {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -583,7 +618,7 @@ export default function App() {
       } else {
         const idToken = user ? await user.getIdToken() : null;
         const bodyText = `${filesSummary}\n\n${rulePrefix} ${text}`;
-        const res = await fetch(apiUrl('/api/ai/student'), {
+        const res = await fetchWithErrorLog(apiUrl('/api/ai/student'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

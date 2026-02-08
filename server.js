@@ -14,15 +14,45 @@ const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || '')
   .map(s => s.trim())
   .filter(Boolean);
 
+// If no explicit CORS_ORIGINS set, allow common development and Vercel domains
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:4173',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  // Vercel production and preview deployments
+  /\.vercel\.app$/,
+];
+
+const corsOrigins = ALLOWED_ORIGINS.length > 0 ? ALLOWED_ORIGINS : DEFAULT_ALLOWED_ORIGINS;
+
 app.use(cors({
   origin: function(origin, cb) {
     // allow non-browser tools (curl, Postman)
     if (!origin) return cb(null, true);
-    // if no allowlist set, allow all (MVP). You can tighten later.
-    if (ALLOWED_ORIGINS.length === 0) return cb(null, true);
-    return cb(null, ALLOWED_ORIGINS.includes(origin));
+    
+    // Check against explicit list or regex patterns
+    const isAllowed = corsOrigins.some(allowed => {
+      if (allowed instanceof RegExp) {
+        return allowed.test(origin);
+      }
+      return origin === allowed;
+    });
+    
+    if (isAllowed) {
+      console.log(`[CORS] Allowed: ${origin}`);
+      return cb(null, true);
+    }
+    
+    console.warn(`[CORS] Blocked: ${origin}`);
+    return cb(null, false); // silently reject (browser will handle)
   },
   credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400, // 24 hours
 }));
 
 const PORT = process.env.PORT || 4000;
@@ -204,8 +234,11 @@ app.post('/api/ai/student', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'text required' });
   }
 
+  console.log(`[API] /api/ai/student - User: ${req.user.uid}, Region: ${region}`);
+
   const GEMINI_KEY = process.env.GEMINI_API_KEY;
   if (!GEMINI_KEY) {
+    console.error('[ERROR] GEMINI_API_KEY not set on backend');
     return res.status(500).json({ error: 'GEMINI_API_KEY not set' });
   }
 
@@ -227,33 +260,52 @@ Question: ${text}
 `;
 
   try {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: promptText }] }],
-          tools: useGoogleSearch ? [{ google_search: {} }] : [],
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-        }),
-      }
-    );
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
+    console.log(`[API] Calling Gemini: ${url.substring(0, 50)}...`);
+    
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: promptText }] }],
+        tools: useGoogleSearch ? [{ google_search: {} }] : [],
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+      }),
+    });
+
+    if (!r.ok) {
+      const errorData = await r.json().catch(() => ({}));
+      console.error(`[ERROR] Gemini API returned ${r.status}:`, errorData);
+      return res.status(r.status).json({ error: `Gemini API error: ${r.status}`, details: errorData });
+    }
 
     const data = await r.json();
+
+    if (!data.candidates || data.candidates.length === 0) {
+      console.error('[ERROR] Gemini returned no candidates:', data);
+      return res.status(500).json({ error: 'Gemini returned empty response' });
+    }
 
     const aiText =
       data.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join('') ||
       data.candidates?.[0]?.content?.parts?.[0]?.text ||
       'No response.';
 
+    console.log(`[API] Gemini responded successfully (${aiText.length} chars)`);
     return res.json({ ok: true, text: aiText, raw: undefined });
   } catch (e) {
+    console.error('[ERROR] /api/ai/student exception:', e.message);
     return res.status(500).json({ error: e.message });
   }
 });
 
-app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`[SERVER] ElimuLink API listening on port ${PORT}`);
+  console.log(`[CONFIG] CORS origins: ${corsOrigins.map(o => o instanceof RegExp ? o.source : o).join(', ')}`);
+  console.log(`[CONFIG] Firebase Admin: ${db ? 'initialized' : 'NOT configured'}`);
+  console.log(`[CONFIG] Gemini API: ${process.env.GEMINI_API_KEY ? 'set' : 'NOT configured'}`);
+  console.log(`[CONFIG] OpenAI API: ${OPENAI_KEY ? 'set' : 'not configured'}`);
+});
 
 // Root status route for quick health check
 app.get('/', (req, res) => {
