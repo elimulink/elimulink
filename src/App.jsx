@@ -42,7 +42,10 @@ const db = getFirestore(app);
 const appId = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ''; 
 // API base for backend (set this in Vercel to your Render service URL)
-const API_BASE = import.meta.env.VITE_API_BASE || '';
+// Never default to localhost in production
+const API_BASE = 
+  import.meta.env.VITE_API_BASE || 
+  (import.meta.env.MODE === 'development' ? 'http://localhost:4000' : '');
 
 function apiUrl(path) {
   if (!path.startsWith('/')) path = '/' + path;
@@ -87,6 +90,30 @@ function suggestChips(text) {
 }
 
 export default function App() {
+  // [DEBUG] Log environment variables on mount
+  useEffect(() => {
+    const mode = import.meta.env.MODE;
+    const apiBase = import.meta.env.VITE_API_BASE || '';
+    const fbKey = import.meta.env.VITE_FIREBASE_API_KEY || '';
+    const fbProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || '';
+    
+    console.log('[ENV] MODE:', mode);
+    console.log('[ENV] VITE_API_BASE:', apiBase ? apiBase.substring(0, 6) + '...' : '(empty)');
+    console.log('[ENV] VITE_FIREBASE_API_KEY:', fbKey ? fbKey.substring(0, 6) + '...' : '(empty)');
+    console.log('[ENV] VITE_FIREBASE_PROJECT_ID:', fbProjectId ? fbProjectId.substring(0, 6) + '...' : '(empty)');
+    
+    // Check for critical missing env vars
+    const missing = [];
+    if (!fbKey) missing.push('VITE_FIREBASE_API_KEY');
+    if (!fbProjectId) missing.push('VITE_FIREBASE_PROJECT_ID');
+    
+    if (missing.length > 0) {
+      console.error('[ERROR] Missing critical env vars:', missing);
+      setEnvError(missing);
+    }
+  }, []);
+
+  const [envError, setEnvError] = useState(null);
   const [user, setUser] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -633,6 +660,28 @@ export default function App() {
     userRole === 'institution' ? 'Institution Console' :
     userRole === 'staff' ? 'Staff Console' :
     'Public Explore';
+
+  // If critical env vars missing, show error panel instead of app
+  if (envError && envError.length > 0) {
+    return (
+      <div className="flex h-screen bg-slate-950 text-slate-100 items-center justify-center p-4">
+        <div className="max-w-md bg-red-900/20 border border-red-500 rounded-lg p-6">
+          <div className="text-lg font-bold text-red-400 mb-3">⚠️ Configuration Error</div>
+          <div className="text-sm text-slate-300 mb-4">
+            Missing required environment variables on Vercel. Contact admin and add these to Vercel:
+          </div>
+          <div className="bg-slate-900 rounded p-3 text-xs space-y-1 text-slate-200 font-mono">
+            {envError.map(v => (
+              <div key={v}>• {v}</div>
+            ))}
+          </div>
+          <div className="text-xs text-slate-400 mt-4">
+            See Vercel project settings → Environment Variables
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
