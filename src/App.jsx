@@ -862,8 +862,8 @@ export default function App() {
       <aside
         className={
           isMobile
-            ? `fixed top-0 left-0 z-40 h-full w-64 bg-slate-900 border-r border-white/5 flex flex-col transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
-            : `w-64 bg-slate-900 border-r border-white/5 flex flex-col shrink-0`
+            ? `fixed top-0 left-0 z-40 h-full w-full max-w-xs bg-slate-900 border-r border-white/5 flex flex-col min-w-0 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
+            : `w-64 bg-slate-900 border-r border-white/5 flex flex-col shrink-0 min-w-0`
         }
         style={isMobile ? { boxShadow: isSidebarOpen ? '0 0 0 9999px rgba(0,0,0,0.5)' : undefined } : {}}
       >
@@ -914,7 +914,7 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className={`flex-1 flex flex-col relative ${isMobile ? '' : 'ml-0'}`}>
+      <main className={`flex-1 flex flex-col min-w-0 relative ${isMobile ? '' : 'ml-0'}`}>
         {/* Department label and switch banner */}
         <div className="flex items-center gap-2 px-4 pt-2 pb-1">
           <span className="text-xs bg-sky-900/40 text-sky-200 px-2 py-1 rounded font-bold">Department: {activeDepartment.name}</span>
