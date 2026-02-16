@@ -4,17 +4,45 @@ const jwt = require('jsonwebtoken');
 const fetch = global.fetch || require('node-fetch');
 const admin = require('firebase-admin');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+
+function loadEnvFile(filename, options = {}) {
+  const { override = false } = options;
+  const fullPath = path.join(process.cwd(), filename);
+  if (!fs.existsSync(fullPath)) return;
+  const lines = fs.readFileSync(fullPath, 'utf8').split(/\r?\n/);
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const idx = line.indexOf('=');
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    let value = line.slice(idx + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (override || !(key in process.env)) process.env[key] = value;
+  }
+}
+
+// Load local env files when running outside managed platforms.
+loadEnvFile('.env');
+loadEnvFile('.env.local', { override: true });
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
 
 // Allow your frontend origins (Vercel + localhost)
 
-// CORS: allow https://*.vercel.app, localhost:3000, localhost:5173
+// CORS: allow https://*.vercel.app and local dev origins on localhost/127.0.0.1 any port
 const allowedOrigins = [
   /^https:\/\/[a-zA-Z0-9-]+\.vercel\.app$/, // https://*.vercel.app
-  'http://localhost:3000',
-  'http://localhost:5173',
+  'https://app.elimulink.co.ke',
+  /^https:\/\/[a-zA-Z0-9-]+\.web\.app$/,
+  /^https:\/\/[a-zA-Z0-9-]+\.firebaseapp\.com$/,
+  /^http:\/\/localhost:\d+$/,
+  /^http:\/\/127\.0\.0\.1:\d+$/,
 ];
 
 const corsOptions = {
@@ -61,6 +89,12 @@ const db = (admin.apps && admin.apps.length) ? admin.firestore() : null;
 // Firebase ID token middleware for students
 async function requireUser(req, res, next) {
   try {
+    const isDev = process.env.NODE_ENV !== 'production';
+    if (!admin.apps?.length && isDev) {
+      req.user = { uid: 'local-dev-user', role: 'student' };
+      return next();
+    }
+
     const authz = req.headers.authorization || '';
     if (!authz.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Missing Bearer token' });
@@ -221,9 +255,9 @@ app.post('/api/ai/student', requireUser, async (req, res) => {
 
   console.log(`[API] /api/ai/student - User: ${req.user.uid}, Region: ${region}`);
 
-  const GEMINI_KEY = process.env.GEMINI_API_KEY;
+  const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
   if (!GEMINI_KEY) {
-    console.error('[ERROR] GEMINI_API_KEY not set on backend');
+    console.error('[ERROR] GEMINI_API_KEY not set on backend (and no VITE_GEMINI_API_KEY fallback)');
     return res.status(500).json({ error: 'GEMINI_API_KEY not set' });
   }
 
