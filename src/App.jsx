@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import InstitutionAdminDashboard from "./pages/institution/InstitutionAdminDashboard";
-import AdminDashboard from "./pages/institution/AdminDashboard";
-import { app, db, auth } from './lib/firebase';
+import InstitutionNotebook from "./pages/institution/InstitutionNotebook";
+import InstitutionAssignments from "./pages/institution/InstitutionAssignments";
+import InstitutionHome from "./pages/institution/InstitutionHome";
+import { app, db, auth, firebaseMissingEnvVars, firebaseInitErrorMessage } from './lib/firebase';
 import imageAPI from './services/imageAPI.js';
+import { isSpeechRecognitionSupported, startRecognition, stopRecognition, speak, cancelSpeak } from './lib/voice';
 import { 
   Plus, 
   FolderHeart, 
@@ -12,6 +15,9 @@ import {
   Menu, 
   Send, 
   Volume2, 
+  VolumeX,
+  Mic,
+  MicOff,
   Image as ImageIcon, 
   Paperclip, 
   Edit2, 
@@ -23,35 +29,19 @@ import {
   Moon,
   Search,
   Lock,
+  Building2,
+  Shield,
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
 import { getDepartments } from './lib/institution';
-import { onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 
-// --- CONFIG & INIT ---
-// Read Firebase config from environment variables (preferred)
-
-// TEMP: Log Firebase env vars for debugging
-console.log('VITE_FIREBASE_API_KEY:', import.meta.env.VITE_FIREBASE_API_KEY);
-console.log('VITE_FIREBASE_AUTH_DOMAIN:', import.meta.env.VITE_FIREBASE_AUTH_DOMAIN);
-
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
-};
-
-// const app = initializeApp(firebaseConfig);
-// const auth = getAuth(app);
-// const db = getFirestore(app);
 const appId = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ''; 
+const INSTITUTION_EMAIL_DOMAIN = String(import.meta.env.VITE_INSTITUTION_EMAIL_DOMAIN || 'elimulink.co.ke').toLowerCase();
+const INSTITUTION_FALLBACK_ID = String(import.meta.env.VITE_INSTITUTION_ID || 'YOUR_INSTITUTION_ID');
 // API base for backend (set this in Vercel to your Render service URL)
 // Never default to localhost in production
 const API_BASE = 
@@ -61,6 +51,11 @@ const API_BASE =
 function apiUrl(path) {
   if (!path.startsWith('/')) path = '/' + path;
   return API_BASE ? API_BASE.replace(/\/$/, '') + path : path;
+}
+
+function isInstitutionLinkedRole(role) {
+  const value = String(role || '');
+  return value.startsWith('institution_') || value === 'staff';
 }
 
 // Helper to log API errors with context
@@ -125,7 +120,7 @@ function suggestChips(text) {
   return ["Explain deeper", "Give examples", "Summarize", "Quiz me", "Show sources"];
 }
 
-export default function App() {
+export default function App({ hostMode = 'public', modeUrls = null }) {
   // [DEBUG] Log environment variables on mount
   useEffect(() => {
     const mode = import.meta.env.MODE;
@@ -149,14 +144,33 @@ export default function App() {
     }
     
     // Check for critical missing env vars
-    const missing = [];
-    if (!fbKey) missing.push('VITE_FIREBASE_API_KEY');
-    if (!fbProjectId) missing.push('VITE_FIREBASE_PROJECT_ID');
+    const missing = [...firebaseMissingEnvVars];
     
     if (missing.length > 0) {
       console.error('[ERROR] Missing critical env vars:', missing);
       setEnvError(missing);
     }
+
+    if (firebaseInitErrorMessage) {
+      setEnvError((prev) => prev && prev.length ? prev : ['Firebase initialization failed (check VITE_FIREBASE_API_KEY)']);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleAuthError = (event) => {
+      const message =
+        String(event?.reason?.message || event?.error?.message || event?.message || event || '');
+      if (message.toLowerCase().includes('auth/invalid-api-key')) {
+        setEnvError((prev) => (prev && prev.length ? prev : ['VITE_FIREBASE_API_KEY (invalid)']));
+      }
+    };
+
+    window.addEventListener('unhandledrejection', handleAuthError);
+    window.addEventListener('error', handleAuthError);
+    return () => {
+      window.removeEventListener('unhandledrejection', handleAuthError);
+      window.removeEventListener('error', handleAuthError);
+    };
   }, []);
 
   // --- Institution Admin Dashboard Route ---
@@ -214,20 +228,32 @@ export default function App() {
   const [showInstall, setShowInstall] = useState(false);
   const [userRole, setUserRole] = useState('public');
   const [userProfile, setUserProfile] = useState(null);
-  const [needsRolePick, setNeedsRolePick] = useState(false);
   const [showInstitutionModal, setShowInstitutionModal] = useState(false);
   const [staffCodeInput, setStaffCodeInput] = useState('');
+  const [showStaffLogin, setShowStaffLogin] = useState(false);
+  const [staffCode, setStaffCode] = useState('');
+  const [staffEmail, setStaffEmail] = useState('');
+  const [staffPassword, setStaffPassword] = useState('');
   const [institutionDepartments, setInstitutionDepartments] = useState([]);
   const [institutionExpanded, setInstitutionExpanded] = useState(false);
-  const [activeDepartmentId, setActiveDepartmentId] = useState(() => localStorage.getItem('activeDepartmentId') || null);
-  const [activeDepartmentName, setActiveDepartmentName] = useState(() => localStorage.getItem('activeDepartmentName') || '');
+  const [activeDepartmentId, setActiveDepartmentId] = useState(() => localStorage.getItem('activeDepartmentId') || 'general');
+  const [activeDepartmentName, setActiveDepartmentName] = useState(() => localStorage.getItem('activeDepartmentName') || 'General');
   const [showDeptBanner, setShowDeptBanner] = useState(false);
   const [suggestedDept, setSuggestedDept] = useState(null);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(() => {
+    const saved = localStorage.getItem('voiceEnabled');
+    return saved == null ? true : saved === 'true';
+  });
   const [onboardEmail, setOnboardEmail] = useState('');
   const [onboardRegNo, setOnboardRegNo] = useState('');
   const [onboardInstitutions, setOnboardInstitutions] = useState([]);
   const [onboardSelectedInst, setOnboardSelectedInst] = useState('');
   const [onboardError, setOnboardError] = useState('');
+  const isInstitutionHost =
+    hostMode === 'institution' ||
+    (typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('institution.'));
+  const speechSupported = isSpeechRecognitionSupported();
 
   // Time-aware greeting helper (keeps inside component scope)
   const getGreeting = () => {
@@ -242,10 +268,18 @@ export default function App() {
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
   const isStaffRole = ["staff", "departmentAdmin", "superAdmin"].includes(userRole);
+  const isInstitutionLinkedUser = Boolean(userProfile?.institutionId) && isInstitutionLinkedRole(userRole);
   const departments = institutionDepartments;
   const activeDepartment =
     departments.find((d) => d.id === activeDepartmentId) ||
     { id: activeDepartmentId || 'general', name: activeDepartmentName || 'General', prompt: 'General student support.' };
+  const defaultInstitutionDepartments = [
+    { id: 'general', name: 'General', prompt: 'General student support and institution guidance.' },
+    { id: 'guidance', name: 'Guidance', prompt: 'Student counseling support and wellbeing.' },
+    { id: 'sports', name: 'Sports', prompt: 'Sports programs, fixtures, and participation.' },
+    { id: 'research', name: 'Research', prompt: 'Research projects and innovation support.' },
+    { id: 'dean', name: 'Dean', prompt: 'Student administration and discipline support.' },
+  ];
 
   const handleDepartmentSelect = (dep) => {
     setActiveDepartmentId(dep.id);
@@ -304,19 +338,53 @@ export default function App() {
   // Auth
   useEffect(() => {
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
+      if (!auth) {
+        setEnvError((prev) => prev && prev.length ? prev : ['Firebase Auth is not initialized']);
+        return;
+      }
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        }
+      } catch (e) {
+        const msg = String(e?.message || '');
+        console.error('Firebase auth init failed:', msg);
+        if (msg.toLowerCase().includes('auth/invalid-api-key')) {
+          setEnvError((prev) => (prev && prev.length ? prev : ['VITE_FIREBASE_API_KEY (invalid)']));
+        }
       }
     };
     initAuth();
-    return onAuthStateChanged(auth, setUser);
+    if (!auth) return;
+    try {
+      return onAuthStateChanged(
+        auth,
+        (nextUser) => setUser(nextUser),
+        (err) => {
+          const msg = String(err?.message || err || '');
+          console.error('onAuthStateChanged error:', msg);
+          if (msg.toLowerCase().includes('auth/invalid-api-key')) {
+            setEnvError((prev) => (prev && prev.length ? prev : ['VITE_FIREBASE_API_KEY (invalid)']));
+          }
+        }
+      );
+    } catch (e) {
+      const msg = String(e?.message || '');
+      console.error('onAuthStateChanged failed:', msg);
+      if (msg.toLowerCase().includes('auth/invalid-api-key')) {
+        setEnvError((prev) => (prev && prev.length ? prev : ['VITE_FIREBASE_API_KEY (invalid)']));
+      }
+      return;
+    }
   }, []);
 
   // Sync History
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setUserRole('public');
+      setUserProfile(null);
+      return;
+    }
     const q = collection(db, 'artifacts', appId, 'users', user.uid, 'chats');
     return onSnapshot(q, (snapshot) => {
       const history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -334,28 +402,33 @@ export default function App() {
         const snap = await getDoc(uDoc);
 
         if (snap.exists()) {
-          const data = snap.data();
+          let data = snap.data();
+          console.log('[APP_AUTH] profile_loaded', { uid: user.uid, email: user.email || null, loadedProfile: data });
+
+          const email = String(user?.email || '').trim().toLowerCase();
+          const matchesInstitutionDomain = email.endsWith(`@${INSTITUTION_EMAIL_DOMAIN}`);
+          const shouldBackfill = matchesInstitutionDomain && (!data?.institutionId || !data?.role || data?.role === 'public' || data?.role === 'student_general');
+
+          if (shouldBackfill) {
+            const patch = {
+              institutionId: INSTITUTION_FALLBACK_ID,
+              role: 'institution_student',
+              subscriptionActive: true,
+            };
+            await setDoc(uDoc, patch, { merge: true });
+            data = { ...(data || {}), ...patch };
+            console.log('[APP_AUTH] institution_backfill_applied', { uid: user.uid, email, patch });
+          }
 
           if (data.region) setRegion(data.region);
 
           // ✅ Primary role source
-          const role =
-            data.role ??
-            (data.isStaff ? 'staff' : null); // legacy support
-
-          // ✅ Default role if missing
-          if (!role) {
-            // If user doc exists but no role, treat as public until they choose
-            setUserRole('public');
-            setNeedsRolePick(true);
-          } else {
-            setUserRole(role);
-            setNeedsRolePick(false);
-          }
+          const inferredRole = data.role || 'student_general';
+          setUserRole(inferredRole);
 
           // ✅ Keep extra profile info (for student/institution later)
           setUserProfile({
-            role: role ?? 'public',
+            role: inferredRole,
 
             // ✅ Student scope model
             studentScope: data.studentScope ?? 'general', // general | institution
@@ -366,37 +439,112 @@ export default function App() {
             stage: data.stage ?? null,
             verificationStatus: data.verificationStatus ?? null,
             institutionId: data.institutionId ?? null,
+            departmentId: data.departmentId ?? null,
             admissionNumber: data.admissionNumber ?? null,
+            subscriptionActive: data.subscriptionActive === true,
           });
         } else {
           // ✅ If no user doc exists (common on anon auth), create a default PUBLIC profile
-          setUserRole('public');
-          setNeedsRolePick(true);
-
-          // Create minimal doc (don't block UI if this fails)
-          try {
-            await setDoc(uDoc, {
-              role: 'public',
-              createdAt: serverTimestamp(),
-            }, { merge: true });
-          } catch (e) {
-            console.warn('Could not create default user doc', e);
-          }
+          const fallbackRole = 'student_general';
+          setUserRole(fallbackRole);
 
           setUserProfile({
-            role: 'public',
+            role: fallbackRole,
             studentScope: 'general',
             educationLevel: null,
+            institutionId: null,
+            departmentId: null,
+            subscriptionActive: false,
           });
         }
       } catch (e) {
         console.error('Error reading user prefs', e);
-        // Safe fallback
-        setUserRole('public');
-        setNeedsRolePick(true);
+        setUserRole('student_general');
       }
     })();
-  }, [user, appId]);
+  }, [user, appId, hostMode]);
+
+  const runPostLoginSync = async (firebaseUser) => {
+    if (!firebaseUser) return null;
+    const idToken = await firebaseUser.getIdToken();
+    const res = await fetch(apiUrl('/api/auth/post-login-sync'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || 'Post-login sync failed');
+    const role = data?.role || 'student_general';
+    setUserRole(role);
+    setUserProfile((prev) => ({
+      ...(prev || {}),
+      role,
+      institutionId: data?.institutionId || null,
+      departmentId: data?.departmentId || prev?.departmentId || null,
+      subscriptionActive: data?.subscriptionActive === true,
+    }));
+    return data;
+  };
+
+  useEffect(() => {
+    localStorage.setItem('voiceEnabled', voiceEnabled ? 'true' : 'false');
+  }, [voiceEnabled]);
+
+  useEffect(() => {
+    if (!isInstitutionHost) {
+      stopRecognition();
+      cancelSpeak();
+      setIsListening(false);
+    }
+    return () => {
+      stopRecognition();
+      cancelSpeak();
+    };
+  }, [isInstitutionHost]);
+
+  const handleMicToggle = () => {
+    if (!isInstitutionHost || !speechSupported) return;
+    if (isListening) {
+      stopRecognition();
+      setIsListening(false);
+      return;
+    }
+    const started = startRecognition({
+      onResult: (finalTranscript) => {
+        setInput((prev) => (prev && prev.trim() ? `${prev} ${finalTranscript}` : finalTranscript));
+      },
+      onError: (event) => {
+        console.error('Speech recognition error:', event?.error || event);
+      },
+      onEnd: () => setIsListening(false),
+    });
+    if (started) setIsListening(true);
+  };
+
+  const speakIfInstitutionVoiceEnabled = (text) => {
+    if (!isInstitutionHost || !voiceEnabled) return;
+    speak(text);
+  };
+
+  const handleLogout = async () => {
+    try {
+      if (auth) await signOut(auth);
+    } catch (e) {
+      console.error('Logout failed', e);
+    } finally {
+      setUser(null);
+      setUserRole('public');
+      setUserProfile(null);
+      setMessages([]);
+      setActiveChatId(null);
+      setIsSettingsOpen(false);
+      localStorage.removeItem('activeDepartmentId');
+      localStorage.removeItem('activeDepartmentName');
+      window.location.replace('/login');
+    }
+  };
 
   // Restore department on startup if authorized
   useEffect(() => {
@@ -408,20 +556,39 @@ export default function App() {
     }
   }, [isStaffRole]);
 
-  // Load departments if authorized
+  // Load departments for institution mode users.
   useEffect(() => {
     async function loadDeps() {
       try {
-        if (isStaffRole && userProfile?.institutionId) {
+        if (isInstitutionHost && userProfile?.institutionId) {
           const deps = await getDepartments(userProfile.institutionId);
-          setInstitutionDepartments(Array.isArray(deps) ? deps : []);
+          const normalized = Array.isArray(deps) ? deps : [];
+          const hasGeneral = normalized.some((d) => d.id === 'general');
+          const merged = hasGeneral
+            ? normalized
+            : [{ id: 'general', name: 'General', prompt: 'General student support and institution guidance.' }, ...normalized];
+          setInstitutionDepartments(merged.length ? merged : defaultInstitutionDepartments);
         }
       } catch (e) {
         console.error("Failed to load departments:", e);
+        if (isInstitutionHost) setInstitutionDepartments(defaultInstitutionDepartments);
       }
     }
     loadDeps();
-  }, [isStaffRole, userProfile]);
+  }, [isInstitutionHost, userProfile]);
+
+  useEffect(() => {
+    if (!isInstitutionHost) return;
+    if (!institutionDepartments.length) setInstitutionDepartments(defaultInstitutionDepartments);
+    if (!localStorage.getItem('activeDepartmentId')) localStorage.setItem('activeDepartmentId', 'general');
+    if (!localStorage.getItem('activeDepartmentName')) localStorage.setItem('activeDepartmentName', 'General');
+    if (!activeDepartmentId || !institutionDepartments.some((d) => d.id === activeDepartmentId)) {
+      setActiveDepartmentId('general');
+      setActiveDepartmentName('General');
+      localStorage.setItem('activeDepartmentId', 'general');
+      localStorage.setItem('activeDepartmentName', 'General');
+    }
+  }, [isInstitutionHost, activeDepartmentId, institutionDepartments.length]);
 
   // Persist region preference when changed
   useEffect(() => {
@@ -676,17 +843,33 @@ export default function App() {
           region,
           userName: settings.userName,
           aiTone: settings.aiTone,
-          useGoogleSearch: settings.useGoogleSearch
+          useGoogleSearch: settings.useGoogleSearch,
+          departmentId: isInstitutionHost ? activeDepartmentId : null,
+          departmentName: isInstitutionHost ? activeDepartmentName : null,
+          hostMode: isInstitutionHost ? 'institution' : 'public',
+          institutionId: isInstitutionHost ? (userProfile?.institutionId || null) : null,
+          mode: isInstitutionHost ? activeDepartmentName : null,
         })
       });
 
       const data = await res.json();
       const aiText = data?.text || 'Connection error.';
+      if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
+        logInstitutionCaseMessage({
+          institutionId: userProfile.institutionId,
+          studentUid: user.uid,
+          departmentId: activeDepartmentId || 'general',
+          from: 'ai',
+          text: aiText,
+          visibility: 'student',
+        });
+      }
 
       // Insert AI reply right after the edited message
       const rebuilt = [...updated];
       rebuilt.splice(idx + 1, 0, { id: Date.now() + 1, role: 'ai', content: aiText });
       setMessages(rebuilt);
+      speakIfInstitutionVoiceEnabled(aiText);
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: 'Error: ' + err.message }]);
     } finally {
@@ -706,6 +889,17 @@ export default function App() {
     setInput('');
     setIsThinking(true);
 
+    if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
+      logInstitutionCaseMessage({
+        institutionId: userProfile.institutionId,
+        studentUid: user.uid,
+        departmentId: activeDepartmentId || 'general',
+        from: 'student',
+        text,
+        visibility: 'student',
+      });
+    }
+
     try {
       const filesSummary = uploads.length
         ? `User uploaded files: ${uploads.map(u => u.name).join(', ')}. Use them if relevant.`
@@ -717,6 +911,7 @@ export default function App() {
       const systemPrompt = basePrompt + deptPrompt;
 
       const rulePrefix = `RULE: Always answer on the home chat. Do not tell user to navigate to modules. Use institution info when relevant; otherwise use global info. QUESTION:`;
+      const isLibraryQuery = /\b(book|library|isbn|borrow|available|catalog)\b/i.test(text);
 
       const isImageReq = /(generate|create|show|draw|make|image|picture|photo|illustration|flag|logo|poster|banner|in image form|as an image)/i.test(text);
       if (isImageReq) {
@@ -749,6 +944,10 @@ export default function App() {
                 aiTone: settings.aiTone,
                 useGoogleSearch: settings.useGoogleSearch,
                 departmentId: activeDepartmentId,
+                departmentName: isInstitutionHost ? activeDepartmentName : null,
+                hostMode: isInstitutionHost ? 'institution' : 'public',
+                institutionId: isInstitutionHost ? (userProfile?.institutionId || null) : null,
+                mode: isInstitutionHost ? activeDepartmentName : null,
                 systemPrompt
               })
             });
@@ -760,6 +959,17 @@ export default function App() {
             }
             const aiText = data?.text || 'Could not generate image.';
             setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText }]);
+            speakIfInstitutionVoiceEnabled(aiText);
+            if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
+              logInstitutionCaseMessage({
+                institutionId: userProfile.institutionId,
+                studentUid: user.uid,
+                departmentId: activeDepartmentId || 'general',
+                from: 'ai',
+                text: aiText,
+                visibility: 'student',
+              });
+            }
             // Log activity
             logInstitutionActivity({ departmentId: activeDepartmentId, studentUid: user?.uid, chatId: activeChatId, role: userRole, content: text });
           } catch (fallbackErr) {
@@ -769,22 +979,75 @@ export default function App() {
       } else {
         const idToken = user ? await user.getIdToken() : null;
         const bodyText = `${filesSummary}\n\n${rulePrefix} ${text}`;
-        const res = await fetchWithErrorLog(apiUrl('/api/ai/student'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': idToken ? `Bearer ${idToken}` : ''
-          },
-          body: JSON.stringify({
-            text: bodyText,
-            region,
-            userName: settings.userName,
-            aiTone: settings.aiTone,
-            useGoogleSearch: settings.useGoogleSearch,
-            departmentId: activeDepartmentId,
-            systemPrompt
-          })
-        });
+        let res;
+        if (isInstitutionHost) {
+          let libraryResults = [];
+          if (isLibraryQuery) {
+            try {
+              const params = new URLSearchParams({
+                q: text,
+                departmentId: activeDepartmentId || 'general',
+              });
+              const libraryRes = await fetchWithErrorLog(apiUrl(`/api/library/search?${params.toString()}`), {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': idToken ? `Bearer ${idToken}` : '',
+                },
+              });
+              const libraryData = await libraryRes.json();
+              libraryResults = Array.isArray(libraryData?.items) ? libraryData.items : [];
+            } catch (libraryErr) {
+              console.warn('[LIBRARY] Search failed, continuing without library grounding:', libraryErr?.message || libraryErr);
+            }
+          }
+
+          res = await fetchWithErrorLog(apiUrl('/api/chat'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': idToken ? `Bearer ${idToken}` : '',
+            },
+            body: JSON.stringify({
+              message: bodyText,
+              text: bodyText,
+              region,
+              userName: settings.userName,
+              aiTone: settings.aiTone,
+              useGoogleSearch: settings.useGoogleSearch,
+              departmentId: activeDepartmentId || 'general',
+              departmentName: activeDepartmentName || 'General',
+              hostMode: 'institution',
+              institutionId: userProfile?.institutionId || null,
+              mode: activeDepartmentName || null,
+              systemPrompt,
+              institutionContext: {
+                libraryResults,
+              },
+            }),
+          });
+        } else {
+          res = await fetchWithErrorLog(apiUrl('/api/ai/student'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': idToken ? `Bearer ${idToken}` : ''
+            },
+            body: JSON.stringify({
+              text: bodyText,
+              region,
+              userName: settings.userName,
+              aiTone: settings.aiTone,
+              useGoogleSearch: settings.useGoogleSearch,
+              departmentId: activeDepartmentId,
+              departmentName: isInstitutionHost ? activeDepartmentName : null,
+              hostMode: isInstitutionHost ? 'institution' : 'public',
+              institutionId: isInstitutionHost ? (userProfile?.institutionId || null) : null,
+              mode: isInstitutionHost ? activeDepartmentName : null,
+              systemPrompt
+            })
+          });
+        }
         const data = await res.json();
         // AI department switch suggestion
         if (data?.suggestDepartmentId && data.suggestDepartmentId !== activeDepartmentId) {
@@ -793,6 +1056,17 @@ export default function App() {
         }
         const aiText = data?.text || 'Connection error.';
         setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText }]);
+        speakIfInstitutionVoiceEnabled(aiText);
+        if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
+          logInstitutionCaseMessage({
+            institutionId: userProfile.institutionId,
+            studentUid: user.uid,
+            departmentId: activeDepartmentId || 'general',
+            from: 'ai',
+            text: aiText,
+            visibility: 'student',
+          });
+        }
         // Log activity
         logInstitutionActivity({ departmentId: activeDepartmentId, studentUid: user?.uid, chatId: activeChatId, role: userRole, content: text });
       }
@@ -824,30 +1098,35 @@ export default function App() {
     } catch (e) { /* ignore */ }
   };
 
-  // Handler to set and persist role choice
-  const setRoleAndPersist = async (role) => {
+  const buildCaseId = (studentUid, departmentId) => `${studentUid || 'unknown'}_${departmentId || 'general'}`;
+
+  const logInstitutionCaseMessage = async ({ institutionId, studentUid, departmentId, from, text, visibility = 'student', sentiment, tags }) => {
     try {
-      const uDoc = doc(db, 'artifacts', appId, 'users', user.uid);
-      await setDoc(
-        uDoc,
-        role === 'student'
-          ? {
-              role: 'student',
-              studentScope: 'general',
-              verificationStatus: 'unverified',
-            }
-          : { role },
-        { merge: true }
-      );
-      setUserRole(role);
-      setUserProfile(p => ({
-        ...(p || {}),
-        role,
-        ...(role === 'student' && { studentScope: 'general', verificationStatus: 'unverified' }),
-      }));
-      setNeedsRolePick(false);
+      if (!institutionId || !studentUid || !text) return;
+      const caseId = buildCaseId(studentUid, departmentId);
+      const caseRef = doc(db, 'institutions', institutionId, 'cases', caseId);
+      await setDoc(caseRef, {
+        institutionId,
+        departmentId: departmentId || 'general',
+        studentId: studentUid,
+        status: 'open',
+        rating: null,
+        lastUpdated: serverTimestamp(),
+      }, { merge: true });
+      const messagesCol = collection(db, 'institutions', institutionId, 'cases', caseId, 'messages');
+      const payload = {
+        from,
+        text,
+        createdAt: serverTimestamp(),
+        departmentId: departmentId || 'general',
+        visibility,
+      };
+      if (sentiment) payload.sentiment = sentiment;
+      if (tags) payload.tags = tags;
+      await addDoc(messagesCol, payload);
+      await setDoc(caseRef, { lastUpdated: serverTimestamp() }, { merge: true });
     } catch (e) {
-      console.error('Failed to set role', e);
+      console.error('Case message log failed', e);
     }
   };
 
@@ -865,7 +1144,7 @@ export default function App() {
   );
 
   // Student capability booleans
-  const isStudent = userRole === 'student';
+  const isStudent = ['student', 'student_general', 'institution_student'].includes(userRole);
   const studentScope = userProfile?.studentScope ?? 'general';
   const isGeneralLearner = isStudent && studentScope === 'general';
   const isInstitutionStudent = isStudent && studentScope === 'institution';
@@ -876,27 +1155,133 @@ export default function App() {
   // Role-aware sidebar title
   const roleTitle =
     userRole === 'student' ? 'Student Portal' :
+    userRole === 'student_general' ? 'Student Portal' :
+    userRole === 'institution_student' ? 'Institution Student Portal' :
+    userRole === 'institution_admin' ? 'Institution Admin Portal' :
     userRole === 'institution' ? 'Institution Console' :
     userRole === 'staff' ? 'Staff Console' :
     'Public Explore';
 
+  const resolvedModeUrls = {
+    public: modeUrls?.public || 'https://app.elimulink.co.ke/public',
+    student: modeUrls?.student || 'https://student.elimulink.co.ke/student',
+    institution: modeUrls?.institution || 'https://institution.elimulink.co.ke/institution',
+  };
+  const institutionAdminAllowedRoles = ['staff', 'departmentAdmin', 'institution_admin', 'superAdmin'];
+  const institutionHomeUrl = resolvedModeUrls.institution.endsWith('/institution')
+    ? resolvedModeUrls.institution
+    : `${resolvedModeUrls.institution}/institution`;
+
+  const handleAdminNavClick = async () => {
+    const tokenInstitutionId = user
+      ? await user.getIdTokenResult().then((r) => r?.claims?.institutionId || null).catch(() => null)
+      : null;
+    const hasInstitutionAccess =
+      Boolean(userProfile?.institutionId) ||
+      Boolean(tokenInstitutionId) ||
+      institutionAdminAllowedRoles.includes(userRole);
+
+    if (!hasInstitutionAccess) {
+      alert('Institution access required.');
+      return;
+    }
+
+    if (hostMode === 'public' || hostMode === 'student') {
+      window.location.assign(institutionHomeUrl);
+      return;
+    }
+
+    window.history.pushState({}, '', '/institution/admin');
+    setPath('/institution/admin');
+  };
+
+  const handlePortalClick = () => {
+    if (isInstitutionLinkedUser) {
+      window.location.assign(resolvedModeUrls.institution);
+      return;
+    }
+    if (hostMode === 'public') {
+      window.location.assign(resolvedModeUrls.student);
+      return;
+    }
+    if (hostMode === 'student') {
+      window.location.assign(resolvedModeUrls.student);
+      return;
+    }
+    window.location.assign(resolvedModeUrls.public);
+  };
+
+  if (path === '/institution/newchat' || path.startsWith('/institution/newchat')) {
+    window.history.replaceState({}, '', '/institution');
+    setPath('/institution');
+    return null;
+  }
+
   // Permission gate for /institution/admin
   if (path.startsWith('/institution/admin')) {
-    const allowedRoles = ['staff', 'departmentAdmin', 'superAdmin'];
-    if (!allowedRoles.includes(userRole)) {
+    if (!institutionAdminAllowedRoles.includes(userRole)) {
       window.history.replaceState({}, '', '/');
       window.location.reload();
       return null;
     }
-    const institutionId = userProfile?.institutionId;
     return (
-      <AdminDashboard
-        db={db}
+      <InstitutionAdminDashboard
         userRole={userRole}
-        institutionId={institutionId}
-        departmentId={activeDepartmentId}
-        departmentName={activeDepartmentName}
-        onExit={() => { window.history.pushState({}, '', '/'); setPath('/'); }}
+        userProfile={userProfile}
+        user={user}
+      />
+    );
+  }
+
+  if (path.startsWith('/institution/notebook')) {
+    const allowedRoles = ['institution_student', 'student_general', 'student', 'staff', 'departmentAdmin', 'institution_admin', 'superAdmin'];
+    if (!allowedRoles.includes(userRole) || !userProfile?.institutionId) {
+      window.history.replaceState({}, '', '/');
+      window.location.reload();
+      return null;
+    }
+    return (
+      <InstitutionNotebook
+        user={user}
+        userProfile={userProfile}
+        userRole={userRole}
+        activeDepartmentId={activeDepartmentId}
+        activeDepartmentName={activeDepartmentName}
+      />
+    );
+  }
+
+  if (path.startsWith('/institution/assignments')) {
+    const allowedRoles = ['institution_student', 'student_general', 'student', 'staff', 'departmentAdmin', 'institution_admin', 'superAdmin'];
+    if (!allowedRoles.includes(userRole) || !userProfile?.institutionId) {
+      window.history.replaceState({}, '', '/');
+      window.location.reload();
+      return null;
+    }
+    return (
+      <InstitutionAssignments
+        user={user}
+        userProfile={userProfile}
+        userRole={userRole}
+        activeDepartmentId={activeDepartmentId}
+        activeDepartmentName={activeDepartmentName}
+      />
+    );
+  }
+
+  if (path === '/institution' || path === '/institution/') {
+    if (!userProfile?.institutionId) {
+      window.history.replaceState({}, '', '/');
+      window.location.reload();
+      return null;
+    }
+    return (
+      <InstitutionHome
+        user={user}
+        userProfile={userProfile}
+        userRole={userRole}
+        activeDepartmentId={activeDepartmentId}
+        activeDepartmentName={activeDepartmentName}
       />
     );
   }
@@ -933,40 +1318,6 @@ export default function App() {
         >
           <Menu size={28} />
         </button>
-      )}
-      {/* Role Picker Modal (one-time) */}
-      {needsRolePick && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-xl bg-slate-900 border border-white/10 p-5">
-            <div className="text-white font-bold text-lg">Welcome to ElimuLink</div>
-            <div className="text-slate-300 text-sm mt-1">
-              Choose how you want to use the app. (You can change this later in Settings.)
-            </div>
-
-            <div className="mt-4 space-y-2">
-              <button
-                className="w-full text-left p-3 rounded bg-white/5 hover:bg-white/10 text-slate-100"
-                onClick={() => setRoleAndPersist('student')}
-              >
-                🎓 I'm a Student
-              </button>
-
-              <button
-                className="w-full text-left p-3 rounded bg-white/5 hover:bg-white/10 text-slate-100"
-                onClick={() => setRoleAndPersist('institution')}
-              >
-                🏫 I represent an Institution
-              </button>
-
-              <button
-                className="w-full text-left p-3 rounded bg-white/5 hover:bg-white/10 text-slate-100"
-                onClick={() => setRoleAndPersist('public')}
-              >
-                🌍 I'm exploring (Public user)
-              </button>
-            </div>
-          </div>
-        </div>
       )}
       {/* Institution Onboarding Modal */}
       {showInstitutionModal && (
@@ -1011,82 +1362,131 @@ export default function App() {
         style={isMobile ? { boxShadow: isSidebarOpen ? '0 0 0 9999px rgba(0,0,0,0.5)' : undefined } : {}}
       >
         <div className="p-4 border-b border-white/5 flex flex-col gap-2">
-          <div className="flex items-center gap-2 font-bold text-sky-400">
+          <div
+            className={`flex items-center gap-2 font-bold text-sky-400 ${isInstitutionHost ? 'cursor-pointer' : ''}`}
+            onClick={() => {
+              if (!isInstitutionHost) return;
+              window.history.pushState({}, '', '/institution');
+              setPath('/institution');
+              if (isMobile) setSidebarOpen(false);
+            }}
+          >
             <div className="w-6 h-6 bg-sky-500 rounded flex items-center justify-center text-white text-[10px]">EL</div>
             ElimuLink — {roleTitle}
           </div>
           <div className="text-[11px] text-slate-400">
             {userRole === 'student' && 'Your academic tools are ready.'}
+            {userRole === 'student_general' && 'Your academic tools are ready.'}
             {userRole === 'institution' && 'Manage learning, students, and insights.'}
+            {userRole === 'institution_admin' && 'Manage learning, students, and insights.'}
+            {userRole === 'institution_student' && 'Institution-linked learning tools are ready.'}
             {userRole === 'staff' && 'Admin and operational controls.'}
             {userRole === 'public' && 'Explore institutions, courses, and opportunities.'}
           </div>
         </div>
         
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          <SidebarItem icon={Plus} label="New Chat" onClick={() => { setMessages([]); setActiveChatId(null); }} />
-          <SidebarItem icon={FolderHeart} label="My Stuff" onClick={() => { setShowMyStuff(!showMyStuff); }} />
-          <SidebarItem icon={Gem} label="Services Hub" onClick={() => { setShowServicesHub(true); setShowMyStuff(false); setShowAdmin(false); }} />
-          {(userRole === 'staff' || userRole === 'institution') && (
-            <SidebarItem icon={FolderHeart} label={userRole === 'institution' ? 'Institution' : 'Admin'} onClick={() => { setShowAdmin(s=>!s); }} />
-          )}
-          {isStudent && (
+          {isInstitutionHost ? (
             <>
-              <SidebarItem icon={FolderHeart} label="Learn" onClick={() => {}} />
-              <SidebarItem icon={FolderHeart} label="Assignments" onClick={() => {}} />
-            </>
-          )}
-          {isInstitutionVerified && (
-            <>
-              <SidebarItem icon={FolderHeart} label="Library" onClick={() => {}} />
-              <SidebarItem icon={FolderHeart} label="Departments" onClick={() => {}} />
-            </>
-          )}
-          <div className="mt-6 mb-2 px-3 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Recent Chats</div>
-          {/* Institution Sidebar Section */}
-          <div className="mt-2">
-            <button
-              className={`w-full flex items-center gap-3 p-3 rounded-lg text-sm transition-colors ${
-                isStaffRole ? 'text-sky-400 hover:bg-white/5' : 'text-slate-400 hover:bg-white/5'
-              }`}
-              onClick={() => {
-                if (isStaffRole) setInstitutionExpanded(v => !v);
-                else setShowInstitutionModal(true);
-              }}
-            >
-              <FolderHeart size={18} />
-              <span>Institution</span>
-              {!isStaffRole && <Lock size={16} className="ml-1" />}
-              {isStaffRole && (
-                institutionExpanded ? <ChevronUp size={16} className="ml-auto" /> : <ChevronDown size={16} className="ml-auto" />
+              <SidebarItem
+                icon={Plus}
+                label="New Chat"
+                onClick={() => {
+                  window.history.pushState({}, '', '/institution');
+                  setPath('/institution');
+                  if (isMobile) setSidebarOpen(false);
+                }}
+              />
+              {!["staff","departmentAdmin","institution_admin","superAdmin"].includes(userRole) && (
+                <button
+                  className="w-full flex items-center gap-3 p-3 rounded-lg text-sm transition-colors text-slate-300 hover:bg-white/5"
+                  onClick={() => setShowStaffLogin(true)}
+                >
+                  <Shield size={18} />
+                  <span>Staff Login</span>
+                  <Lock size={16} className="ml-auto opacity-70" />
+                </button>
               )}
-            </button>
+              <SidebarItem icon={FolderHeart} label="Notebook" onClick={() => { window.history.pushState({}, '', '/institution/notebook'); setPath('/institution/notebook'); }} />
+              <SidebarItem icon={FolderHeart} label="Assignments" onClick={() => { window.history.pushState({}, '', '/institution/assignments'); setPath('/institution/assignments'); }} />
+              {institutionAdminAllowedRoles.includes(userRole) && (
+                <SidebarItem
+                  icon={Shield}
+                  label="Admin"
+                  onClick={handleAdminNavClick}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <SidebarItem icon={Plus} label="New Chat" onClick={() => { setMessages([]); setActiveChatId(null); }} />
+              <SidebarItem icon={FolderHeart} label="My Stuff" onClick={() => { setShowMyStuff(!showMyStuff); }} />
+              <SidebarItem icon={Gem} label="Services Hub" onClick={() => { setShowServicesHub(true); setShowMyStuff(false); setShowAdmin(false); }} />
+              <SidebarItem icon={FolderHeart} label="Portal" onClick={handlePortalClick} />
+              <div className="px-3 pt-2 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Switch Experience</div>
+              <a className="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-white/5" href={resolvedModeUrls.public}>Public</a>
+              <a className="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-white/5" href={resolvedModeUrls.student}>Student</a>
+              <a className="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-white/5" href={resolvedModeUrls.institution}>Institution</a>
+              {isInstitutionLinkedUser && (
+                <SidebarItem icon={FolderHeart} label={userRole === 'institution' ? 'Institution' : 'Admin'} onClick={() => { setShowAdmin(s=>!s); }} />
+              )}
+              {isStudent && (
+                <>
+                  <SidebarItem icon={FolderHeart} label="Learn" onClick={() => {}} />
+                  <SidebarItem icon={FolderHeart} label="Assignments" onClick={() => {}} />
+                </>
+              )}
+              {isInstitutionVerified && (
+                <>
+                  <SidebarItem icon={FolderHeart} label="Library" onClick={() => {}} />
+                  <SidebarItem icon={FolderHeart} label="Departments" onClick={() => {}} />
+                </>
+              )}
+              <div className="mt-6 mb-2 px-3 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Recent Chats</div>
+              <div className="mt-2">
+                <button
+                  className={`w-full flex items-center gap-3 p-3 rounded-lg text-sm transition-colors ${
+                    isStaffRole ? 'text-sky-400 hover:bg-white/5' : 'text-slate-400 hover:bg-white/5'
+                  }`}
+                  onClick={() => {
+                    if (isStaffRole) setInstitutionExpanded(v => !v);
+                    else setShowInstitutionModal(true);
+                  }}
+                >
+                  <FolderHeart size={18} />
+                  <span>Institution</span>
+                  {!isStaffRole && <Lock size={16} className="ml-1" />}
+                  {isStaffRole && (
+                    institutionExpanded ? <ChevronUp size={16} className="ml-auto" /> : <ChevronDown size={16} className="ml-auto" />
+                  )}
+                </button>
 
-            {/* Department List */}
-            {isStaffRole && institutionExpanded && (
-              <div className="ml-6 mt-1 space-y-1">
-                {institutionDepartments.length === 0 && (
-                  <div className="text-xs text-slate-500">No departments</div>
+                {isStaffRole && institutionExpanded && (
+                  <div className="ml-6 mt-1 space-y-1">
+                    {institutionDepartments.length === 0 && (
+                      <div className="text-xs text-slate-500">No departments</div>
+                    )}
+                    {institutionDepartments.map(dep => (
+                      <button
+                        key={dep.id}
+                        className={`w-full text-left px-2 py-1 rounded text-xs ${
+                          activeDepartmentId === dep.id ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-sky-900/30'
+                        }`}
+                        onClick={() => handleDepartmentSelect(dep)}
+                      >
+                        {dep.name || dep.id}
+                      </button>
+                    ))}
+                  </div>
                 )}
-                {institutionDepartments.map(dep => (
-                  <button
-                    key={dep.id}
-                    className={`w-full text-left px-2 py-1 rounded text-xs ${
-                      activeDepartmentId === dep.id ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-sky-900/30'
-                    }`}
-                    onClick={() => handleDepartmentSelect(dep)}
-                  >
-                    {dep.name || dep.id}
-                  </button>
-                ))}
               </div>
-            )}
-          </div>
-          {chatHistory.slice(0, 5).map(chat => (
-            <button key={chat.id} onClick={() => { setActiveChatId(chat.id); setMessages(chat.messages || []); }} className="w-full text-left p-2 rounded text-xs truncate text-slate-400 hover:bg-white/5">
-              {chat.title || "Previous Chat"}
-            </button>
-          ))}
+              {chatHistory.slice(0, 5).map(chat => (
+                <button key={chat.id} onClick={() => { setActiveChatId(chat.id); setMessages(chat.messages || []); }} className="w-full text-left p-2 rounded text-xs truncate text-slate-400 hover:bg-white/5">
+                  {chat.title || "Previous Chat"}
+                </button>
+              ))}
+            </>
+          )}
         </div>
 
         <div className="p-2 border-t border-white/5">
@@ -1098,15 +1498,25 @@ export default function App() {
       {/* Main Content */}
       <main className={`flex-1 flex flex-col min-w-0 relative ${isMobile ? '' : 'ml-0'}`}>
         {/* Department label and switch banner */}
-        <div className="flex items-center gap-2 px-4 pt-2 pb-1">
-          <span className="text-xs bg-sky-900/40 text-sky-200 px-2 py-1 rounded font-bold">
-            Mode: {activeDepartmentId ? (activeDepartmentName || activeDepartmentId) : 'General'}
-          </span>
-        </div>
+        {isInstitutionHost && (
+          <div className="flex items-center gap-2 px-4 pt-2 pb-1">
+            <span className="text-xs bg-sky-900/40 text-sky-200 px-2 py-1 rounded font-bold">
+              Mode: {activeDepartmentId ? (activeDepartmentName || activeDepartmentId) : 'General'}
+            </span>
+          </div>
+        )}
         {suggestedDept && showDeptBanner && (
           <div className="mx-4 mb-2 p-2 bg-emerald-900/80 border border-emerald-400 rounded flex items-center gap-3 text-xs text-white">
             <span>Switch to {departments.find(d=>d.id===suggestedDept.suggestDepartmentId)?.name || suggestedDept.suggestDepartmentId}? <span className="text-slate-300">({suggestedDept.reason})</span></span>
-            <button className="ml-2 px-2 py-1 bg-emerald-500 rounded text-white font-bold" onClick={() => { setActiveDepartmentId(suggestedDept.suggestDepartmentId); setShowDeptBanner(false); setSuggestedDept(null); }}>Switch</button>
+            <button className="ml-2 px-2 py-1 bg-emerald-500 rounded text-white font-bold" onClick={() => {
+              const next = departments.find(d => d.id === suggestedDept.suggestDepartmentId) || { id: suggestedDept.suggestDepartmentId, name: suggestedDept.suggestDepartmentId };
+              setActiveDepartmentId(next.id);
+              setActiveDepartmentName(next.name || next.id);
+              localStorage.setItem('activeDepartmentId', next.id);
+              localStorage.setItem('activeDepartmentName', next.name || next.id);
+              setShowDeptBanner(false);
+              setSuggestedDept(null);
+            }}>Switch</button>
             <button className="ml-1 px-2 py-1 bg-slate-700 rounded text-white" onClick={() => setShowDeptBanner(false)}>Dismiss</button>
           </div>
         )}
@@ -1140,6 +1550,11 @@ export default function App() {
                   setDeferredPrompt(null);
                 } catch (e) { console.error('Install prompt failed', e); }
               }} className="bg-emerald-500 px-3 py-1 rounded text-xs font-bold text-white">Install ElimuLink</button>
+            )}
+            {isInstitutionHost && (
+              <span className="text-[10px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300">
+                Mode: {activeDepartmentName || 'General'}
+              </span>
             )}
             <div className="bg-white/5 px-3 py-1 rounded-full text-[10px] text-slate-400 border border-white/10 uppercase tracking-tighter">Home Station</div>
           </div>
@@ -1185,7 +1600,7 @@ export default function App() {
             ) : showServicesHub ? (
               <div className="p-4 bg-slate-900 rounded-lg max-h-[600px] overflow-y-auto">
                 <h2 className="text-lg font-bold mb-4">Services Hub</h2>
-                {userRole === 'student' && (
+                {isStudent && (
                   <>
                     <section className="mb-6">
                       <h3 className="font-semibold text-sky-400 mb-2">Student Services</h3>
@@ -1204,7 +1619,7 @@ export default function App() {
                     </section>
                   </>
                 )}
-                {(userRole === 'staff' || userRole === 'institution') && (
+                {isInstitutionLinkedUser && (
                   <>
                     <section className="mb-6">
                       <h3 className="font-semibold text-emerald-400 mb-2">Institution Services</h3>
@@ -1420,6 +1835,39 @@ export default function App() {
                     <button type="button" onClick={() => setInput(p => p + " Generate an image of ")} className="p-2 hover:bg-white/5 rounded-lg text-slate-400 transition-colors" title="Generate Image">
                       <ImageIcon size={18} />
                     </button>
+                    {isInstitutionHost && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleMicToggle}
+                          disabled={!speechSupported}
+                          title={speechSupported ? (isListening ? 'Stop voice input' : 'Start voice input') : 'Voice not supported in this browser'}
+                          className={`p-2 rounded-lg transition-colors ${
+                            speechSupported
+                              ? isListening
+                                ? 'bg-red-600/30 text-red-300 hover:bg-red-600/40'
+                                : 'hover:bg-white/5 text-slate-400'
+                              : 'text-slate-600 cursor-not-allowed'
+                          }`}
+                        >
+                          {speechSupported ? (isListening ? <MicOff size={18} /> : <Mic size={18} />) : <MicOff size={18} />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setVoiceEnabled((prev) => {
+                              const next = !prev;
+                              if (!next) cancelSpeak();
+                              return next;
+                            });
+                          }}
+                          title={voiceEnabled ? 'Voice playback on' : 'Voice playback off'}
+                          className={`p-2 rounded-lg transition-colors ${voiceEnabled ? 'text-sky-300 hover:bg-white/5' : 'text-slate-500 hover:bg-white/5'}`}
+                        >
+                          {voiceEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+                        </button>
+                      </>
+                    )}
                   </div>
                   <button 
                     disabled={!input.trim()}
@@ -1464,6 +1912,76 @@ export default function App() {
             <button
               className="w-full mt-2 text-xs text-slate-400 underline"
               onClick={() => setShowInstitutionModal(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {showStaffLogin && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl p-6 w-full max-w-md">
+            <h2 className="text-lg font-bold text-sky-400 mb-2">Staff Login</h2>
+            <p className="text-xs text-slate-400 mb-4">
+              Enter institution Staff Code plus your Email and Password.
+            </p>
+
+            <input
+              className="w-full p-2 rounded bg-slate-800 border border-white/10 text-white mb-2"
+              placeholder="Staff Code"
+              value={staffCode}
+              onChange={(e) => setStaffCode(e.target.value)}
+            />
+            <input
+              className="w-full p-2 rounded bg-slate-800 border border-white/10 text-white mb-2"
+              placeholder="Staff Email"
+              value={staffEmail}
+              onChange={(e) => setStaffEmail(e.target.value)}
+            />
+            <input
+              className="w-full p-2 rounded bg-slate-800 border border-white/10 text-white mb-2"
+              placeholder="Password"
+              type="password"
+              value={staffPassword}
+              onChange={(e) => setStaffPassword(e.target.value)}
+            />
+
+            <button
+              className="w-full bg-sky-500 text-white font-bold py-2 rounded mt-2"
+              onClick={async () => {
+                try {
+                  await signInWithEmailAndPassword(auth, staffEmail, staffPassword);
+                  await runPostLoginSync(auth.currentUser);
+                  const idToken = await auth.currentUser.getIdToken();
+                  const res = await fetch(apiUrl('/api/auth/verify-staff-code'), {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${idToken}`,
+                    },
+                    body: JSON.stringify({ staffCode }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data?.error || 'Verify failed');
+
+                  setUserRole('staff');
+                  setUserProfile((prev) => ({ ...(prev || {}), role: 'staff', staffCodeVerified: true }));
+                  alert('Staff access enabled!');
+                  setShowStaffLogin(false);
+                  setStaffCode('');
+                  setStaffEmail('');
+                  setStaffPassword('');
+                } catch (e) {
+                  alert(e.message || 'Login failed');
+                }
+              }}
+            >
+              Sign in
+            </button>
+
+            <button
+              className="w-full mt-2 text-xs text-slate-400 underline"
+              onClick={() => setShowStaffLogin(false)}
             >
               Cancel
             </button>
@@ -1533,6 +2051,14 @@ export default function App() {
                     </button>
                   </div>
                 </section>
+                <section>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full bg-red-600 hover:bg-red-500 text-white font-semibold text-sm py-3 rounded-xl"
+                  >
+                    Log out
+                  </button>
+                </section>
               </div>
             </div>
           </div>
@@ -1544,3 +2070,5 @@ export default function App() {
     </div>
   );
 }
+
+

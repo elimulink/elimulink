@@ -1,28 +1,15 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, getDocs, setDoc, getDoc, updateDoc, serverTimestamp, addDoc, query, orderBy } from "firebase/firestore";
-import { getAuth } from 'firebase/auth';
-
-function envValue(key) {
-  const raw = import.meta.env[key];
-  if (raw === undefined || raw === null) return raw;
-  const trimmed = String(raw).trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1).trim();
-  }
-  return trimmed;
-}
+import { browserLocalPersistence, getAuth, setPersistence } from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey: envValue('VITE_FIREBASE_API_KEY'),
-  authDomain: envValue('VITE_FIREBASE_AUTH_DOMAIN'),
-  projectId: envValue('VITE_FIREBASE_PROJECT_ID'),
-  storageBucket: envValue('VITE_FIREBASE_STORAGE_BUCKET'),
-  messagingSenderId: envValue('VITE_FIREBASE_MESSAGING_SENDER_ID'),
-  appId: envValue('VITE_FIREBASE_APP_ID'),
-  measurementId: envValue('VITE_FIREBASE_MEASUREMENT_ID'),
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 const firebaseEnvVarMap = {
@@ -54,11 +41,22 @@ if (missingFirebaseVars.length === 0) {
     console.log("FIREBASE authDomain:", firebaseConfig.authDomain);
     console.log("FIREBASE apiKey first10:", (firebaseConfig.apiKey || "").slice(0, 10));
     console.log("FIREBASE apiKey last6:", (firebaseConfig.apiKey || "").slice(-6));
-    console.log("USING FIREBASE API KEY:", envValue('VITE_FIREBASE_API_KEY'));
-    console.log("USING AUTH DOMAIN:", envValue('VITE_FIREBASE_AUTH_DOMAIN'));
+    console.log("USING FIREBASE API KEY:", import.meta.env.VITE_FIREBASE_API_KEY);
+    console.log("USING AUTH DOMAIN:", import.meta.env.VITE_FIREBASE_AUTH_DOMAIN);
+    console.log("ENV CHECK:", {
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      mode: import.meta.env.MODE,
+      baseUrl: import.meta.env.BASE_URL,
+    });
+    if (!import.meta.env.VITE_FIREBASE_API_KEY) {
+      console.error("Missing VITE_FIREBASE_API_KEY. Check .env.local is being loaded.");
+    }
     app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     auth = getAuth(app);
+    await setPersistence(auth, browserLocalPersistence);
   } catch (error) {
     firebaseInitError = String(error?.message || error);
     console.error('[FIREBASE] Initialization failed:', firebaseInitError);

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  browserLocalPersistence,
+  setPersistence,
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -11,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import App from '../App.jsx';
+import InstitutionApp from '../institution/InstitutionApp.jsx';
 import { auth, db, firebaseInitErrorMessage } from '../lib/firebase';
 import { getResolvedHostMode } from './hostMode';
 
@@ -18,24 +21,20 @@ const APP_ID = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
   (import.meta.env.MODE === 'development' ? 'http://localhost:4000' : '');
-
+const INSTITUTION_EMAIL_DOMAIN = String(import.meta.env.VITE_INSTITUTION_EMAIL_DOMAIN || 'elimulink.co.ke').toLowerCase();
+// const INSTITUTION_FALLBACK_ID = String(import.meta.env.VITE_INSTITUTION_ID || 'YOUR_INSTITUTION_ID');
+const INSTITUTION_FALLBACK_ID = String(import.meta.env.VITE_INSTITUTION_ID || 'YOUR_INSTITUTION_ID');
 function apiUrl(path) {
   if (!path.startsWith('/')) path = `/${path}`;
   return API_BASE ? `${API_BASE.replace(/\/$/, '')}${path}` : path;
 }
 
-function isInstitutionLinkedRole(role) {
-  const value = String(role || '');
-  return value.startsWith('institution_') || value === 'staff';
-}
-
-function canAccessInstitution(profile) {
-  if (!profile) return false;
-  const role = profile?.role || '';
-  const roleAllowed = isInstitutionLinkedRole(role);
-  const hasInstitution = Boolean(profile?.institutionId);
-  const subscriptionActive = profile?.subscriptionActive === true;
-  return roleAllowed && hasInstitution && subscriptionActive;
+function shouldBackfillInstitutionProfile(nextUser, profile) {
+  const email = String(nextUser?.email || '').trim().toLowerCase();
+  const matchesDomain = email.endsWith(`@${INSTITUTION_EMAIL_DOMAIN}`);
+  if (!matchesDomain) return false;
+  const missingRole = !profile?.role || profile?.role === 'public' || profile?.role === 'student_general';
+  return missingRole;
 }
 
 function profileDisplayName(profile, user) {
@@ -53,35 +52,66 @@ function replacePath(targetPath, setPathname) {
   setPathname(targetPath);
 }
 
-function getModeUrl(mode) {
-  const host = window.location.hostname.toLowerCase();
+function getModeBaseUrl(mode, currentHostname = window.location.hostname) {
+  const host = String(currentHostname || '').toLowerCase();
   const isLocal = host.endsWith('.localhost') || host === 'localhost' || host === '127.0.0.1';
   if (isLocal) {
-    const localMap = {
+    const localBaseMap = {
       public: 'http://app.localhost:3000',
       student: 'http://student.localhost:3000',
       institution: 'http://institution.localhost:3000',
     };
-    return `${localMap[mode]}/${mode}`;
+    return localBaseMap[mode];
   }
 
-  const baseMap = {
+  const isFirebaseDefaultHost = host.includes('.web.app') || host.includes('.firebaseapp.com');
+  if (isFirebaseDefaultHost) {
+    const firebaseBaseMap = {
+      public: 'https://elimulink-app-ai.web.app',
+      student: 'https://elimulink-student.web.app',
+      institution: 'https://elimulink-institution.web.app',
+    };
+    return firebaseBaseMap[mode];
+  }
+
+  const customBaseMap = {
     public: 'https://app.elimulink.co.ke',
     student: 'https://student.elimulink.co.ke',
     institution: 'https://institution.elimulink.co.ke',
   };
-
-  return `${baseMap[mode]}/${mode}`;
+  return customBaseMap[mode];
 }
 
-function getModeFromProfile(profile) {
-  if (canAccessInstitution(profile)) return 'institution';
-  if (profile?.role && profile.role !== 'public') return 'student';
-  return 'public';
+function getModeUrl(mode) {
+  return `${getModeBaseUrl(mode)}/${mode}`;
 }
 
 function getBaseOrigin(modeUrl, mode) {
   return String(modeUrl || '').replace(new RegExp(`/${mode}$`), '');
+}
+
+function getDefaultModePath(mode) {
+  return `/${mode || 'public'}`;
+}
+
+function sanitizeReturnTo(returnToRaw, { mode, isAuthenticated = false } = {}) {
+  const fallback = getDefaultModePath(mode);
+  const raw = String(returnToRaw || '').trim();
+  if (!raw || raw === '/' || raw === 'null' || raw === 'undefined') return fallback;
+
+  let value = raw;
+  try {
+    value = decodeURIComponent(raw);
+  } catch (_) {
+    value = raw;
+  }
+
+  if (!value.startsWith('/')) return fallback;
+  if (value.startsWith('//')) return fallback;
+  if (value.includes('://')) return fallback;
+  if (value.startsWith('/login')) return fallback;
+  if (value.includes('/onboarding?returnTo=')) return fallback;
+  return value;
 }
 
 function LoadingScreen() {
@@ -92,11 +122,20 @@ function LoadingScreen() {
   );
 }
 
+function PublicApp({ modeUrls }) {
+  return <App hostMode="public" modeUrls={modeUrls} />;
+}
+
+function StudentApp({ modeUrls }) {
+  return <App hostMode="student" modeUrls={modeUrls} />;
+}
+
 function LoginPage({
   mode,
   hostMode,
   profile,
   user,
+  authReady,
   onAuthSuccess,
   onCompleteOnboarding,
 }) {
@@ -108,13 +147,17 @@ function LoginPage({
   const [notice, setNotice] = useState('');
   const [signup, setSignup] = useState(false);
   const [returnTo, setReturnTo] = useState('');
+  const navigate = (nextPath) => {
+    window.history.replaceState({}, '', nextPath);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const message = params.get('message');
     const incomingReturnTo = params.get('returnTo') || '';
     if (message) setNotice(message);
-    setReturnTo(incomingReturnTo);
+    setReturnTo(sanitizeReturnTo(incomingReturnTo, { mode: hostMode, isAuthenticated: Boolean(user && !user.isAnonymous) }));
   }, []);
 
   const normalizeAuthError = (err) => {
@@ -184,16 +227,39 @@ function LoginPage({
   };
 
   if (mode === 'onboarding') {
+    const canContinue = authReady && !!user && !pending;
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
         <div className="max-w-md w-full rounded-xl border border-white/10 bg-slate-900 p-6">
           <h1 className="text-lg font-bold">Complete your profile</h1>
           <p className="text-sm text-slate-300 mt-2">Your full name is required before continuing.</p>
+          {!authReady ? <div className="mt-3 text-xs text-slate-400">Loading...</div> : null}
+          {authReady && !user ? (
+            <div className="mt-3 rounded bg-amber-900/40 border border-amber-500/40 px-3 py-2 text-xs">
+              Please login again.
+              <a
+                className="ml-2 underline text-amber-200"
+                href={`/login?returnTo=${encodeURIComponent(sanitizeReturnTo('/onboarding', { mode: hostMode, isAuthenticated: false }))}`}
+              >
+                Login
+              </a>
+            </div>
+          ) : null}
           {error && <div className="mt-3 rounded bg-red-900/40 border border-red-500/40 px-3 py-2 text-xs">{error}</div>}
           <form
             className="mt-4 space-y-3"
             onSubmit={async (e) => {
               e.preventDefault();
+              if (!authReady) {
+                setError('Loading...');
+                return;
+              }
+              if (!user) {
+                // isAuthenticated: false
+                const nextReturnTo = sanitizeReturnTo('/', { mode: hostMode, isAuthenticated:  true});
+                window.location.replace(`/login?returnTo=${encodeURIComponent(nextReturnTo)}`);
+                return;
+              }
               setPending(true);
               setError('');
               try {
@@ -215,7 +281,7 @@ function LoginPage({
             <button
               className="w-full rounded bg-sky-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
               type="submit"
-              disabled={pending}
+              disabled={!canContinue}
             >
               {pending ? 'Saving...' : 'Continue'}
             </button>
@@ -317,11 +383,23 @@ export default function HostRouter() {
   const [profile, setProfile] = useState(null);
   const [flashMessage, setFlashMessage] = useState('');
   const handledInitialRedirect = useRef(false);
+  const authStateLogged = useRef(false);
+  const hostRouteLogged = useRef(false);
 
   const hostMode = useMemo(
-    () => getResolvedHostMode(window.location.hostname, import.meta.env.VITE_HOST_MODE),
+    () => getResolvedHostMode(window.location.hostname),
     [],
   );
+
+  useEffect(() => {
+    console.log('[HOST_MODE]', { host: window.location.host, mode: hostMode });
+  }, [hostMode]);
+
+  useEffect(() => {
+    if (hostRouteLogged.current) return;
+    console.log('[HOST_MODE_ROUTE]', { host: window.location.host, hostMode, pathname });
+    hostRouteLogged.current = true;
+  }, [hostMode, pathname]);
 
   const modeUrls = useMemo(
     () => ({
@@ -338,13 +416,13 @@ export default function HostRouter() {
       replacePath(targetPath, setPathname);
       return;
     }
-    const baseOrigin = getBaseOrigin(modeUrls[mode], mode);
+    const baseOrigin = getModeBaseUrl(mode);
     window.location.replace(`${baseOrigin}${targetPath}`);
   };
 
-  const resolvePostAuthTarget = (nextProfile, returnToRaw = '') => {
-    const mode = getModeFromProfile(nextProfile);
-    const returnTo = decodeURIComponent(String(returnToRaw || ''));
+  const resolvePostAuthTarget = (_nextProfile, returnToRaw = '') => {
+    const mode = hostMode;
+    const returnTo = sanitizeReturnTo(returnToRaw, { mode, isAuthenticated: true });
     const modePrefix = `/${mode}`;
     if (returnTo && returnTo.startsWith(modePrefix)) return { mode, path: returnTo };
     return { mode, path: modePrefix };
@@ -354,6 +432,20 @@ export default function HostRouter() {
     const onPopState = () => setPathname(window.location.pathname);
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (authStateLogged.current) return;
+    if (!authReady) return;
+    console.log("AUTH_STATE", { authReady, uid: user?.uid || null, host: window.location.host });
+    authStateLogged.current = true;
+  }, [authReady, user]);
+
+  useEffect(() => {
+    if (!auth) return;
+    setPersistence(auth, browserLocalPersistence).catch((err) => {
+      console.error('HostRouter auth persistence setup failed:', err?.message || err);
+    });
   }, []);
 
   useEffect(() => {
@@ -392,7 +484,20 @@ export default function HostRouter() {
 
       try {
         const snap = await getDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid));
-        setProfile(snap.exists() ? snap.data() : null);
+        let loadedProfile = snap.exists() ? snap.data() : null;
+        console.log('[HOST_AUTH] profile_loaded', { uid: user.uid, email: user.email || null, loadedProfile });
+
+        if (user && shouldBackfillInstitutionProfile(user, loadedProfile)) {
+          const patch = {
+            role: 'institution_student',
+            updatedAt: serverTimestamp(),
+          };
+          await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid), patch, { merge: true });
+          loadedProfile = { ...(loadedProfile || {}), ...patch };
+          console.log('[HOST_AUTH] institution_backfill_applied', { uid: user.uid, email: user.email || null, patch });
+        }
+
+        setProfile(loadedProfile);
       } catch (err) {
         console.error('Failed to load user profile for host routing', err);
         setProfile(null);
@@ -410,43 +515,66 @@ export default function HostRouter() {
 
     const loggedIn = !!user && !user.isAnonymous;
     const expectedPrefix = `/${hostMode}`;
+    console.log("[AUTH]", {
+      host: window.location.host,
+      uid: user?.uid || null,
+      path: pathname,
+      isAnon: user?.isAnonymous,
+    });
 
-    if (pathname === '/' || pathname === '/choose') {
-      replacePath(expectedPrefix, setPathname);
+    const shouldRedirectToModeHome =
+      pathname === '/' ||
+      pathname === '/choose' ||
+      ((hostMode === 'student' || hostMode === 'institution') && pathname === '/public');
+    if (shouldRedirectToModeHome) {
+      const suffix = window.location.search || '';
+      replacePath(`${expectedPrefix}${suffix}`, setPathname);
       handledInitialRedirect.current = true;
       return;
     }
 
-    if (!loggedIn) {
+    // Hard rule: never render onboarding when logged out.
+    if (!loggedIn && pathname.startsWith('/onboarding')) {
+      const returnTo = encodeURIComponent(sanitizeReturnTo('/onboarding', { mode: hostMode, isAuthenticated: false }));
+      const target = `/login?returnTo=${returnTo}`;
+      console.log("[REDIRECT]", { from: pathname, to: target });
+      window.history.replaceState({}, '', target);
+      setPathname('/login');
+      handledInitialRedirect.current = true;
+      return;
+    }
+
+    if ((hostMode === 'student' || hostMode === 'institution') && !loggedIn) {
       if (pathname !== '/login') {
-        const returnTo = encodeURIComponent(`${window.location.pathname}${window.location.search || ''}`);
-        window.history.replaceState({}, '', `/login?returnTo=${returnTo}`);
+        const rawTarget = pathname === '/onboarding' ? '/onboarding' : `${window.location.pathname}${window.location.search || ''}`;
+        const returnTo = encodeURIComponent(sanitizeReturnTo(rawTarget, { mode: hostMode, isAuthenticated: false }));
+        const target = `/login?returnTo=${returnTo}`;
+        console.log("[REDIRECT]", { from: pathname, to: target });
+        window.history.replaceState({}, '', target);
         setPathname('/login');
       }
       handledInitialRedirect.current = true;
       return;
     }
 
-    if (hostMode === 'institution' && !canAccessInstitution(profile)) {
-      const message = encodeURIComponent('Institution access requires an institution-linked account');
-      window.location.replace(`${modeUrls.student}?message=${message}`);
-      handledInitialRedirect.current = true;
-      return;
-    }
-
     const profileDone = isProfileComplete(profile, user);
-    if (!profileDone && pathname !== '/onboarding') {
-      const returnTo = encodeURIComponent(`${window.location.pathname}${window.location.search || ''}`);
-      window.history.replaceState({}, '', `/onboarding?returnTo=${returnTo}`);
+    if (loggedIn && !profileDone && pathname !== '/onboarding') {
+      const returnTo = encodeURIComponent(
+        sanitizeReturnTo(`${window.location.pathname}${window.location.search || ''}`, { mode: hostMode, isAuthenticated: true })
+      );
+      const target = `/onboarding?returnTo=${returnTo}`;
+      console.log("[REDIRECT]", { from: pathname, to: target });
+      window.history.replaceState({}, '', target);
       setPathname('/onboarding');
       handledInitialRedirect.current = true;
       return;
     }
 
-    if (profileDone && (pathname === '/login' || pathname === '/onboarding')) {
+    if (loggedIn && profileDone && (pathname === '/login' || pathname === '/onboarding')) {
       const params = new URLSearchParams(window.location.search);
       const returnTo = params.get('returnTo') || '';
       const target = resolvePostAuthTarget(profile, returnTo);
+      console.log("[REDIRECT]", { from: pathname, to: target.path });
       navigateToModePath(target.mode, target.path);
       handledInitialRedirect.current = true;
       return;
@@ -476,6 +604,13 @@ export default function HostRouter() {
     handledInitialRedirect.current = false;
   }, [pathname, hostMode, user, profileReady]);
 
+  const AppEntry =
+    hostMode === 'student'
+      ? StudentApp
+      : hostMode === 'institution'
+        ? InstitutionApp
+        : PublicApp;
+
   const appElement = (
     <>
       {user && !user.emailVerified ? (
@@ -488,7 +623,7 @@ export default function HostRouter() {
           {flashMessage}
         </div>
       ) : null}
-      <App hostMode={hostMode} modeUrls={modeUrls} />
+      {hostMode === 'institution' ? <AppEntry /> : <AppEntry modeUrls={modeUrls} />}
     </>
   );
 
@@ -498,6 +633,10 @@ export default function HostRouter() {
 
   if (!authReady || !profileReady) return <LoadingScreen />;
 
+  if ((hostMode === 'student' || hostMode === 'institution') && (!user || user.isAnonymous) && pathname !== '/login') {
+    return <LoadingScreen />;
+  }
+
   if (pathname === '/login' || pathname === '/onboarding') {
     return (
       <LoginPage
@@ -505,6 +644,7 @@ export default function HostRouter() {
         hostMode={hostMode}
         profile={profile}
         user={user}
+        authReady={authReady}
         onAuthSuccess={async (syncedProfile, returnTo) => {
           const merged = {
             ...(profile || {}),
@@ -513,30 +653,52 @@ export default function HostRouter() {
           };
           setProfile(merged);
           const complete = isProfileComplete(merged, auth?.currentUser);
+          const safeReturnTo = sanitizeReturnTo(returnTo, { mode: hostMode, isAuthenticated: true });
           if (!complete) {
-            window.history.replaceState({}, '', `/onboarding?returnTo=${encodeURIComponent(returnTo || '')}`);
+            window.history.replaceState({}, '', `/onboarding?returnTo=${encodeURIComponent(safeReturnTo)}`);
             setPathname('/onboarding');
             return;
           }
-          const target = resolvePostAuthTarget(merged, returnTo);
+          const target = resolvePostAuthTarget(merged, safeReturnTo);
           navigateToModePath(target.mode, target.path);
           handledInitialRedirect.current = false;
         }}
         onCompleteOnboarding={async (fullName, returnTo) => {
-          if (!user) throw new Error('Not authenticated');
-          if (!fullName) throw new Error('Full name is required');
-          if (auth?.currentUser && !auth.currentUser.displayName) {
-            await updateProfile(auth.currentUser, { displayName: fullName });
+          const activeUser = user || auth?.currentUser || null;
+          if (!activeUser) {
+            const safeLoginReturn = sanitizeReturnTo('/onboarding', { mode: hostMode, isAuthenticated: false });
+            window.history.replaceState({}, '', `/login?returnTo=${encodeURIComponent(safeLoginReturn)}`);
+            setPathname('/login');
+            return;
           }
+          const normalizedName = String(fullName || '').trim();
+          if (!normalizedName) throw new Error('Full name is required');
+          await activeUser.getIdToken();
+          if (auth?.currentUser && !String(auth.currentUser.displayName || '').trim()) {
+            await updateProfile(auth.currentUser, { displayName: normalizedName });
+          }
+          const profileRef = doc(db, 'artifacts', APP_ID, 'users', activeUser.uid);
           const profilePatch = {
-            displayName: fullName,
-            name: fullName,
+            displayName: normalizedName,
+            name: normalizedName,
             updatedAt: serverTimestamp(),
           };
-          await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid), profilePatch, { merge: true });
-          const merged = { ...(profile || {}), ...profilePatch };
+          console.log('[ONBOARDING_SAVE] start', {
+            uid: activeUser.uid,
+            path: `artifacts/${APP_ID}/users/${activeUser.uid}`,
+            payload: profilePatch,
+          });
+          await setDoc(profileRef, profilePatch, { merge: true });
+          console.log('[ONBOARDING_SAVE] profile saved ok');
+          const savedSnap = await getDoc(profileRef);
+          const savedProfile = savedSnap.exists() ? savedSnap.data() : null;
+          const merged = { ...(profile || {}), ...(savedProfile || {}), ...profilePatch };
+          setFlashMessage('');
           setProfile(merged);
-          const target = resolvePostAuthTarget(merged, returnTo);
+          const completeAfterSave = isProfileComplete(merged, auth?.currentUser);
+          console.log('[ONBOARDING_SAVE] profile after save complete?', completeAfterSave);
+          const safeReturnTo = sanitizeReturnTo(returnTo, { mode: hostMode, isAuthenticated: true });
+          const target = resolvePostAuthTarget(merged, safeReturnTo);
           navigateToModePath(target.mode, target.path);
           handledInitialRedirect.current = false;
         }}

@@ -1,0 +1,21 @@
+{
+  "projects": {
+    "default": "elimulink-ai"
+  },
+  "targets": {
+    "elimulink-ai": {
+      "hosting": {
+        "elimulink-app-ai": [
+          "elimulink-app-ai"
+        ],
+        "elimulink-student": [
+          "elimulink-student"
+        ],
+        "elimulink-institution": [
+          "elimulink-institution"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -1,0 +1,264 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function hasProfile() {
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/artifacts/elimulink-pro-v2/users/$(request.auth.uid));
+    }
+
+    function appUser() {
+      return hasProfile()
+        ? get(/databases/$(database)/documents/artifacts/elimulink-pro-v2/users/$(request.auth.uid)).data
+        : null;
+    }
+
+    function profileRole() {
+      return hasProfile() ? appUser().role : null;
+    }
+
+    function profileInstitutionId() {
+      return hasProfile() ? appUser().institutionId : null;
+    }
+
+    function profileDepartmentId() {
+      return hasProfile() ? appUser().departmentId : null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && request.auth.token.role == "super_admin";
+    }
+
+    function isInstitutionAdmin(institutionId) {
+      return isAuthenticated()
+        && request.auth.token.role == "institution_admin"
+        && request.auth.token.institutionId == institutionId
+        && request.auth.token.subscriptionActive == true;
+    }
+
+    function isDepartmentAdmin(institutionId) {
+      return hasProfile()
+        && (profileRole() == "departmentAdmin" || profileRole() == "staff")
+        && profileInstitutionId() == institutionId
+        && profileDepartmentId() is string
+        && profileDepartmentId().size() > 0;
+    }
+
+    function isStudentInInstitution(institutionId) {
+      return hasProfile()
+        && profileInstitutionId() == institutionId
+        && request.auth.uid is string
+        && request.auth.uid.size() > 0;
+    }
+
+    function canAccessDepartment(institutionId, departmentId) {
+      let institutionMatch = request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId;
+      return institutionMatch && (
+        isInstitutionAdmin(institutionId) ||
+        (isDepartmentAdmin(institutionId) && (departmentId == profileDepartmentId() || departmentId == "general")) ||
+        (isStudentInInstitution(institutionId) && (departmentId == profileDepartmentId() || departmentId == "general"))
+      );
+    }
+
+    function caseIdMatches(data, caseId) {
+      return caseId == (data.studentId + "_" + data.departmentId);
+    }
+
+    function validCaseData(data, institutionId, caseId) {
+      return data.institutionId == institutionId
+        && data.departmentId is string
+        && data.departmentId.size() > 0
+        && data.studentId is string
+        && data.studentId.size() > 0
+        && data.status is string
+        && caseIdMatches(data, caseId);
+    }
+
+    function validMessageData(data, parent) {
+      return data.from in ["student", "ai", "admin"]
+        && data.text is string
+        && data.text.size() > 0
+        && data.departmentId == parent.departmentId
+        && data.visibility in ["student", "internal"];
+    }
+
+    match /users/{uid} {
+      allow read, write: if isAuthenticated() && request.auth.uid == uid;
+    }
+
+    match /artifacts/{appId}/users/{uid} {
+      allow read, write: if isAuthenticated() && request.auth.uid == uid;
+    }
+
+    match /institutions/{institutionId} {
+      allow read: if isInstitutionAdmin(institutionId)
+        || isDepartmentAdmin(institutionId)
+        || isStudentInInstitution(institutionId);
+      allow write: if isInstitutionAdmin(institutionId);
+    }
+
+    match /institutions/{institutionId}/students/{studentId} {
+      allow read: if isInstitutionAdmin(institutionId)
+        || isDepartmentAdmin(institutionId)
+        || (isStudentInInstitution(institutionId) && request.auth.uid == studentId);
+      allow write: if isInstitutionAdmin(institutionId) || isDepartmentAdmin(institutionId);
+    }
+
+    match /institutions/{institutionId}/courses/{courseId} {
+      allow read: if isInstitutionAdmin(institutionId)
+        || isDepartmentAdmin(institutionId)
+        || isStudentInInstitution(institutionId);
+      allow write: if isInstitutionAdmin(institutionId) || isDepartmentAdmin(institutionId);
+    }
+
+    match /institutions/{institutionId}/analytics/{doc} {
+      allow read: if isInstitutionAdmin(institutionId);
+      allow write: if false;
+    }
+
+    match /institutions/{institutionId}/libraryItems/{itemId} {
+      allow read: if canAccessDepartment(institutionId, resource.data.departmentId);
+      allow write: if false;
+    }
+
+    match /institutions/{institutionId}/audits/{auditId} {
+      allow read: if isInstitutionAdmin(institutionId) || isDepartmentAdmin(institutionId);
+      allow write: if false;
+    }
+
+    match /institutions/{institutionId}/reports/{departmentId}/weekly/{weekKey} {
+      allow read: if canAccessDepartment(institutionId, departmentId);
+      allow write: if false;
+    }
+
+    match /institutions/{institutionId}/notes/{noteId} {
+      allow read: if (
+        isAuthenticated()
+        && request.auth.uid == resource.data.ownerUid
+        && (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
+      );
+
+      allow create, update: if (
+        isAuthenticated()
+        && request.auth.uid == request.resource.data.ownerUid
+        && (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
+      );
+
+      allow delete: if (
+        isAuthenticated()
+        && request.auth.uid == resource.data.ownerUid
+        && (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
+      );
+    }
+
+    match /institutions/{institutionId}/assignments/{assignmentId} {
+      allow read: if canAccessDepartment(institutionId, resource.data.departmentId);
+
+      allow create, update: if
+        (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
+        && (
+          isInstitutionAdmin(institutionId) ||
+          (
+            isDepartmentAdmin(institutionId)
+            && (
+              request.resource.data.departmentId == profileDepartmentId()
+              || request.resource.data.departmentId == "general"
+            )
+          )
+        );
+
+      allow delete: if
+        (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
+        && (
+          isInstitutionAdmin(institutionId) ||
+          (
+            isDepartmentAdmin(institutionId)
+            && (
+              resource.data.departmentId == profileDepartmentId()
+              || resource.data.departmentId == "general"
+            )
+          )
+        );
+    }
+
+    match /institutions/{institutionId}/cases/{caseId} {
+      allow read: if isInstitutionAdmin(institutionId)
+        || (isDepartmentAdmin(institutionId) && resource.data.departmentId == profileDepartmentId())
+        || (isStudentInInstitution(institutionId) && resource.data.studentId == request.auth.uid);
+
+      allow create: if validCaseData(request.resource.data, institutionId, caseId)
+        && (
+          isInstitutionAdmin(institutionId)
+          || (isDepartmentAdmin(institutionId) && request.resource.data.departmentId == profileDepartmentId())
+          || (isStudentInInstitution(institutionId) && request.resource.data.studentId == request.auth.uid)
+        );
+
+      allow update: if validCaseData(request.resource.data, institutionId, caseId)
+        && (
+          isInstitutionAdmin(institutionId)
+          || (
+            isDepartmentAdmin(institutionId)
+            && resource.data.departmentId == profileDepartmentId()
+            && request.resource.data.departmentId == resource.data.departmentId
+            && request.resource.data.studentId == resource.data.studentId
+            && request.resource.data.institutionId == resource.data.institutionId
+          )
+          || (
+            isStudentInInstitution(institutionId)
+            && resource.data.studentId == request.auth.uid
+            && request.resource.data.studentId == resource.data.studentId
+            && request.resource.data.departmentId == resource.data.departmentId
+            && request.resource.data.institutionId == resource.data.institutionId
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    match /institutions/{institutionId}/cases/{caseId}/messages/{messageId} {
+      function parentCase() {
+        return get(/databases/$(database)/documents/institutions/$(institutionId)/cases/$(caseId)).data;
+      }
+
+      allow read: if isInstitutionAdmin(institutionId)
+        || (
+          isDepartmentAdmin(institutionId)
+          && parentCase().departmentId == profileDepartmentId()
+          && resource.data.departmentId == profileDepartmentId()
+        )
+        || (
+          isStudentInInstitution(institutionId)
+          && parentCase().studentId == request.auth.uid
+          && resource.data.departmentId == parentCase().departmentId
+        );
+
+      allow create: if validMessageData(request.resource.data, parentCase())
+        && (
+          isInstitutionAdmin(institutionId)
+          || (
+            isDepartmentAdmin(institutionId)
+            && parentCase().departmentId == profileDepartmentId()
+            && request.resource.data.departmentId == profileDepartmentId()
+          )
+          || (
+            isStudentInInstitution(institutionId)
+            && parentCase().studentId == request.auth.uid
+          )
+        );
+
+      allow update, delete: if false;
+    }
+
+    match /public/{doc} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

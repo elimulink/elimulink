@@ -2,9 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { 
-  getFirestore, collection, doc, setDoc, getDoc, 
-  onSnapshot, query, addDoc, updateDoc, serverTimestamp 
-} from 'firebase/firestore';
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  getDoc,
+  updateDoc,
+  serverTimestamp,
+  addDoc,
+  query,
+  orderBy
+} from "firebase/firestore";
 import { SplashScreen } from './SplashScreen';
 import { geminiAPI } from './services/geminiAPI';
 
@@ -15,9 +23,10 @@ const MODEL_IMAGE = "imagen-4.0-generate-001";
 const MODEL_TTS = "gemini-2.5-flash-preview-tts";
 
 const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-const app = firebaseConfig.apiKey ? initializeApp(firebaseConfig) : null;
-const auth = app ? getAuth(app) : null;
-const db = app ? getFirestore(app) : null;
+// NOTE: Firebase runtime initialization is handled in src/lib/firebase.js.
+const app = null;
+const auth = null;
+const db = null;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'elimulink-ultra-v2';
 
 // ============= INLINE SVG ICONS (NO LUCIDE-REACT) =============
