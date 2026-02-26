@@ -8,15 +8,7 @@ import {
   GitBranch,
   Mail,
 } from "lucide-react";
-
-const API_BASE =
-  import.meta.env.VITE_API_BASE ||
-  (import.meta.env.MODE === "development" ? "http://localhost:4000" : "");
-
-function apiUrl(path) {
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  return API_BASE ? `${API_BASE.replace(/\/$/, "")}${normalized}` : normalized;
-}
+import { apiPost } from "../../lib/apiClient";
 
 function getGreetingByHour(date = new Date()) {
   const h = date.getHours();
@@ -87,41 +79,37 @@ export default function InstitutionHome({
     setQuery("");
 
     try {
-      const idToken = user ? await user.getIdToken() : null;
-      const response = await fetch(apiUrl("/api/ai/student"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-        },
-        body: JSON.stringify({
-          text,
-          hostMode: "institution",
-          institutionId: userProfile?.institutionId || null,
-          departmentId: activeDepartmentId || "general",
-          departmentName: activeDepartmentName || "General",
-          mode: activeDepartmentName || "General",
-        }),
+      if (!user) throw new Error("Please sign in");
+      const idToken = await user.getIdToken();
+      const data = await apiPost("/api/ai/student", {
+        message: text,
+        text,
+        hostMode: "institution",
+        institutionId: userProfile?.institutionId || null,
+        departmentId: activeDepartmentId || "general",
+        departmentName: activeDepartmentName || "General",
+        mode: activeDepartmentName || "General",
+      }, {
+        token: idToken,
       });
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(errorBody || `Request failed (${response.status})`);
-      }
-
-      const data = await response.json();
       const aiText = data?.text || "I could not generate a response.";
       setMessages((prev) => [...prev, { id: Date.now() + 1, role: "ai", text: aiText }]);
     } catch (error) {
+      const status = error?.status ? ` (${error.status})` : "";
+      console.error("[AI_ERROR][institutionHome]", {
+        status: error?.status || null,
+        message: error?.message || null,
+        body: error?.body || null,
+      });
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now() + 1,
           role: "ai",
-          text: "Error: Failed to fetch AI response.",
+          text: `Error${status}: ${error?.message || "Failed to fetch AI response."}`,
         },
       ]);
-      setStatus(error?.message || "Failed to fetch");
+      setStatus(`Error${status}: ${error?.message || "Failed to fetch"}`);
     } finally {
       setIsThinking(false);
     }

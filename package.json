@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "vite",
+    "dev:public": "vite --mode public --force",
+    "dev:student": "vite --mode student --force",
+    "dev:institution": "vite --mode institution --force",
     "server": "node server.js",
     "build": "vite build",
     "build:public": "cross-env VITE_APP_MODE=public vite build --outDir dist-public",

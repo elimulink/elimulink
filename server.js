@@ -83,8 +83,39 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint();
+  res.on('finish', () => {
+    const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+    console.log(`[REQ] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${elapsedMs.toFixed(1)}ms)`);
+  });
+  next();
+});
+
 const PORT = process.env.PORT || 4000;
 const APP_ID = process.env.VITE_APP_ID || 'elimulink-pro-v2';
+const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 30000);
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = AI_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      const timeoutError = new Error('AI_TIMEOUT');
+      timeoutError.code = 'AI_TIMEOUT';
+      throw timeoutError;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isAiTimeoutError(err) {
+  return err?.code === 'AI_TIMEOUT' || err?.message === 'AI_TIMEOUT';
+}
 
 // Initialize Firebase Admin SDK once.
 function initFirebaseAdminOnce() {
@@ -667,7 +698,7 @@ async function writeLibraryAudit({ institutionId, uid, role, departmentId, type,
 }
 
 async function callGeminiText({ system, userMessage, institutionContext }) {
-  const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+  const GEMINI_KEY = process.env.GEMINI_API_KEY;
   if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY is not set');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
@@ -685,11 +716,11 @@ async function callGeminiText({ system, userMessage, institutionContext }) {
     generationConfig: { temperature: 0.4 },
   };
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  });
+  }, AI_TIMEOUT_MS);
 
   const data = await response.json();
   if (!response.ok) {
@@ -717,14 +748,14 @@ const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET; // required
 if (!ADMIN_JWT_SECRET) {
   console.warn("ADMIN_JWT_SECRET not set — admin auth will not work reliably");
 }
-const OPENAI_KEY = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY || '';
+const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
 
 async function generateImageFromOpenAI(prompt) {
-  const r = await fetch('https://api.openai.com/v1/images/generations', {
+  const r = await fetchWithTimeout('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
     body: JSON.stringify({ model: 'gpt-image-1', prompt, size: '1024x1024', n: 1 })
-  });
+  }, AI_TIMEOUT_MS);
   const data = await r.json().catch(() => ({}));
   const b64 = data.data?.[0]?.b64_json || data.data?.[0]?.b64_image;
   if (!r.ok) {
@@ -735,6 +766,37 @@ async function generateImageFromOpenAI(prompt) {
     throw new Error('No image returned');
   }
   return `data:image/png;base64,${b64}`;
+}
+
+async function generateSpeechFromGemini(text, voiceName = 'Kore') {
+  const GEMINI_KEY = process.env.GEMINI_API_KEY;
+  if (!GEMINI_KEY) {
+    throw new Error('GEMINI_API_KEY not set on backend');
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_KEY}`;
+  const r = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: String(text || '').slice(0, 300) }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: String(voiceName || 'Kore') }
+          }
+        }
+      }
+    }),
+  }, AI_TIMEOUT_MS);
+
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = data?.error?.message || `Gemini TTS error: ${r.status}`;
+    throw new Error(msg);
+  }
+  return data;
 }
 
 function requireAdmin(req, res, next) {
@@ -846,6 +908,40 @@ app.post('/api/image', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/ai/image', requireFirebaseAuth, async (req, res) => {
+  const { prompt } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  if (!OPENAI_KEY) {
+    return res.status(500).json({ error: 'Image generation key missing on backend. Set OPENAI_API_KEY.' });
+  }
+  try {
+    const image = await generateImageFromOpenAI(prompt);
+    return res.json({ ok: true, image });
+  } catch (e) {
+    console.error('[ERROR] /api/ai/image', e.message);
+    if (isAiTimeoutError(e)) {
+      return res.status(504).json({ ok: false, error: 'AI_TIMEOUT' });
+    }
+    return res.status(502).json({ error: e.message });
+  }
+});
+
+app.post('/api/ai/tts', requireFirebaseAuth, async (req, res) => {
+  const { text, voiceName } = req.body || {};
+  if (!text || !String(text).trim()) return res.status(400).json({ error: 'text required' });
+  try {
+    const tts = await generateSpeechFromGemini(text, voiceName);
+    const audioBase64 = tts?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+    return res.json({ ok: true, audioBase64, tts });
+  } catch (e) {
+    console.error('[ERROR] /api/ai/tts', e.message);
+    if (isAiTimeoutError(e)) {
+      return res.status(504).json({ ok: false, error: 'AI_TIMEOUT' });
+    }
+    return res.status(502).json({ error: e.message });
+  }
+});
+
 // Student image endpoint (requires Firebase user token)
 app.post('/api/image/student', requireFirebaseAuth, async (req, res) => {
   const { prompt } = req.body || {};
@@ -858,6 +954,9 @@ app.post('/api/image/student', requireFirebaseAuth, async (req, res) => {
     return res.json({ ok: true, image });
   } catch (e) {
     console.error('[ERROR] /api/image/student', e.message);
+    if (isAiTimeoutError(e)) {
+      return res.status(504).json({ ok: false, error: 'AI_TIMEOUT' });
+    }
     return res.status(502).json({ error: e.message });
   }
 });
@@ -981,9 +1080,9 @@ app.post('/api/ai/student', requireFirebaseAuth, async (req, res) => {
 
   console.log(`[API] /api/ai/student - User: ${req.user.uid}, Region: ${region}`);
 
-  const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+  const GEMINI_KEY = process.env.GEMINI_API_KEY;
   if (!GEMINI_KEY) {
-    console.error('[ERROR] GEMINI_API_KEY not set on backend (and no VITE_GEMINI_API_KEY fallback)');
+    console.error('[ERROR] GEMINI_API_KEY not set on backend');
     return res.status(500).json({ error: 'GEMINI_API_KEY not set' });
   }
 
@@ -1008,7 +1107,7 @@ Question: ${text}
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
     console.log(`[API] Calling Gemini: ${url.substring(0, 50)}...`);
     
-    const r = await fetch(url, {
+    const r = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1016,7 +1115,7 @@ Question: ${text}
         tools: useGoogleSearch ? [{ google_search: {} }] : [],
         systemInstruction: { parts: [{ text: systemInstruction }] },
       }),
-    });
+    }, AI_TIMEOUT_MS);
 
     if (!r.ok) {
       const errorData = await r.json().catch(() => ({}));
@@ -1040,6 +1139,9 @@ Question: ${text}
     return res.json({ ok: true, text: aiText, raw: undefined });
   } catch (e) {
     console.error('[ERROR] /api/ai/student exception:', e.message);
+    if (isAiTimeoutError(e)) {
+      return res.status(504).json({ ok: false, error: 'AI_TIMEOUT' });
+    }
     return res.status(500).json({ error: e.message });
   }
 });
@@ -1110,6 +1212,9 @@ Rules:
     });
   } catch (err) {
     console.error('POST /api/chat error:', err);
+    if (isAiTimeoutError(err)) {
+      return res.status(504).json({ ok: false, error: 'AI_TIMEOUT' });
+    }
     return res.status(500).json({ error: err.message || 'Server error' });
   }
 });
@@ -1288,9 +1393,26 @@ app.get('/', (req, res) => {
   return res.status(200).send(JSON.stringify(status, null, 2));
 });
 
-app.listen(PORT, () => {
+app.use((err, req, res, next) => {
+  console.error('[EXPRESS_ERROR]', err?.stack || err);
+  if (res.headersSent) return next(err);
+  return res.status(500).json({ ok: false, error: 'INTERNAL_SERVER_ERROR' });
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[UNHANDLED_REJECTION]', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT_EXCEPTION]', err);
+});
+
+const server = app.listen(PORT, () => {
   console.log(`[SERVER] ElimuLink API listening on port ${PORT}`);
   console.log(`[CONFIG] Firebase Admin: ${db ? 'initialized' : 'NOT configured'}`);
   console.log(`[CONFIG] Gemini API: ${process.env.GEMINI_API_KEY ? 'set' : 'NOT configured'}`);
   console.log(`[CONFIG] OpenAI API: ${OPENAI_KEY ? 'set' : 'not configured'}`);
 });
+server.timeout = Number(process.env.SERVER_REQUEST_TIMEOUT_MS || 120000);
+server.keepAliveTimeout = Number(process.env.SERVER_KEEPALIVE_TIMEOUT_MS || 65000);
+server.headersTimeout = Number(process.env.SERVER_HEADERS_TIMEOUT_MS || 70000);

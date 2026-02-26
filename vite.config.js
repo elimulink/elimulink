@@ -6,7 +6,7 @@ export default defineConfig({
   root: './',
   server: {
     host: true,
-    port: 3000,
+    port: 5173,
     strictPort: true,
     allowedHosts: [
       'app.localhost',
@@ -18,8 +18,8 @@ export default defineConfig({
     hmr: {
       protocol: 'ws',
       host: 'localhost',
-      port: 3000,
-      clientPort: 3000,
+      port: 5173,
+      clientPort: 5173,
     },
   }
 })

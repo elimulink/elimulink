@@ -3,15 +3,7 @@ import { Lock, Search, FileText } from "lucide-react";
 import { getDepartments } from "../../lib/institution";
 import { listCases, getCaseWithMessages, addAdminRemark, updateCaseFields } from "../../lib/institutionAdmin";
 import { db } from "../../lib/firebase";
-
-const API_BASE =
-  import.meta.env.VITE_API_BASE ||
-  (import.meta.env.MODE === "development" ? "http://localhost:4000" : "");
-
-function apiUrl(path) {
-  if (!path.startsWith("/")) path = `/${path}`;
-  return API_BASE ? `${API_BASE.replace(/\/$/, "")}${path}` : path;
-}
+import { apiUrl } from "../../lib/apiUrl";
 
 function normalizeStatus(status) {
   const value = String(status || "").trim().toLowerCase();

@@ -24,3 +24,90 @@
     transform: translateY(-20px);
   }
 }
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+html.dark body {
+  background: #020617;
+  color: #e2e8f0;
+}
+
+/* Global dark-mode surface overrides so existing screens switch cleanly */
+html.dark .bg-white {
+  background-color: #0f172a !important;
+}
+html.dark .bg-slate-50 {
+  background-color: #111827 !important;
+}
+html.dark .bg-slate-100 {
+  background-color: #0b1220 !important;
+}
+html.dark .border-slate-200 {
+  border-color: #334155 !important;
+}
+html.dark .text-slate-900 {
+  color: #f8fafc !important;
+}
+html.dark .text-slate-800 {
+  color: #e2e8f0 !important;
+}
+html.dark .text-slate-700 {
+  color: #cbd5e1 !important;
+}
+html.dark .text-slate-600,
+html.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+/* Modern auto-hide scrollbars: show only while scrolling */
+.smart-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.smart-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.smart-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.smart-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.smart-scrollbar::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.smart-scrollbar.is-scrolling {
+  scrollbar-color: rgba(100, 116, 139, 0.65) transparent;
+}
+
+.smart-scrollbar.is-scrolling::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(100, 116, 139, 0.75), rgba(71, 85, 105, 0.75));
+}
+
+html.dark .smart-scrollbar.is-scrolling {
+  scrollbar-color: rgba(148, 163, 184, 0.65) transparent;
+}
+
+html.dark .smart-scrollbar.is-scrolling::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.7), rgba(100, 116, 139, 0.7));
+}

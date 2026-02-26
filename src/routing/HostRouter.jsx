@@ -15,18 +15,17 @@ import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import App from '../App.jsx';
 import InstitutionApp from '../institution/InstitutionApp.jsx';
 import { auth, db, firebaseInitErrorMessage } from '../lib/firebase';
+import { apiUrl } from '../lib/apiUrl';
 import { getResolvedHostMode } from './hostMode';
 
 const APP_ID = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
-const API_BASE =
-  import.meta.env.VITE_API_BASE ||
-  (import.meta.env.MODE === 'development' ? 'http://localhost:4000' : '');
 const INSTITUTION_EMAIL_DOMAIN = String(import.meta.env.VITE_INSTITUTION_EMAIL_DOMAIN || 'elimulink.co.ke').toLowerCase();
+const DEBUG_HOST_ROUTER = import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_HOST_ROUTER || '').trim() === '1';
 // const INSTITUTION_FALLBACK_ID = String(import.meta.env.VITE_INSTITUTION_ID || 'YOUR_INSTITUTION_ID');
 const INSTITUTION_FALLBACK_ID = String(import.meta.env.VITE_INSTITUTION_ID || 'YOUR_INSTITUTION_ID');
-function apiUrl(path) {
-  if (!path.startsWith('/')) path = `/${path}`;
-  return API_BASE ? `${API_BASE.replace(/\/$/, '')}${path}` : path;
+
+function hostLog(...args) {
+  if (DEBUG_HOST_ROUTER) console.log(...args);
 }
 
 function shouldBackfillInstitutionProfile(nextUser, profile) {
@@ -392,12 +391,12 @@ export default function HostRouter() {
   );
 
   useEffect(() => {
-    console.log('[HOST_MODE]', { host: window.location.host, mode: hostMode });
+    hostLog('[HOST_MODE]', { host: window.location.host, mode: hostMode });
   }, [hostMode]);
 
   useEffect(() => {
     if (hostRouteLogged.current) return;
-    console.log('[HOST_MODE_ROUTE]', { host: window.location.host, hostMode, pathname });
+    hostLog('[HOST_MODE_ROUTE]', { host: window.location.host, hostMode, pathname });
     hostRouteLogged.current = true;
   }, [hostMode, pathname]);
 
@@ -437,7 +436,7 @@ export default function HostRouter() {
   useEffect(() => {
     if (authStateLogged.current) return;
     if (!authReady) return;
-    console.log("AUTH_STATE", { authReady, uid: user?.uid || null, host: window.location.host });
+    hostLog("AUTH_STATE", { authReady, uid: user?.uid || null, host: window.location.host });
     authStateLogged.current = true;
   }, [authReady, user]);
 
@@ -485,7 +484,7 @@ export default function HostRouter() {
       try {
         const snap = await getDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid));
         let loadedProfile = snap.exists() ? snap.data() : null;
-        console.log('[HOST_AUTH] profile_loaded', { uid: user.uid, email: user.email || null, loadedProfile });
+        hostLog('[HOST_AUTH] profile_loaded', { uid: user.uid, email: user.email || null, loadedProfile });
 
         if (user && shouldBackfillInstitutionProfile(user, loadedProfile)) {
           const patch = {
@@ -494,12 +493,12 @@ export default function HostRouter() {
           };
           await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid), patch, { merge: true });
           loadedProfile = { ...(loadedProfile || {}), ...patch };
-          console.log('[HOST_AUTH] institution_backfill_applied', { uid: user.uid, email: user.email || null, patch });
+          hostLog('[HOST_AUTH] institution_backfill_applied', { uid: user.uid, email: user.email || null, patch });
         }
 
         setProfile(loadedProfile);
       } catch (err) {
-        console.error('Failed to load user profile for host routing', err);
+        console.warn('Failed to load user profile for host routing:', err?.message || err);
         setProfile(null);
       } finally {
         setProfileReady(true);
@@ -515,7 +514,7 @@ export default function HostRouter() {
 
     const loggedIn = !!user && !user.isAnonymous;
     const expectedPrefix = `/${hostMode}`;
-    console.log("[AUTH]", {
+    hostLog("[AUTH]", {
       host: window.location.host,
       uid: user?.uid || null,
       path: pathname,
@@ -537,7 +536,7 @@ export default function HostRouter() {
     if (!loggedIn && pathname.startsWith('/onboarding')) {
       const returnTo = encodeURIComponent(sanitizeReturnTo('/onboarding', { mode: hostMode, isAuthenticated: false }));
       const target = `/login?returnTo=${returnTo}`;
-      console.log("[REDIRECT]", { from: pathname, to: target });
+      hostLog("[REDIRECT]", { from: pathname, to: target });
       window.history.replaceState({}, '', target);
       setPathname('/login');
       handledInitialRedirect.current = true;
@@ -549,7 +548,7 @@ export default function HostRouter() {
         const rawTarget = pathname === '/onboarding' ? '/onboarding' : `${window.location.pathname}${window.location.search || ''}`;
         const returnTo = encodeURIComponent(sanitizeReturnTo(rawTarget, { mode: hostMode, isAuthenticated: false }));
         const target = `/login?returnTo=${returnTo}`;
-        console.log("[REDIRECT]", { from: pathname, to: target });
+        hostLog("[REDIRECT]", { from: pathname, to: target });
         window.history.replaceState({}, '', target);
         setPathname('/login');
       }
@@ -563,7 +562,7 @@ export default function HostRouter() {
         sanitizeReturnTo(`${window.location.pathname}${window.location.search || ''}`, { mode: hostMode, isAuthenticated: true })
       );
       const target = `/onboarding?returnTo=${returnTo}`;
-      console.log("[REDIRECT]", { from: pathname, to: target });
+      hostLog("[REDIRECT]", { from: pathname, to: target });
       window.history.replaceState({}, '', target);
       setPathname('/onboarding');
       handledInitialRedirect.current = true;
@@ -574,7 +573,7 @@ export default function HostRouter() {
       const params = new URLSearchParams(window.location.search);
       const returnTo = params.get('returnTo') || '';
       const target = resolvePostAuthTarget(profile, returnTo);
-      console.log("[REDIRECT]", { from: pathname, to: target.path });
+      hostLog("[REDIRECT]", { from: pathname, to: target.path });
       navigateToModePath(target.mode, target.path);
       handledInitialRedirect.current = true;
       return;
@@ -623,7 +622,7 @@ export default function HostRouter() {
           {flashMessage}
         </div>
       ) : null}
-      {hostMode === 'institution' ? <AppEntry /> : <AppEntry modeUrls={modeUrls} />}
+      {hostMode === 'institution' ? <AppEntry userRole={profile?.role} /> : <AppEntry modeUrls={modeUrls} />}
     </>
   );
 
@@ -683,20 +682,20 @@ export default function HostRouter() {
             name: normalizedName,
             updatedAt: serverTimestamp(),
           };
-          console.log('[ONBOARDING_SAVE] start', {
+          hostLog('[ONBOARDING_SAVE] start', {
             uid: activeUser.uid,
             path: `artifacts/${APP_ID}/users/${activeUser.uid}`,
             payload: profilePatch,
           });
           await setDoc(profileRef, profilePatch, { merge: true });
-          console.log('[ONBOARDING_SAVE] profile saved ok');
+          hostLog('[ONBOARDING_SAVE] profile saved ok');
           const savedSnap = await getDoc(profileRef);
           const savedProfile = savedSnap.exists() ? savedSnap.data() : null;
           const merged = { ...(profile || {}), ...(savedProfile || {}), ...profilePatch };
           setFlashMessage('');
           setProfile(merged);
           const completeAfterSave = isProfileComplete(merged, auth?.currentUser);
-          console.log('[ONBOARDING_SAVE] profile after save complete?', completeAfterSave);
+          hostLog('[ONBOARDING_SAVE] profile after save complete?', completeAfterSave);
           const safeReturnTo = sanitizeReturnTo(returnTo, { mode: hostMode, isAuthenticated: true });
           const target = resolvePostAuthTarget(merged, safeReturnTo);
           navigateToModePath(target.mode, target.path);

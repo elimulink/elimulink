@@ -10,22 +10,26 @@ export default function Notebook({ user }) {
   const [content, setContent] = useState('');
 
   useEffect(() => {
-    if (!uid) {
+    if (!uid || !db) {
       setNotes([]);
       setActiveId(null);
       return;
     }
 
     const notesRef = collection(db, 'users', uid, 'notes');
-    const unsubscribe = onSnapshot(notesRef, (snapshot) => {
-      const rows = snapshot.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
-      setNotes(rows);
-      if (!activeId && rows.length) setActiveId(rows[0].id);
-    });
+    const unsubscribe = onSnapshot(
+      notesRef,
+      (snapshot) => {
+        const rows = snapshot.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
+        setNotes(rows);
+        if (!activeId && rows.length) setActiveId(rows[0].id);
+      },
+      (err) => console.warn("[FIRESTORE]", err?.code, err)
+    );
     return () => unsubscribe();
-  }, [uid, activeId]);
+  }, [uid, activeId, db]);
 
   const activeNote = useMemo(() => notes.find((n) => n.id === activeId) || null, [notes, activeId]);
 

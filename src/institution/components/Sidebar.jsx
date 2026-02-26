@@ -1,9 +1,9 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Search, MessageSquarePlus, NotebookPen, Megaphone, CalendarDays, Settings, Shield } from 'lucide-react';
+import { Home, Search, MessageSquarePlus, NotebookPen, Megaphone, CalendarDays, Settings, Shield } from 'lucide-react';
 
 const links = [
-  { to: '/', label: 'Admin', icon: LayoutDashboard },
+  { to: '/search', label: 'Home', icon: Home },
   { to: '/search', label: 'Search', icon: Search },
   { to: '/search', label: 'NewChat', icon: MessageSquarePlus },
   { to: '/notebook', label: 'Notebook', icon: NotebookPen },
