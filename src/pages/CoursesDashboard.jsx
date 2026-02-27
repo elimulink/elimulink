@@ -160,7 +160,7 @@ export default function CoursesDashboard({ onBack }) {
   }, [tab]);
 
   return (
-    <div className="h-full min-h-0 flex flex-col">
+    <div className="min-h-[100dvh] bg-slate-100 p-4 md:p-6 flex flex-col">
       <div className="mb-3">
         <button
           type="button"

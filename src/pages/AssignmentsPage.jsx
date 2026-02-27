@@ -606,7 +606,7 @@ export default function AssignmentsPage() {
   }
 
   return (
-    <div className="w-full">
+    <div className="min-h-[100dvh] w-full bg-slate-100 p-4 md:p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xl font-extrabold text-slate-900">Assignments</div>

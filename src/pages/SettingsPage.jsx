@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getStoredThemeMode, setThemeMode } from "../lib/theme";
 import {
   getStoredPreferences,
@@ -6,6 +6,61 @@ import {
   saveStoredPreferences,
   saveStoredProfile,
 } from "../lib/userSettings";
+
+const LANGUAGE_OPTIONS = [
+  { code: "en", label: "English" },
+  { code: "sw", label: "Kiswahili (Swahili)" },
+  { code: "fr", label: "French" },
+  { code: "es", label: "Spanish" },
+  { code: "pt", label: "Portuguese" },
+  { code: "de", label: "German" },
+  { code: "it", label: "Italian" },
+  { code: "nl", label: "Dutch" },
+  { code: "sv", label: "Swedish" },
+  { code: "no", label: "Norwegian" },
+  { code: "da", label: "Danish" },
+  { code: "fi", label: "Finnish" },
+  { code: "pl", label: "Polish" },
+  { code: "cs", label: "Czech" },
+  { code: "hu", label: "Hungarian" },
+  { code: "ro", label: "Romanian" },
+  { code: "el", label: "Greek" },
+  { code: "tr", label: "Turkish" },
+  { code: "ru", label: "Russian" },
+  { code: "uk", label: "Ukrainian" },
+  { code: "ar", label: "Arabic" },
+  { code: "he", label: "Hebrew" },
+  { code: "fa", label: "Persian (Farsi)" },
+  { code: "ur", label: "Urdu" },
+  { code: "hi", label: "Hindi" },
+  { code: "bn", label: "Bengali" },
+  { code: "pa", label: "Punjabi" },
+  { code: "ta", label: "Tamil" },
+  { code: "te", label: "Telugu" },
+  { code: "kn", label: "Kannada" },
+  { code: "ml", label: "Malayalam" },
+  { code: "mr", label: "Marathi" },
+  { code: "gu", label: "Gujarati" },
+  { code: "zh", label: "Chinese (Simplified)" },
+  { code: "zh-tw", label: "Chinese (Traditional)" },
+  { code: "ja", label: "Japanese" },
+  { code: "ko", label: "Korean" },
+  { code: "th", label: "Thai" },
+  { code: "vi", label: "Vietnamese" },
+  { code: "id", label: "Indonesian" },
+  { code: "ms", label: "Malay" },
+  { code: "tl", label: "Filipino (Tagalog)" },
+  { code: "am", label: "Amharic" },
+  { code: "yo", label: "Yoruba" },
+  { code: "ig", label: "Igbo" },
+  { code: "ha", label: "Hausa" },
+  { code: "zu", label: "Zulu" },
+];
+
+function languageLabelOf(code) {
+  const normalized = String(code || "").trim().toLowerCase();
+  return LANGUAGE_OPTIONS.find((lang) => lang.code === normalized)?.label || "English";
+}
 
 function Section({ title, description, children }) {
   return (
@@ -87,23 +142,75 @@ function Toggle({ checked, onChange, label, sublabel }) {
   );
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to load image"));
+    image.src = source;
+  });
+}
+
+async function normalizeAvatarImage(file) {
+  const rawDataUrl = await readFileAsDataUrl(file);
+  if (!String(file?.type || "").startsWith("image/")) return rawDataUrl;
+
+  try {
+    const image = await loadImage(rawDataUrl);
+    const maxSize = 512;
+    const sourceWidth = Math.max(1, Number(image.width) || 1);
+    const sourceHeight = Math.max(1, Number(image.height) || 1);
+    const scale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
+    const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return rawDataUrl;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, targetWidth, targetHeight);
+    ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+    return canvas.toDataURL("image/jpeg", 0.86);
+  } catch {
+    return rawDataUrl;
+  }
+}
+
 export default function SettingsPage({ user, onBack }) {
+  const uploadInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
   const [form, setForm] = useState(() =>
     getStoredProfile({
       name: user?.name || "Scholar",
       email: user?.email || "scholar@elimulink.demo",
       phone: user?.phone || "+2547xx xxx xxx",
+      avatarUrl: "",
     })
   );
   const [prefs, setPrefs] = useState(() => {
     const stored = getStoredPreferences({
       muteNotifications: false,
       keyboardShortcuts: false,
+      language: "en",
     });
     return { ...stored, theme: getStoredThemeMode() };
   });
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
+  const [avatarError, setAvatarError] = useState("");
 
   const resolvedTheme = useMemo(() => prefs.theme, [prefs.theme]);
 
@@ -118,6 +225,7 @@ export default function SettingsPage({ user, onBack }) {
       saveStoredPreferences({
         muteNotifications: !!prefs.muteNotifications,
         keyboardShortcuts: !!prefs.keyboardShortcuts,
+        language: String(prefs.language || "en"),
       });
       await new Promise((r) => setTimeout(r, 450));
       setSavedAt(new Date());
@@ -126,8 +234,28 @@ export default function SettingsPage({ user, onBack }) {
     }
   }
 
+  async function handleAvatarSelect(event) {
+    const input = event?.target;
+    const file = input?.files?.[0];
+    if (input) input.value = "";
+    if (!file) return;
+
+    setAvatarError("");
+    try {
+      const avatarUrl = await normalizeAvatarImage(file);
+      setForm((prev) => ({ ...prev, avatarUrl }));
+    } catch {
+      setAvatarError("Could not process this image. Try another photo.");
+    }
+  }
+
+  function removeAvatar() {
+    setAvatarError("");
+    setForm((prev) => ({ ...prev, avatarUrl: "" }));
+  }
+
   return (
-    <div className="min-h-full bg-slate-100 dark:bg-slate-950">
+    <div className="min-h-[100dvh] bg-slate-100 dark:bg-slate-950">
       <div className="mx-auto max-w-5xl p-4 md:p-8">
         <div className="mb-6 flex flex-col gap-2">
           <button
@@ -152,6 +280,55 @@ export default function SettingsPage({ user, onBack }) {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Section title="Profile & Account" description="Name, email, phone, password.">
             <div className="space-y-4">
+              <Field label="Profile photo" hint="Upload or camera">
+                <div className="flex items-center gap-4">
+                  <div className="h-16 w-16 overflow-hidden rounded-full border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800">
+                    {form.avatarUrl ? (
+                      <img src={form.avatarUrl} alt="Profile avatar" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center text-lg font-semibold text-slate-600 dark:text-slate-300">
+                        {String(form.name || "U").trim().charAt(0).toUpperCase() || "U"}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="ghost" onClick={() => uploadInputRef.current?.click()}>
+                      Upload
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={() => cameraInputRef.current?.click()}>
+                      Camera
+                    </Button>
+                    {form.avatarUrl ? (
+                      <Button type="button" variant="softDanger" onClick={removeAvatar}>
+                        Remove
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAvatarSelect}
+                />
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="user"
+                  className="hidden"
+                  onChange={handleAvatarSelect}
+                />
+                {avatarError ? (
+                  <div className="mt-2 text-xs text-red-600 dark:text-red-300">{avatarError}</div>
+                ) : (
+                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    Choose a photo, then tap Save changes.
+                  </div>
+                )}
+              </Field>
               <Field label="Full name">
                 <Input
                   value={form.name}
@@ -206,6 +383,29 @@ export default function SettingsPage({ user, onBack }) {
                       </button>
                     );
                   })}
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
+                <div className="text-sm font-medium text-slate-800 dark:text-slate-200">Language</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Current: {languageLabelOf(prefs.language || "en")}
+                </div>
+                <div className="mt-2">
+                  <select
+                    value={prefs.language || "en"}
+                    onChange={(e) => setPrefs((p) => ({ ...p, language: e.target.value }))}
+                    aria-label="Select app language"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-slate-600 dark:focus:border-slate-600"
+                  >
+                    {LANGUAGE_OPTIONS.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  Applies app language preference after Save changes.
                 </div>
               </div>
               <Toggle

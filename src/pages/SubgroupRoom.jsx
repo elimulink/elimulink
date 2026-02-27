@@ -121,7 +121,7 @@ export default function SubgroupRoom({ onBack }) {
   const canAdmin = group.role === "group_admin";
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-[100dvh] bg-slate-100">
       <div className="bg-white border-b border-slate-200">
         <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between gap-4">
           <div className="min-w-0">

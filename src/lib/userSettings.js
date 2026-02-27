@@ -1,5 +1,8 @@
 export const PROFILE_SETTINGS_KEY = "elimulink_profile_settings_v1";
 export const PREFS_SETTINGS_KEY = "elimulink_preferences_v1";
+export const DEFAULT_APP_LANGUAGE = "en";
+
+const RTL_LANGUAGE_BASES = new Set(["ar", "fa", "he", "ur"]);
 
 function readJSON(key, fallback) {
   try {
@@ -35,6 +38,21 @@ export function getStoredPreferences(defaults = {}) {
 }
 
 export function saveStoredPreferences(preferences) {
-  writeJSON(PREFS_SETTINGS_KEY, preferences || {});
+  const next = { ...(preferences || {}) };
+  writeJSON(PREFS_SETTINGS_KEY, next);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("elimulink-preferences-change", { detail: next }));
+  }
 }
 
+export function getStoredLanguage(fallback = DEFAULT_APP_LANGUAGE) {
+  const prefs = getStoredPreferences({ language: fallback });
+  const language = String(prefs?.language || fallback).trim().toLowerCase();
+  return language || fallback;
+}
+
+export function isRtlLanguage(languageCode) {
+  const value = String(languageCode || "").trim().toLowerCase();
+  const base = value.split("-")[0];
+  return RTL_LANGUAGE_BASES.has(base);
+}

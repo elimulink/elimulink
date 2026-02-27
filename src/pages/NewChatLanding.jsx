@@ -171,6 +171,35 @@ function formatChatStamp(timestamp) {
   }
 }
 
+function resolveSpeechLanguage(languageCode) {
+  const code = String(languageCode || "en").trim().toLowerCase();
+  const map = {
+    en: "en-US",
+    sw: "sw-KE",
+    fr: "fr-FR",
+    es: "es-ES",
+    pt: "pt-PT",
+    de: "de-DE",
+    it: "it-IT",
+    nl: "nl-NL",
+    ru: "ru-RU",
+    ar: "ar-SA",
+    hi: "hi-IN",
+    bn: "bn-BD",
+    ta: "ta-IN",
+    te: "te-IN",
+    zh: "zh-CN",
+    "zh-tw": "zh-TW",
+    ja: "ja-JP",
+    ko: "ko-KR",
+    tr: "tr-TR",
+    vi: "vi-VN",
+  };
+  if (map[code]) return map[code];
+  if (code.includes("-")) return code;
+  return "en-US";
+}
+
 function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "") {
   return {
     id: makeChatId(),
@@ -484,6 +513,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
         name: profileName,
         email: firebaseUser?.email || "student@elimulink.co.ke",
         phone: "+2547xx xxx xxx",
+        avatarUrl: "",
       }),
     [active, profileName, firebaseUser]
   );
@@ -492,6 +522,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
       getStoredPreferences({
         muteNotifications: false,
         keyboardShortcuts: false,
+        language: "en",
       }),
     [active]
   );
@@ -501,6 +532,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
       name: settingsProfile?.name || profileName,
       email: settingsProfile?.email || firebaseUser?.email || "student@elimulink.co.ke",
       phone: settingsProfile?.phone || "+2547xx xxx xxx",
+      avatarUrl: settingsProfile?.avatarUrl || "",
       nextClass: "Biology 101 at 10:00 AM",
       balance: "KES 12,000",
       attendance: "85%",
@@ -656,7 +688,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
 
     if (!recognitionRef.current) {
       const recognition = new SpeechRecognition();
-      recognition.lang = "en-US";
+      recognition.lang = resolveSpeechLanguage(settingsPrefs?.language);
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
       recognition.onresult = (event) => {
@@ -677,6 +709,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     }
 
     try {
+      recognitionRef.current.lang = resolveSpeechLanguage(settingsPrefs?.language);
       recognitionRef.current.start();
       setIsListening(true);
     } catch {
@@ -716,6 +749,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
       if (pendingAttachments.length > 0) {
         const formData = new FormData();
         formData.append("message", clean || "Sent attachments");
+        formData.append("preferredLanguage", String(settingsPrefs?.language || "en"));
         pendingAttachments.forEach((a) => {
           if (a?.file instanceof File) formData.append("files", a.file, a.name);
         });
@@ -731,7 +765,10 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ message: clean }),
+          body: JSON.stringify({
+            message: clean,
+            preferredLanguage: String(settingsPrefs?.language || "en"),
+          }),
         });
       }
 
@@ -766,7 +803,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     const utterance = new SpeechSynthesisUtterance(normalized);
     utterance.rate = 1;
     utterance.pitch = 1;
-    utterance.lang = "en-US";
+    utterance.lang = resolveSpeechLanguage(settingsPrefs?.language);
     window.speechSynthesis.speak(utterance);
     lastSpokenRef.current = { text: normalized, at: now };
   }
@@ -863,7 +900,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
   }
 
   return (
-    <div className="min-h-screen md:h-screen bg-slate-100 flex flex-col overflow-x-hidden md:overflow-hidden">
+    <div className="min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-x-hidden md:overflow-hidden">
       <div className="w-full px-3 md:px-4 pt-2 pb-1 shrink-0">
         <div className="h-12 rounded-xl border border-slate-200 bg-white/95 shadow-sm px-2.5 md:px-3 flex items-center gap-2">
           <button
@@ -877,12 +914,11 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
           <div className="hidden md:flex items-center gap-2 shrink-0">
             <button
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-slate-800"
-              title="ElimuLink Home"
+              title="Home"
             >
               <span className="h-6 w-6 rounded-md bg-emerald-500 text-white text-xs font-semibold inline-flex items-center justify-center">
                 E
               </span>
-              <span className="text-sm font-semibold">ElimuLink</span>
               <ChevronDown size={14} className="text-slate-500" />
             </button>
             <button
@@ -1018,10 +1054,12 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
           <div ref={profileMenuRef} className="relative">
             <button
               onClick={toggleProfileMenu}
-              className="h-9 w-9 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center"
+              className="h-9 w-9 rounded-full overflow-hidden bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center"
               title={`${user.name} profile`}
             >
-              {profileInitials ? (
+              {user.avatarUrl ? (
+                <img src={user.avatarUrl} alt="Profile avatar" className="h-full w-full object-cover" />
+              ) : profileInitials ? (
                 <span className="text-xs font-semibold">{profileInitials}</span>
               ) : (
                 <UserCircle2 size={20} />
@@ -1029,41 +1067,111 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
             </button>
 
             {isProfileMenuOpen ? (
-              <div className="absolute right-0 top-12 w-80 rounded-xl border border-slate-200 bg-white p-2 space-y-2 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-                <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 dark:bg-slate-800 dark:border-slate-700">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-semibold">
-                      {profileInitials}
+              <>
+                <div className="fixed inset-0 z-[70] md:hidden">
+                  <button
+                    type="button"
+                    aria-label="Close profile menu"
+                    className="absolute inset-0 bg-black/45"
+                    onClick={() => setIsProfileMenuOpen(false)}
+                  />
+                  <div
+                    className="absolute inset-x-0 bottom-0 rounded-t-3xl border border-slate-200 bg-white p-3 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+                    style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+                  >
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="mx-auto h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
+                      <button
+                        type="button"
+                        onClick={() => setIsProfileMenuOpen(false)}
+                        className="absolute right-3 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Done
+                      </button>
                     </div>
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-900 truncate dark:text-white">{user.name}</div>
-                      <div className="text-xs text-slate-600 truncate dark:text-slate-300">{user.email}</div>
+
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-slate-800">
+                      <div className="flex items-center gap-3">
+                        <div className="h-11 w-11 rounded-full overflow-hidden bg-slate-900 text-white flex items-center justify-center text-xs font-semibold">
+                          {user.avatarUrl ? (
+                            <img src={user.avatarUrl} alt="Profile avatar" className="h-full w-full object-cover" />
+                          ) : (
+                            profileInitials
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-slate-900 truncate dark:text-white">{user.name}</div>
+                          <div className="text-xs text-slate-600 truncate dark:text-slate-300">{user.email}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 space-y-1">
+                      <button
+                        onClick={openSettingsPanel}
+                        className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                      >
+                        <IdCard size={16} />
+                        Profile & Account
+                      </button>
+                      <button
+                        onClick={openSettingsPanel}
+                        className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                      >
+                        <Settings size={16} />
+                        Settings
+                      </button>
+                      <button
+                        onClick={handleLogout}
+                        className="w-full text-left px-3 py-3 rounded-xl text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40 flex items-center gap-2"
+                      >
+                        <LogOut size={16} />
+                        Logout
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                <button
-                  onClick={openSettingsPanel}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
-                >
-                  <IdCard size={15} />
-                  Profile & Account
-                </button>
-                <button
-                  onClick={openSettingsPanel}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
-                >
-                  <Settings size={15} />
-                  Settings
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40 flex items-center gap-2"
-                >
-                  <LogOut size={15} />
-                  Logout
-                </button>
-              </div>
+                <div className="absolute right-0 top-12 hidden w-80 rounded-xl border border-slate-200 bg-white p-2 space-y-2 shadow-xl dark:border-slate-700 dark:bg-slate-900 md:block">
+                  <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 dark:bg-slate-800 dark:border-slate-700">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-full overflow-hidden bg-slate-900 text-white flex items-center justify-center text-xs font-semibold">
+                        {user.avatarUrl ? (
+                          <img src={user.avatarUrl} alt="Profile avatar" className="h-full w-full object-cover" />
+                        ) : (
+                          profileInitials
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-900 truncate dark:text-white">{user.name}</div>
+                        <div className="text-xs text-slate-600 truncate dark:text-slate-300">{user.email}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={openSettingsPanel}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                  >
+                    <IdCard size={15} />
+                    Profile & Account
+                  </button>
+                  <button
+                    onClick={openSettingsPanel}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                  >
+                    <Settings size={15} />
+                    Settings
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40 flex items-center gap-2"
+                  >
+                    <LogOut size={15} />
+                    Logout
+                  </button>
+                </div>
+              </>
             ) : null}
           </div>
         </div>
