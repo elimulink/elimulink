@@ -102,7 +102,7 @@ Console shows `[API] Fetching: ...` followed by error
    - Check Render logs for `[ERROR] Gemini API returned 401`
    - Update `GEMINI_API_KEY` in Render settings
 
-### Issue #2: Console shows "Failed to fetch https://localhost:4000"
+### Issue #2: Console shows "Failed to fetch https://127.0.0.1:8000"
 **Problem:** `VITE_API_BASE` not set, using development default
 
 **Fix:**
@@ -206,3 +206,4 @@ After all fixes, you should see:
 3. **Copy exact error messages** from console/logs and share them
 
 All error messages now have clear context showing exactly where the failure occurred.
+

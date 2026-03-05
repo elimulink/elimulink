@@ -11,7 +11,7 @@ import {
   ClipboardList,
   Copy,
   Ellipsis,
-  FileUp,
+  Paperclip,
   GraduationCap,
   IdCard,
   Image,
@@ -48,6 +48,7 @@ import SubgroupRoom from "./SubgroupRoom";
 import CoursesDashboard from "./CoursesDashboard";
 import AssignmentsPage from "./AssignmentsPage";
 import ResultsPage from "./ResultsPage";
+import AdminAnalyticsLanding from "./AdminAnalyticsLanding";
 
 const MAIN_ITEMS = [
   { key: "newchat", label: "NewChat", icon: LayoutGrid },
@@ -70,10 +71,11 @@ const MORE_ITEMS_BASE = [
   { key: "profile", label: "Profile", icon: IdCard },
 ];
 
-const ADMIN_ROLES = new Set(["institution_admin", "department_head", "super_admin"]);
 const CHAT_HISTORY_KEY = "institution_chat_threads_v1";
 const CHAT_ACTIVE_KEY = "institution_chat_active_v1";
+const ACTIVE_VIEW_KEY = "institution_active_view_v1";
 const UNTITLED_CHAT_BASE = "New Chat";
+const AI_PATH = "/api/ai/chat";
 
 function timeGreeting(date = new Date()) {
   const hour = date.getHours();
@@ -224,14 +226,50 @@ function StatCard({ title, value, subtitle }) {
   );
 }
 
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const delta = Date.now() - date.getTime();
+  if (delta < 60_000) return "Just now";
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
+  return `${Math.floor(delta / 86_400_000)}d ago`;
+}
+
+function PlaceholderPanel({ title, bullets = [] }) {
+  return (
+    <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
+      <div className="text-lg font-semibold text-slate-900">{title}</div>
+      <div className="text-sm text-slate-600 mt-1">Coming next</div>
+      <ul className="mt-3 space-y-1.5 text-sm text-slate-700">
+        {bullets.map((item) => (
+          <li key={item} className="flex items-start gap-2">
+            <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-slate-400" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        disabled
+        className="mt-4 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2 text-sm font-semibold text-slate-500 cursor-not-allowed"
+      >
+        Connect backend
+      </button>
+    </div>
+  );
+}
+
 function isErrorText(text) {
   const value = String(text || "").toLowerCase();
   return value.includes("failed to reach ai service") || value.includes("error (");
 }
 
-function Bubble({ role, text, onAssistantSpeak, onRetry, onLearnMore, onCopy, onEdit, isCopied }) {
+function Bubble({ role, text, onAssistantSpeak, onRetry, onLearnMore, onCopy, onEdit, isCopied, isSpeaking, speakingText }) {
   const isUser = role === "user";
   const isError = !isUser && isErrorText(text);
+  const isActiveSpeak = !isUser && isSpeaking && speakingText === text;
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -253,7 +291,7 @@ function Bubble({ role, text, onAssistantSpeak, onRetry, onLearnMore, onCopy, on
               title="Play audio"
             >
               <Volume2 size={13} />
-              Speak
+              {isActiveSpeak ? "Speaking..." : "Speak"}
             </button>
           </div>
         ) : null}
@@ -327,12 +365,13 @@ function SectionLabel({ collapsed, children }) {
   return <div className="px-3 pt-2 text-[11px] font-semibold tracking-wider text-slate-500">{children}</div>;
 }
 
-export default function NewChatLanding({ onOpenAdmin, userRole }) {
+export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole }) {
   const firebaseUser = auth?.currentUser || null;
   const profileName = resolveProfileName(firebaseUser);
   const welcomeText = buildWelcomeMessage(profileName);
 
   const [active, setActive] = useState("newchat");
+  const [userRole, setUserRole] = useState(initialUserRole || null);
   const [input, setInput] = useState("");
   const [chats, setChats] = useState(() => {
     try {
@@ -358,15 +397,19 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
   const [notifications, setNotifications] = useState(() => [
     {
       id: "n1",
-      title: "New activity",
-      detail: "Your recent chats are now saved in history.",
+      title: "New announcement posted",
+      detail: "Check the latest update from your institution.",
       read: false,
+      createdAt: Date.now() - 2 * 60 * 60 * 1000,
+      type: "info",
     },
     {
       id: "n2",
-      title: "Assignments update",
-      detail: "Assignment tools were updated with AI helper shortcuts.",
+      title: "Assignment due tomorrow",
+      detail: "Reminder: one assignment is due by 5 PM.",
       read: false,
+      createdAt: Date.now() - 30 * 60 * 1000,
+      type: "assignments",
     },
   ]);
 
@@ -381,9 +424,16 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     }
   });
   const [isMorePopupOpen, setIsMorePopupOpen] = useState(false);
-  const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+  const [isAttachOpen, setIsAttachOpen] = useState(false);
+  const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [notifAnchor, setNotifAnchor] = useState(null);
   const [isAiModeOn, setIsAiModeOn] = useState(true);
   const [isListening, setIsListening] = useState(false);
+  const [voices, setVoices] = useState([]);
+  const [kb, setKb] = useState({ offset: 0, height: 0 });
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingText, setSpeakingText] = useState("");
   const [lastPrompt, setLastPrompt] = useState("");
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
   const recognitionRef = useRef(null);
@@ -391,16 +441,31 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
   const newChatMenuRef = useRef(null);
   const profileMenuRef = useRef(null);
   const notificationsMenuRef = useRef(null);
+  const notifBtnRef = useRef(null);
   const globalSearchInputRef = useRef(null);
   const messagesEndRef = useRef(null);
   const promptInputRef = useRef(null);
   const lastSpokenRef = useRef({ text: "", at: 0 });
+  const renderCountRef = useRef(0);
 
   const [attachments, setAttachments] = useState([]);
-  const galleryInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
   const fileInputRef = useRef(null);
-  const scanInputRef = useRef(null);
+  const attachmentSourceRef = useRef("file");
+  const [fileAcceptMode, setFileAcceptMode] = useState("");
+  const [fileCaptureMode, setFileCaptureMode] = useState("");
+
+  function syncActiveView(next, mode = "replace") {
+    if (typeof window !== "undefined") {
+      const currentState = window.history.state || {};
+      const nextState = { ...currentState, [ACTIVE_VIEW_KEY]: next };
+      if (mode === "push") {
+        window.history.pushState(nextState, "", window.location.href);
+      } else {
+        window.history.replaceState(nextState, "", window.location.href);
+      }
+    }
+    setActive(next);
+  }
 
   useEffect(() => {
     try {
@@ -411,16 +476,73 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
   }, [isMoreOpen]);
 
   useEffect(() => {
-    if (!isAttachmentMenuOpen) return;
+    let mounted = true;
+    const resolveRole = async () => {
+      try {
+        const tokenResult = await auth.currentUser?.getIdTokenResult();
+        const roleClaim = tokenResult?.claims?.role || tokenResult?.claims?.userRole;
+        if (mounted && roleClaim) setUserRole(roleClaim);
+      } catch {
+        // no-op
+      }
+      if (import.meta.env.DEV) {
+        const devRole = localStorage.getItem("dev_role");
+        if (mounted && devRole) setUserRole(devRole);
+      }
+    };
+    resolveRole();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    const updateVoices = () => setVoices(synth.getVoices());
+    updateVoices();
+    synth.onvoiceschanged = updateVoices;
+    return () => {
+      if (synth.onvoiceschanged === updateVoices) synth.onvoiceschanged = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const isMobile = window.matchMedia("(max-width: 767px)").matches;
+    const prevOverflow = document.body.style.overflow;
+    if (isMobile) {
+      document.body.style.overflow = "hidden";
+    }
+    const onVV = () => {
+      const layoutH = window.innerHeight;
+      const vvBottom = vv.height + vv.offsetTop;
+      const keyboard = Math.max(0, layoutH - vvBottom);
+      setKb({ height: keyboard, offset: vv.offsetTop });
+    };
+    onVV();
+    vv.addEventListener("resize", onVV);
+    vv.addEventListener("scroll", onVV);
+    return () => {
+      vv.removeEventListener("resize", onVV);
+      vv.removeEventListener("scroll", onVV);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAttachOpen) return;
     const onDocumentMouseDown = (event) => {
       if (!attachmentMenuRef.current) return;
       if (!attachmentMenuRef.current.contains(event.target)) {
-        setIsAttachmentMenuOpen(false);
+        setIsAttachOpen(false);
       }
     };
     document.addEventListener("mousedown", onDocumentMouseDown);
     return () => document.removeEventListener("mousedown", onDocumentMouseDown);
-  }, [isAttachmentMenuOpen]);
+  }, [isAttachOpen]);
 
   useEffect(() => {
     if (!isProfileMenuOpen && !isNotificationsMenuOpen) return;
@@ -451,6 +573,31 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     if (!isNotificationsMenuOpen) return;
     setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
   }, [isNotificationsMenuOpen]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.style.overflow = isProfileSheetOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isProfileSheetOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const currentState = window.history.state || {};
+    const currentView = currentState[ACTIVE_VIEW_KEY];
+    if (!currentView) {
+      window.history.replaceState({ ...currentState, [ACTIVE_VIEW_KEY]: active }, "", window.location.href);
+    } else if (currentView !== active) {
+      setActive(currentView);
+    }
+    const onPopState = () => {
+      const nextView = window.history.state?.[ACTIVE_VIEW_KEY] || "newchat";
+      setActive(nextView);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   useEffect(() => {
     try {
@@ -499,11 +646,26 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     return () => document.removeEventListener("scroll", onScroll, true);
   }, []);
 
-  const normalizedRole = String(userRole || "").toLowerCase();
-  const canShowAdmin = ADMIN_ROLES.has(normalizedRole);
-  const moreItems = MORE_ITEMS_BASE;
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    renderCountRef.current += 1;
+    console.debug("[NewChatLanding] render", {
+      count: renderCountRef.current,
+      active,
+      chats: chats.length,
+      messages: messages.length,
+      attachments: attachments.length,
+    });
+  });
 
-  const moreKeys = moreItems.map((item) => item.key);
+  const isAdminRole = ["admin", "department_head", "institution_admin"].includes(String(userRole || "").toLowerCase());
+  const canShowAdmin = isAdminRole;
+  const moreItems = useMemo(() => {
+    if (!isAdminRole) return MORE_ITEMS_BASE;
+    return [...MORE_ITEMS_BASE, { key: "admin", label: "Admin", icon: Shield }];
+  }, [isAdminRole]);
+
+  const moreKeys = useMemo(() => moreItems.map((item) => item.key), [moreItems]);
 
   const settingsProfile = useMemo(
     () =>
@@ -520,7 +682,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
       getStoredPreferences({
         muteNotifications: false,
         keyboardShortcuts: false,
-        language: "en",
+        language: "en-KE",
       }),
     [active]
   );
@@ -539,19 +701,68 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     [settingsProfile, profileName, firebaseUser]
   );
 
-  const quickPrompts = [
-    { label: "Summarize Biology lecture", icon: "✨" },
-    { label: "Explain Photosynthesis", icon: "🌿" },
-    { label: "Prep for History 202 exam", icon: "📘" },
-    { label: "Write assignment draft", icon: "📝" },
-    { label: "Help me learn", icon: "🎓" },
-  ];
+  const preferredSpeechLanguage = useMemo(
+    () => resolveSpeechLanguage(settingsPrefs?.language || "en-KE"),
+    [settingsPrefs?.language]
+  );
+
+  const placeholderConfig = useMemo(
+    () => ({
+      calendar: {
+        title: "Calendar",
+        bullets: ["Connect schedules", "Sync classes and exams", "Set reminders"],
+      },
+      messaging: {
+        title: "Messaging",
+        bullets: ["Group chats", "Direct messages", "Admin announcements"],
+      },
+      attendance: {
+        title: "Attendance",
+        bullets: ["Track sessions", "Mark participation", "Export reports"],
+      },
+      fees: {
+        title: "Fees Portal",
+        bullets: ["View balances", "Payment history", "Download statements"],
+      },
+      profile: {
+        title: "Profile",
+        bullets: ["Update personal info", "Manage preferences", "View account status"],
+      },
+    }),
+    []
+  );
+
+  const activePlaceholder = placeholderConfig[active];
+
+  const quickPrompts = useMemo(
+    () => [
+      { label: "Summarize Biology lecture", icon: "✨" },
+      { label: "Explain Photosynthesis", icon: "🌿" },
+      { label: "Prep for History 202 exam", icon: "📘" },
+      { label: "Write assignment draft", icon: "📝" },
+      { label: "Help me learn", icon: "🎓" },
+    ],
+    []
+  );
 
   const activeChat = chats.find((chat) => chat.id === activeChatId) || chats[0];
   const messages = activeChat?.messages || [];
   const hasConversation = messages.length > 0;
   const canSend = input.trim().length > 0 || attachments.length > 0;
+  const hasText = input.trim().length > 0;
   const unreadNotifications = notifications.filter((item) => !item.read).length;
+  const normalizedNotifications = useMemo(
+    () =>
+      notifications.map((item) => ({
+        id: item.id,
+        title: item.title,
+        body: item.detail || "",
+        createdAt: item.createdAt || null,
+        type: item.type || "info",
+        read: item.read,
+      })),
+    [notifications]
+  );
   const profileInitials = initialsOf(user.name);
 
   useEffect(() => {
@@ -578,7 +789,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
   function openSettingsPanel() {
     setIsProfileMenuOpen(false);
     setIsNotificationsMenuOpen(false);
-    setActive("settings");
+    syncActiveView("settings", "push");
   }
 
   function openAdminPanel() {
@@ -587,12 +798,32 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     setIsMobileDrawerOpen(false);
     setIsMobileMoreOpen(false);
     setIsMorePopupOpen(false);
-    onOpenAdmin?.();
+    syncActiveView("admin", "push");
   }
 
   function toggleNotificationsMenu() {
     setIsNotificationsMenuOpen((prev) => !prev);
     setIsProfileMenuOpen(false);
+  }
+
+  function openMobileNotifications() {
+    const btn = notifBtnRef.current;
+    if (!btn || typeof window === "undefined") {
+      setIsNotifOpen((prev) => !prev);
+      return;
+    }
+    const rect = btn.getBoundingClientRect();
+    const panelWidth = Math.min(360, window.innerWidth - 24);
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+    const left = clamp(rect.right - panelWidth, 12, window.innerWidth - panelWidth - 12);
+    const top = rect.bottom + 10;
+    setNotifAnchor({ top, left, width: panelWidth });
+    setIsNotifOpen(true);
+    setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+  }
+
+  function markAllNotificationsRead() {
+    setNotifications([]);
   }
 
   function toggleProfileMenu() {
@@ -610,7 +841,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
         .includes(queryLower)
     );
 
-    setActive("newchat");
+    syncActiveView("newchat", "push");
     if (matchingChat?.id) {
       setActiveChatId(matchingChat.id);
       setGlobalSearch("");
@@ -624,10 +855,16 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
 
   async function handleLogout() {
     setIsProfileMenuOpen(false);
+    setIsProfileSheetOpen(false);
     try {
       await signOut(auth);
     } catch {
       // no-op, keep frontend flow
+    }
+    try {
+      localStorage.removeItem("elimulink_admin_token");
+    } catch {
+      // no-op
     }
     window.location.href = "/login?returnTo=%2Finstitution";
   }
@@ -636,7 +873,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     const next = createDefaultChat(nextUntitledChatTitle(chats), "");
     setChats((prev) => [next, ...prev]);
     setActiveChatId(next.id);
-    setActive("newchat");
+    syncActiveView("newchat", "push");
     setIsNewChatMenuOpen(false);
   }
 
@@ -663,7 +900,31 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     });
   }
 
-  function addFiles(fileList) {
+  function formatFileSize(bytes) {
+    if (bytes === null || bytes === undefined) return "";
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    return `${(kb / 1024).toFixed(1)} MB`;
+  }
+
+  function openAttachmentPicker({ accept = "", capture = "", source = "file" } = {}) {
+    setIsAttachOpen(false);
+    setFileAcceptMode(accept);
+    setFileCaptureMode(capture);
+    attachmentSourceRef.current = source;
+    setTimeout(() => {
+      if (!fileInputRef.current) return;
+      fileInputRef.current.accept = accept;
+      if (capture) {
+        fileInputRef.current.setAttribute("capture", capture);
+      } else {
+        fileInputRef.current.removeAttribute("capture");
+      }
+      fileInputRef.current.click();
+    }, 0);
+  }
+
+  function addFiles(fileList, source = "file") {
     if (!fileList || fileList.length === 0) return;
     const next = [];
     for (const f of Array.from(fileList)) {
@@ -671,9 +932,11 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
       next.push({
         id: `${f.name}-${f.size}-${f.lastModified}-${Math.random().toString(16).slice(2)}`,
         name: f.name,
+        size: f.size,
         type: f.type || "application/octet-stream",
         url,
         file: f,
+        source,
       });
     }
     setAttachments((prev) => [...prev, ...next]);
@@ -681,6 +944,12 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
 
   function removeAttachment(id) {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
+
+  function handleFileInputChange(event) {
+    const files = event.target.files;
+    addFiles(files, attachmentSourceRef.current || "file");
+    event.target.value = "";
   }
 
   function toggleMic() {
@@ -695,7 +964,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
 
     if (!recognitionRef.current) {
       const recognition = new SpeechRecognition();
-      recognition.lang = resolveSpeechLanguage(settingsPrefs?.language);
+      recognition.lang = preferredSpeechLanguage;
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
       recognition.onresult = (event) => {
@@ -716,7 +985,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     }
 
     try {
-      recognitionRef.current.lang = resolveSpeechLanguage(settingsPrefs?.language);
+      recognitionRef.current.lang = preferredSpeechLanguage;
       recognitionRef.current.start();
       setIsListening(true);
     } catch {
@@ -752,39 +1021,37 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
         return;
       }
 
-      let response;
-      if (pendingAttachments.length > 0) {
-        const formData = new FormData();
-        formData.append("message", clean || "Sent attachments");
-        formData.append("preferredLanguage", String(settingsPrefs?.language || "en"));
-        pendingAttachments.forEach((a) => {
-          if (a?.file instanceof File) formData.append("files", a.file, a.name);
-        });
-        response = await fetch(apiUrl("/api/chat/upload"), {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-      } else {
-        response = await fetch(apiUrl("/api/chat"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            message: clean,
-            preferredLanguage: String(settingsPrefs?.language || "en"),
-          }),
-        });
+      const payloadMessage = clean || "Sent attachments";
+      const requestUrl = apiUrl(AI_PATH);
+      if (import.meta.env.DEV) {
+        console.debug("[NewChatLanding][AI_REQUEST]", { url: requestUrl, hasText: Boolean(clean), attachments: pendingAttachments.length });
       }
+      const response = await fetch(requestUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          message: `${payloadMessage}${attachSummary}`,
+          preferredLanguage: String(settingsPrefs?.language || "en-KE"),
+        }),
+      });
 
       const result = await response.json().catch(() => ({}));
+      if (import.meta.env.DEV) {
+        console.debug("[NewChatLanding][AI_RESPONSE]", { status: response.status, ok: response.ok });
+      }
       if (!response.ok) {
-        const code = result?.code || result?.error || `HTTP_${response.status}`;
-        const message = result?.message || code;
+        const message = result?.message || result?.error || "AI service unavailable.";
         updateActiveChatMessages(
-          (m) => [...m, { role: "assistant", text: `Error (${response.status}): ${message}` }],
+          (m) => [
+            ...m,
+            {
+              role: "assistant",
+              text: `I couldn't reach the AI service (status ${response.status}). ${message}`,
+            },
+          ],
           clean || "Error"
         );
         return;
@@ -800,19 +1067,70 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     }
   }
 
-  function speakAssistantText(text) {
-    if (!text || !("speechSynthesis" in window)) return;
+  function stripMarkdown(raw) {
+    const value = String(raw || "");
+    return value
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[*_~>#-]{1,3}/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function resolveTtsLang() {
+    const storedPrefs = getStoredPreferences({});
+    const storedLang = localStorage.getItem("elimulink_language");
+    const rawLang =
+      settingsPrefs?.language ||
+      storedPrefs?.language ||
+      storedLang ||
+      "en-US";
+    return resolveSpeechLanguage(rawLang);
+  }
+
+  function pickVoice(allVoices, lang) {
+    if (!Array.isArray(allVoices) || allVoices.length === 0) return null;
+    const normalized = String(lang || "").toLowerCase();
+    const base = normalized.split("-")[0];
+    const byLang = allVoices.filter((v) => String(v.lang || "").toLowerCase().startsWith(normalized));
+    const byBase = allVoices.filter((v) => String(v.lang || "").toLowerCase().startsWith(base));
+    const byEn = allVoices.filter((v) => String(v.lang || "").toLowerCase().startsWith("en"));
+    const preferGoogle = (list) => list.find((v) => String(v.name || "").toLowerCase().includes("google")) || list[0];
+    return preferGoogle(byLang) || preferGoogle(byBase) || preferGoogle(byEn) || null;
+  }
+
+  function speakText(rawText) {
+    if (!rawText || !("speechSynthesis" in window)) return;
+    const cleaned = stripMarkdown(rawText);
+    if (!cleaned) return;
+    const clipped = cleaned.length > 1800 ? `${cleaned.slice(0, 1800)}…` : cleaned;
     const now = Date.now();
-    const normalized = String(text).trim();
-    if (!normalized) return;
-    if (lastSpokenRef.current.text === normalized && now - lastSpokenRef.current.at < 2500) return;
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(normalized);
+    setIsSpeaking(true);
+    setSpeakingText(rawText);
+    const utterance = new SpeechSynthesisUtterance(clipped);
+    const resolvedLang = resolveTtsLang() || "en-US";
+    const chosenVoice = pickVoice(voices, resolvedLang);
+    utterance.lang = resolvedLang;
+    if (chosenVoice) utterance.voice = chosenVoice;
     utterance.rate = 1;
     utterance.pitch = 1;
-    utterance.lang = resolveSpeechLanguage(settingsPrefs?.language);
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setSpeakingText("");
+    };
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setSpeakingText("");
+    };
     window.speechSynthesis.speak(utterance);
-    lastSpokenRef.current = { text: normalized, at: now };
+    lastSpokenRef.current = { text: clipped, at: now };
+  }
+
+  function speakAssistantText(text) {
+    speakText(text);
   }
 
   async function copyPromptText(index, text) {
@@ -847,12 +1165,15 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     setIsNewChatMenuOpen(false);
     setIsProfileMenuOpen(false);
     setIsNotificationsMenuOpen(false);
+    setIsMobileDrawerOpen(false);
+    setIsAttachOpen(false);
 
     if (itemKey === "admin") {
-      onOpenAdmin?.();
+      if (!isAdminRole) return;
+      syncActiveView("admin", "push");
       return;
     }
-    setActive(itemKey);
+    syncActiveView(itemKey, "push");
   }
 
   useEffect(() => {
@@ -884,7 +1205,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
 
   useEffect(() => {
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
-    if (!isMobile) return;
+    if (isMobile) return;
     if (active !== "newchat") {
       document.documentElement.style.overflow = "";
       document.body.style.overflow = "";
@@ -904,23 +1225,40 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     return (
       <SettingsPage
         user={user}
-        onBack={() => setActive("newchat")}
-        canShowAdmin={canShowAdmin}
+        onBack={() => syncActiveView("newchat", "push")}
+        canShowAdmin={isAdminRole}
         onOpenAdmin={openAdminPanel}
       />
     );
   }
 
+  if (active === "profile") {
+    return (
+      <div className="min-h-[100dvh] bg-slate-50 text-slate-900 flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-lg font-semibold text-slate-900">Profile</div>
+          <div className="text-sm text-slate-600 mt-1">Profile details will appear here.</div>
+          <button
+            onClick={() => syncActiveView("newchat", "push")}
+            className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Back to chat
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (active === "notebook") {
-    return <NotebookPage onBack={() => setActive("newchat")} />;
+    return <NotebookPage onBack={() => syncActiveView("newchat", "push")} />;
   }
 
   if (active === "subgroups") {
-    return <SubgroupRoom onBack={() => setActive("newchat")} />;
+    return <SubgroupRoom onBack={() => syncActiveView("newchat", "push")} />;
   }
 
   if (active === "courses") {
-    return <CoursesDashboard onBack={() => setActive("newchat")} />;
+    return <CoursesDashboard onBack={() => syncActiveView("newchat", "push")} />;
   }
 
   if (active === "assignments") {
@@ -931,9 +1269,214 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     return <ResultsPage />;
   }
 
+  if (active === "admin") {
+    return <AdminAnalyticsLanding userRole={userRole} />;
+  }
+
   return (
-    <div className="min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-hidden">
-      <div className="w-full px-3 md:px-4 pt-2 pb-1 shrink-0">
+    <div className="min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-hidden md:h-auto md:overflow-visible">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-50 pointer-events-none">
+        <div className="bg-gradient-to-b from-white/80 via-white/40 to-transparent px-3 py-3 flex items-center justify-between pointer-events-auto">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm grid place-items-center text-slate-700"
+              onClick={() => setIsMobileDrawerOpen(true)}
+              title="Menu"
+            >
+              <Menu size={16} />
+            </button>
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="px-3 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm text-sm font-semibold text-slate-900">
+                ElimuLink
+              </span>
+              <span className="px-3 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm text-sm font-semibold text-slate-900">
+                University
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                ref={notifBtnRef}
+                onClick={openMobileNotifications}
+                className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm grid place-items-center text-slate-700 relative"
+                title="Notifications"
+              >
+                <Bell size={18} />
+                {unreadNotifications > 0 ? (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-sky-500 text-white text-[10px] font-semibold leading-[18px] px-1">
+                    {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                  </span>
+                ) : null}
+              </button>
+            </div>
+
+            <div ref={profileMenuRef} className="relative">
+              <button
+                onClick={() => setIsProfileSheetOpen(true)}
+                className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm overflow-hidden grid place-items-center text-slate-700"
+                title="Profile"
+              >
+                {user.avatarUrl ? (
+                  <img src={user.avatarUrl} alt={user.name} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-xs font-semibold">{profileInitials}</span>
+                )}
+              </button>
+
+            </div>
+          </div>
+        </div>
+        {import.meta.env.DEV ? (
+          <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 md:hidden px-3">
+            <span className="rounded-full border border-slate-200 bg-white/80 px-2 py-0.5">role: {String(userRole || "unknown")}</span>
+            <span className="rounded-full border border-slate-200 bg-white/80 px-2 py-0.5">view: {String(active || "unknown")}</span>
+          </div>
+        ) : null}
+      </div>
+
+      {isNotifOpen && notifAnchor ? (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-40 bg-transparent md:hidden"
+            aria-label="Close notifications"
+            onClick={() => setIsNotifOpen(false)}
+          />
+          <div
+            className="fixed z-50 rounded-2xl bg-white shadow-xl border border-slate-200 p-2 space-y-2 md:hidden"
+            style={{ top: notifAnchor.top, left: notifAnchor.left, width: notifAnchor.width }}
+          >
+            <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-semibold tracking-wider text-slate-500">NOTIFICATIONS</div>
+                <div className="text-xs text-slate-600">
+                  {settingsPrefs.muteNotifications ? "Muted from Settings" : "Recent updates"}
+                </div>
+              </div>
+              {!settingsPrefs.muteNotifications ? (
+                <button
+                  onClick={markAllNotificationsRead}
+                  className="text-xs font-semibold text-slate-700 hover:text-slate-900"
+                >
+                  Mark all read
+                </button>
+              ) : null}
+            </div>
+
+            <div className="max-h-64 overflow-auto smart-scrollbar space-y-2">
+              {settingsPrefs.muteNotifications ? (
+                <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                  Notifications are muted.
+                  <button onClick={openSettingsPanel} className="ml-2 text-slate-900 font-semibold underline">
+                    Open Settings
+                  </button>
+                </div>
+              ) : (
+                normalizedNotifications.map((item) => (
+                  <div key={item.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <div className="text-sm font-semibold text-slate-900">{item.title}</div>
+                    <div className="text-xs text-slate-600 mt-1">{item.body}</div>
+                    {item.createdAt ? (
+                      <div className="text-[11px] text-slate-400 mt-1">{formatTimeAgo(item.createdAt)}</div>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {isProfileSheetOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close profile sheet"
+            className="fixed inset-0 z-[60] bg-black/30 md:hidden"
+            onClick={() => setIsProfileSheetOpen(false)}
+          />
+          <div
+            className="fixed bottom-0 left-0 right-0 z-[70] rounded-t-3xl bg-white shadow-2xl md:hidden"
+            style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+          >
+            <div className="p-3">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="mx-auto h-1.5 w-12 rounded-full bg-slate-300" />
+                <button
+                  type="button"
+                  onClick={() => setIsProfileSheetOpen(false)}
+                  className="absolute right-3 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Done
+                </button>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-11 w-11 rounded-full overflow-hidden bg-slate-900 text-white flex items-center justify-center text-xs font-semibold">
+                    {auth.currentUser?.photoURL ? (
+                      <img src={auth.currentUser.photoURL} alt="Profile avatar" className="h-full w-full object-cover" />
+                    ) : (
+                      profileInitials || "S"
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900 truncate">
+                      {auth.currentUser?.displayName || "Student"}
+                    </div>
+                    <div className="text-xs text-slate-600 truncate">{auth.currentUser?.email || ""}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 space-y-1">
+                <button
+                  onClick={() => {
+                    setIsProfileSheetOpen(false);
+                    syncActiveView("profile", "push");
+                  }}
+                  className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                >
+                  <IdCard size={16} />
+                  Profile & Account
+                </button>
+                <button
+                  onClick={() => {
+                    setIsProfileSheetOpen(false);
+                    syncActiveView("settings", "push");
+                  }}
+                  className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                >
+                  <Settings size={16} />
+                  Settings
+                </button>
+                {canShowAdmin ? (
+                  <button
+                    onClick={() => {
+                      setIsProfileSheetOpen(false);
+                      openAdminPanel();
+                    }}
+                    className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                  >
+                    <Shield size={16} />
+                    Admin
+                  </button>
+                ) : null}
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left px-3 py-3 rounded-xl text-sm text-red-700 hover:bg-red-50 flex items-center gap-2"
+                >
+                  <LogOut size={16} />
+                  Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      <div className="hidden md:block w-full px-3 md:px-4 pt-2 pb-1 shrink-0">
         <div className="h-12 rounded-xl border border-slate-200 bg-white/95 shadow-sm px-2.5 md:px-3 flex items-center gap-2">
           <button
             className="md:hidden h-9 w-9 rounded-lg bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
@@ -962,7 +1505,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
             </button>
           </div>
 
-          <div className="flex-1 min-w-0 flex items-center justify-center">
+          <div className="hidden md:flex flex-1 min-w-0 items-center justify-center">
             <div className="relative">
               <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -1286,7 +1829,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
                           >
                             <button
                               onClick={() => {
-                                setActive("newchat");
+                                syncActiveView("newchat", "push");
                                 setActiveChatId(chat.id);
                                 setIsMobileDrawerOpen(false);
                                 setIsNewChatMenuOpen(false);
@@ -1399,6 +1942,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
                   <span className="flex-1">More</span>
                   {isMobileMoreOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </button>
+                <div className="px-3 -mt-1 text-xs text-slate-400">Role: {String(userRole || "unknown")}</div>
 
                 {isMobileMoreOpen ? (
                   <div className="pl-2 space-y-1">
@@ -1504,7 +2048,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
                           >
                             <button
                               onClick={() => {
-                                setActive("newchat");
+                                syncActiveView("newchat", "push");
                                 setActiveChatId(chat.id);
                                 setIsNewChatMenuOpen(false);
                               }}
@@ -1666,7 +2210,194 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
             isSidebarOpen ? "md:col-span-9 lg:col-span-9" : "md:col-span-11 lg:col-span-11",
           ].join(" ")}
         >
-          <div className="rounded-xl bg-slate-50 border border-slate-200 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            multiple
+            accept={fileAcceptMode || undefined}
+            capture={fileCaptureMode || undefined}
+            onChange={handleFileInputChange}
+          />
+
+          {active === "newchat" ? (
+            <div className="md:hidden relative h-[100dvh] overflow-hidden bg-slate-50 flex flex-col">
+              <div
+                className="flex-1 overflow-y-auto overscroll-none touch-pan-y px-4 pt-20 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-3"
+                style={
+                  window.matchMedia("(max-width: 767px)").matches
+                    ? { paddingBottom: `calc(96px + env(safe-area-inset-bottom) + ${kb.height}px)` }
+                    : undefined
+                }
+              >
+                {messages.length === 0 ? (
+                  <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
+                    <div className="text-sm text-slate-500">{timeGreeting()}</div>
+                    <div className="text-2xl font-semibold text-slate-900 mt-1">
+                      Hi {firstNameOf(user.name)}, where should we start?
+                    </div>
+                    <div className="text-sm text-slate-600 mt-1">
+                      Ask anything about coursework, assignments, revision, or research.
+                    </div>
+                  </div>
+                ) : null}
+
+                {messages.map((m, idx) => (
+                  <Bubble
+                    key={idx}
+                    role={m.role}
+                    text={m.text}
+                    onAssistantSpeak={speakAssistantText}
+                    isSpeaking={isSpeaking}
+                    speakingText={speakingText}
+                    onRetry={() => {
+                      if (lastPrompt) sendMessage(lastPrompt);
+                    }}
+                    onLearnMore={() => sendMessage("Learn more about the error and how I can fix it.")}
+                    onCopy={() => copyPromptText(idx, m.text)}
+                    onEdit={m.role === "user" ? () => editPromptText(m.text) : undefined}
+                    isCopied={copiedMessageIndex === idx}
+                  />
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+
+              <div
+                className="fixed left-0 right-0 bottom-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] transition-transform duration-75 md:static md:z-auto"
+                style={
+                  window.matchMedia("(max-width: 767px)").matches
+                    ? { transform: `translateY(-${kb.height}px)` }
+                    : undefined
+                }
+              >
+                <div className="max-w-xl mx-auto space-y-2">
+                  {attachments.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {attachments.map((a) => (
+                        <div
+                          key={a.id}
+                          className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm"
+                        >
+                          <span className="text-xs font-medium text-slate-700 truncate max-w-[140px]">{a.name}</span>
+                          <span className="text-[11px] text-slate-500">{formatFileSize(a.size)}</span>
+                          <button
+                            className="text-slate-400 hover:text-slate-700"
+                            onClick={() => removeAttachment(a.id)}
+                            title="Remove"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <div className="flex items-end gap-2">
+                    <div ref={attachmentMenuRef} className="relative">
+                      <button
+                        onClick={() => setIsAttachOpen((v) => !v)}
+                        className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-700 grid place-items-center shadow-sm transition hover:bg-slate-50 active:scale-[0.98]"
+                        title="Add attachment"
+                      >
+                        <Plus size={18} />
+                      </button>
+
+                      {isAttachOpen ? (
+                        <div className="fixed inset-x-0 bottom-0 z-30 rounded-t-2xl bg-white shadow-xl ring-1 ring-black/5 p-2 divide-y divide-slate-100">
+                          <button
+                            onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
+                            className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
+                          >
+                            <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
+                              <Image size={18} />
+                            </span>
+                            <span>Photo</span>
+                          </button>
+                          <button
+                            onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "camera" })}
+                            className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
+                          >
+                            <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
+                              <Camera size={18} />
+                            </span>
+                            <span>Camera</span>
+                          </button>
+                          <button
+                            onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "scan" })}
+                            className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
+                          >
+                            <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
+                              <ScanLine size={18} />
+                            </span>
+                            <span>Scan</span>
+                          </button>
+                          <button
+                            onClick={() => openAttachmentPicker({ source: "file" })}
+                            className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
+                          >
+                            <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
+                              <Paperclip size={18} />
+                            </span>
+                            <span>File</span>
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="flex-1 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                      <textarea
+                        ref={promptInputRef}
+                        rows={1}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            sendMessage(input);
+                          }
+                        }}
+                        className="w-full resize-none outline-none text-sm text-slate-800 placeholder:text-slate-400"
+                        placeholder="Type your message..."
+                      />
+                    </div>
+
+                    <button
+                      onClick={() => (hasText ? sendMessage(input) : toggleMic())}
+                      className={[
+                        "relative h-11 w-11 rounded-xl transition grid place-items-center overflow-hidden",
+                        hasText
+                          ? "bg-sky-500 text-white shadow-sm hover:bg-sky-600 active:scale-[0.98]"
+                          : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                      ].join(" ")}
+                      title={hasText ? "Send" : "Live AI ready"}
+                    >
+                      {!hasText ? (
+                        <>
+                          <span className="absolute inset-0 rounded-xl border-2 border-sky-300/60 animate-ping" />
+                          <span className="absolute inset-0 rounded-xl border border-sky-400/40" />
+                          <Mic size={16} className="relative z-10" />
+                        </>
+                      ) : (
+                        <Send size={16} className="transition-transform duration-200" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {active !== "newchat" ? (
+            <div className="md:hidden flex-1 overflow-y-auto px-4 pt-20 pb-24 bg-slate-50">
+              <PlaceholderPanel
+                title={activePlaceholder?.title || "Coming soon"}
+                bullets={activePlaceholder?.bullets || ["Feature wiring", "Permissions setup", "Backend connection"]}
+              />
+            </div>
+          ) : null}
+
+          {active === "newchat" ? (
+            <div className="hidden md:flex rounded-xl bg-slate-50 border border-slate-200 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
             <div className="px-5 py-3 border-b border-slate-200 bg-white/80 shrink-0">
               <div className="text-sm font-semibold text-slate-800">{activeChat?.title || UNTITLED_CHAT_BASE}</div>
               <div className="text-xs text-slate-500">
@@ -1703,6 +2434,8 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
                     role={m.role}
                     text={m.text}
                     onAssistantSpeak={speakAssistantText}
+                    isSpeaking={isSpeaking}
+                    speakingText={speakingText}
                     onRetry={() => {
                       if (lastPrompt) sendMessage(lastPrompt);
                     }}
@@ -1731,110 +2464,72 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
               ) : null}
 
               {attachments.length > 0 ? (
-                <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 shrink-0">
-                  <div className="text-xs font-semibold text-slate-500">Attachments</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {attachments.map((a) => (
-                      <div
-                        key={a.id}
-                        className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                <div className="mt-3 flex flex-wrap gap-2 shrink-0">
+                  {attachments.map((a) => (
+                    <div
+                      key={a.id}
+                      className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm"
+                    >
+                      <span className="text-xs font-medium text-slate-700 truncate max-w-[180px]">{a.name}</span>
+                      <span className="text-[11px] text-slate-500">{formatFileSize(a.size)}</span>
+                      <button
+                        className="text-slate-400 hover:text-slate-700"
+                        onClick={() => removeAttachment(a.id)}
+                        title="Remove"
                       >
-                        <span className="text-xs text-slate-700">{a.name}</span>
-                        <button
-                          className="text-xs text-slate-500 hover:text-slate-900"
-                          onClick={() => removeAttachment(a.id)}
-                          title="Remove"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               ) : null}
 
               <div ref={attachmentMenuRef} className="mt-3 flex items-end gap-2 shrink-0 relative">
-                <input
-                  ref={galleryInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => addFiles(e.target.files)}
-                />
-                <input
-                  ref={cameraInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => addFiles(e.target.files)}
-                />
-                <input
-                  ref={scanInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => addFiles(e.target.files)}
-                />
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => addFiles(e.target.files)}
-                />
-
                 <button
-                  onClick={() => setIsAttachmentMenuOpen((v) => !v)}
-                  className="h-11 w-11 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center shadow-sm transition"
+                  onClick={() => setIsAttachOpen((v) => !v)}
+                  className="h-11 w-11 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center shadow-sm transition active:scale-[0.98]"
                   title="Add attachment"
                 >
                   <Plus size={17} />
                 </button>
 
-                {isAttachmentMenuOpen ? (
-                  <div className="absolute left-0 bottom-12 z-20 rounded-xl border border-slate-200 bg-white shadow-lg p-2 w-44">
+                {isAttachOpen ? (
+                  <div className="absolute left-0 bottom-12 z-20 rounded-xl bg-white shadow-xl ring-1 ring-black/5 p-2 w-56 divide-y divide-slate-100">
                     <button
-                      onClick={() => {
-                        setIsAttachmentMenuOpen(false);
-                        galleryInputRef.current?.click();
-                      }}
-                      className="group w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between"
+                      onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
+                      className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
                     >
+                      <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
+                        <Image size={18} />
+                      </span>
                       <span>Photo</span>
-                      <Image size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />
                     </button>
                     <button
-                      onClick={() => {
-                        setIsAttachmentMenuOpen(false);
-                        cameraInputRef.current?.click();
-                      }}
-                      className="group w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between"
+                      onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "camera" })}
+                      className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
                     >
+                      <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
+                        <Camera size={18} />
+                      </span>
                       <span>Camera</span>
-                      <Camera size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />
                     </button>
                     <button
-                      onClick={() => {
-                        setIsAttachmentMenuOpen(false);
-                        scanInputRef.current?.click();
-                      }}
-                      className="group w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between"
+                      onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "scan" })}
+                      className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
                     >
+                      <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
+                        <ScanLine size={18} />
+                      </span>
                       <span>Scan</span>
-                      <ScanLine size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />
                     </button>
                     <button
-                      onClick={() => {
-                        setIsAttachmentMenuOpen(false);
-                        fileInputRef.current?.click();
-                      }}
-                      className="group w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between"
+                      onClick={() => openAttachmentPicker({ source: "file" })}
+                      className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
                     >
+                      <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
+                        <Paperclip size={18} />
+                      </span>
                       <span>File</span>
-                      <FileUp size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />
                     </button>
                   </div>
                 ) : null}
@@ -1886,16 +2581,28 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
                     ].join(" ")}
                     title="Send"
                   >
-                  <Send size={16} className="mx-auto" />
+                    <Send size={16} className="mx-auto" />
                   </button>
                 </div>
               </div>
+            </div>
 
-              <div className="mt-3 text-xs text-slate-500">
-                Backend will be Python. Later we will send messages and attachments to your API (for example /api/chat).
+            <div className="mt-3 text-xs text-slate-500">
+              Backend will be Python. Later we will send messages and attachments to your API (for example /api/chat).
+            </div>
+            </div>
+          ) : null}
+
+          {active !== "newchat" ? (
+            <div className="hidden md:flex flex-1 min-h-0 rounded-xl bg-slate-50 border border-slate-200 shadow-sm p-6">
+              <div className="w-full max-w-2xl">
+                <PlaceholderPanel
+                  title={activePlaceholder?.title || "Coming soon"}
+                  bullets={activePlaceholder?.bullets || ["Feature wiring", "Permissions setup", "Backend connection"]}
+                />
               </div>
             </div>
-          </div>
+          ) : null}
         </main>
       </div>
     </div>

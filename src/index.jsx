@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import HostRouter from './routing/HostRouter.jsx';
+import PhoneFrame from "./components/PhoneFrame.jsx";
 import './lib/apiUrl';
 import './index.css';
 import { applyThemeMode, getStoredThemeMode } from './lib/theme';
@@ -43,7 +44,16 @@ function ThemeBootstrap() {
     };
   }, []);
 
-  return <HostRouter />;
+  const appContent = <HostRouter />;
+  const showDevPhoneFrame =
+    import.meta.env.DEV &&
+    String(import.meta.env.VITE_DEV_PHONE_FRAME || "").trim() === "1";
+
+  if (showDevPhoneFrame) {
+    return <PhoneFrame>{appContent}</PhoneFrame>;
+  }
+
+  return appContent;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

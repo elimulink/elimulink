@@ -13,5 +13,5 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npm run build
+      - run: npx vite build --mode institution
       - run: npx firebase deploy --only hosting:elimulink-institution --token "${{ secrets.FIREBASE_TOKEN }}"

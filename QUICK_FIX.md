@@ -10,7 +10,7 @@
 
 Frontend can't find your backend. Two possibilities:
 
-1. **`VITE_API_BASE` not set on Vercel** → Falls back to `http://localhost:4000` which doesn't exist
+1. **`VITE_API_BASE` not set on Vercel** → Falls back to `http://127.0.0.1:8000` which doesn't exist
 2. **Render backend is sleeping** → Free tier shuts down after 15 min inactivity
 
 ---
@@ -166,3 +166,4 @@ Done! 🎉
 [API] /api/ai/student - User: uid123, Region: Uganda
 [API] Gemini responded successfully (245 chars)
 ```
+

@@ -79,7 +79,7 @@ VITE_API_BASE
 - **Value example:** `https://elimulink-api.onrender.com`
 - **Purpose:** Base URL for backend API calls
 - **Default:** Falls back to direct Firestore access if not set (recommended for MVP)
-- **Important:** This MUST NOT default to `http://localhost:4000` in production (already prevented in code)
+- **Important:** This MUST NOT default to `http://127.0.0.1:8000` in production (already prevented in code)
 
 ### AI/Gemini Configuration (Optional)
 
@@ -219,4 +219,5 @@ If you're still seeing issues:
 3. Verify values match Firebase project (copy directly from Firebase Console)
 4. Wait 1-2 minutes after adding vars and redeploy
 5. Clear browser cache if needed (Ctrl+Shift+Delete, empty cache)
+
 

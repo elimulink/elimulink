@@ -23,7 +23,7 @@
 1. Line 532 & 597 & 621: `fetch(apiUrl('/api/ai/student'), ...)` — All correct
 2. Lines 401, 411, 419: Admin endpoints (`/api/admin/auth`, `/api/libraries/sync`, `/api/image`) — All use `apiUrl()`
 
-**Conclusion:** Frontend already uses correct pattern. The issue is **missing `VITE_API_BASE` env var** causing fallback to `localhost:4000` (which doesn't exist in production).
+**Conclusion:** Frontend already uses correct pattern. The issue is **missing `VITE_API_BASE` env var** causing fallback to `127.0.0.1:8000` (which doesn't exist in production).
 
 ---
 
@@ -209,7 +209,7 @@ app.use(cors({
 
 ### Why "Error: Failed to fetch" Happens
 1. **Missing `VITE_API_BASE` environment variable**
-   - Frontend defaults to `http://localhost:4000`
+   - Frontend defaults to `http://127.0.0.1:8000`
    - Vercel can't reach localhost (it's in the cloud)
    - Fetch fails silently with generic "Error: Failed to fetch"
 
@@ -363,3 +363,4 @@ All changes are backward compatible. No UI changes. No refactoring. Just better 
 **Latest Commit:** `0822ad39` — Diagnostic checklist added  
 **Build Status:** ✅ Succeeds  
 **All Changes:** Committed and ready to deploy
+

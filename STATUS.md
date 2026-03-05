@@ -23,7 +23,7 @@
    - Located: `src/App.jsx` lines 664-685
 
 3. **Production-Safe API Base**
-   - Only defaults to `localhost:4000` in development
+   - Only defaults to `127.0.0.1:8000` in development
    - Empty string in production (Vercel)
    - Prevents accidental localhost leakage
    - Located: `src/App.jsx` lines 47-50
@@ -208,3 +208,4 @@ The app is **ready to deploy to Vercel**. All code changes are committed, docume
 **Last Commit:** `0132b07f` — Deployment readiness checklist added  
 **Build Status:** ✅ Production build succeeds  
 **Preview Status:** ✅ Runs on localhost:4173 without errors
+

@@ -1,220 +1,211 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ---------------------------
+    // Claims-based auth helpers
+    // ---------------------------
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function hasProfile() {
-      return isAuthenticated()
-        && exists(/databases/$(database)/documents/artifacts/elimulink-pro-v2/users/$(request.auth.uid));
+    function claimRole() {
+      return isAuthenticated() ? request.auth.token.role : null;
     }
 
-    function appUser() {
-      return hasProfile()
-        ? get(/databases/$(database)/documents/artifacts/elimulink-pro-v2/users/$(request.auth.uid)).data
-        : null;
+    function claimInstitutionId() {
+      return isAuthenticated() ? request.auth.token.institutionId : null;
     }
 
-    function profileRole() {
-      return hasProfile() ? appUser().role : null;
+    function claimDepartmentId() {
+      return isAuthenticated() ? request.auth.token.departmentId : null;
     }
 
-    function profileInstitutionId() {
-      return hasProfile() ? appUser().institutionId : null;
-    }
-
-    function profileDepartmentId() {
-      return hasProfile() ? appUser().departmentId : null;
+    function canonicalRole() {
+      let role = claimRole();
+      role = role == null ? 'public' : role;
+      return role == 'superAdmin' ? 'super_admin'
+        : role == 'institutionAdmin' ? 'institution_admin'
+        : role == 'departmentAdmin' ? 'department_head'
+        : role == 'staff' ? 'lecturer'
+        : role == 'institution_student' ? 'student'
+        : role == 'student_general' ? 'student'
+        : role;
     }
 
     function isSuperAdmin() {
-      return isAuthenticated() && request.auth.token.role == "super_admin";
+      return canonicalRole() == 'super_admin';
     }
 
-    function isInstitutionAdmin(institutionId) {
-      return isAuthenticated()
-        && request.auth.token.role == "institution_admin"
-        && request.auth.token.institutionId == institutionId
-        && request.auth.token.subscriptionActive == true;
+    function isInstitutionAdmin() {
+      return canonicalRole() == 'institution_admin';
     }
 
-    function isDepartmentAdmin(institutionId) {
-      return hasProfile()
-        && (profileRole() == "departmentAdmin" || profileRole() == "staff")
-        && profileInstitutionId() == institutionId
-        && profileDepartmentId() is string
-        && profileDepartmentId().size() > 0;
+    function isDepartmentHead() {
+      return canonicalRole() == 'department_head';
     }
 
-    function isStudentInInstitution(institutionId) {
-      return hasProfile()
-        && profileInstitutionId() == institutionId
-        && request.auth.uid is string
-        && request.auth.uid.size() > 0;
+    function isLecturer() {
+      return canonicalRole() == 'lecturer';
     }
 
-    function canAccessDepartment(institutionId, departmentId) {
-      let institutionMatch = request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId;
-      return institutionMatch && (
-        isInstitutionAdmin(institutionId) ||
-        (isDepartmentAdmin(institutionId) && (departmentId == profileDepartmentId() || departmentId == "general")) ||
-        (isStudentInInstitution(institutionId) && (departmentId == profileDepartmentId() || departmentId == "general"))
-      );
+    function isStaff() {
+      return isDepartmentHead() || isLecturer();
     }
 
-    function caseIdMatches(data, caseId) {
-      return caseId == (data.studentId + "_" + data.departmentId);
+    function isStudentRole() {
+      return canonicalRole() == 'student';
     }
 
-    function validCaseData(data, institutionId, caseId) {
-      return data.institutionId == institutionId
-        && data.departmentId is string
-        && data.departmentId.size() > 0
-        && data.studentId is string
-        && data.studentId.size() > 0
-        && data.status is string
-        && caseIdMatches(data, caseId);
+    function institutionMatch(institutionId) {
+      return isSuperAdmin() || claimInstitutionId() == institutionId;
     }
 
-    function validMessageData(data, parent) {
-      return data.from in ["student", "ai", "admin"]
-        && data.text is string
-        && data.text.size() > 0
-        && data.departmentId == parent.departmentId
-        && data.visibility in ["student", "internal"];
+    function departmentMatch(departmentId) {
+      return isSuperAdmin()
+        || isInstitutionAdmin()
+        || claimDepartmentId() == departmentId;
     }
 
+    function departmentOrGeneralMatch(departmentId) {
+      return departmentId == 'general' || departmentMatch(departmentId);
+    }
+
+    // Lock privileged identity/tenant fields from client profile writes.
+    function isSafeProfileCreate() {
+      return !request.resource.data.keys().hasAny([
+        'role', 'institutionId', 'departmentId', 'subscriptionActive',
+        'staffCodeVerified', 'claims', 'customClaims', 'isAdmin'
+      ]);
+    }
+
+    function isSafeProfileUpdate() {
+      return !request.resource.data.diff(resource.data).changedKeys().hasAny([
+        'role', 'institutionId', 'departmentId', 'subscriptionActive',
+        'staffCodeVerified', 'claims', 'customClaims', 'isAdmin'
+      ]);
+    }
+
+    function canReadInstitutionDepartment(institutionId, departmentId) {
+      return isAuthenticated() && institutionMatch(institutionId) && departmentOrGeneralMatch(departmentId);
+    }
+
+    // ---------------------------
+    // User profile + personal data
+    // ---------------------------
     match /users/{uid} {
+      allow read: if isAuthenticated() && request.auth.uid == uid;
+      allow create: if isAuthenticated() && request.auth.uid == uid && isSafeProfileCreate();
+      allow update: if isAuthenticated() && request.auth.uid == uid && isSafeProfileUpdate();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /users/{uid}/{document=**} {
       allow read, write: if isAuthenticated() && request.auth.uid == uid;
     }
 
+    // App-scoped profile path used by current frontend/backend.
     match /artifacts/{appId}/users/{uid} {
+      allow read: if isAuthenticated() && request.auth.uid == uid;
+      allow create: if isAuthenticated() && request.auth.uid == uid && isSafeProfileCreate();
+      allow update: if isAuthenticated() && request.auth.uid == uid && isSafeProfileUpdate();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /artifacts/{appId}/users/{uid}/{document=**} {
       allow read, write: if isAuthenticated() && request.auth.uid == uid;
     }
 
+    // ---------------------------
+    // Institution root + datasets
+    // ---------------------------
     match /institutions/{institutionId} {
-      allow read: if isInstitutionAdmin(institutionId)
-        || isDepartmentAdmin(institutionId)
-        || isStudentInInstitution(institutionId);
-      allow write: if isInstitutionAdmin(institutionId);
+      allow read: if isAuthenticated() && institutionMatch(institutionId);
+      allow write: if isAuthenticated() && (isSuperAdmin() || (institutionMatch(institutionId) && isInstitutionAdmin()));
     }
 
     match /institutions/{institutionId}/students/{studentId} {
-      allow read: if isInstitutionAdmin(institutionId)
-        || isDepartmentAdmin(institutionId)
-        || (isStudentInInstitution(institutionId) && request.auth.uid == studentId);
-      allow write: if isInstitutionAdmin(institutionId) || isDepartmentAdmin(institutionId);
+      allow read: if canReadInstitutionDepartment(institutionId, resource.data.departmentId)
+        || (isAuthenticated() && institutionMatch(institutionId) && request.auth.uid == studentId);
+      allow write: if isAuthenticated() && institutionMatch(institutionId) && (isInstitutionAdmin() || isStaff());
     }
 
     match /institutions/{institutionId}/courses/{courseId} {
-      allow read: if isInstitutionAdmin(institutionId)
-        || isDepartmentAdmin(institutionId)
-        || isStudentInInstitution(institutionId);
-      allow write: if isInstitutionAdmin(institutionId) || isDepartmentAdmin(institutionId);
+      allow read: if canReadInstitutionDepartment(institutionId, resource.data.departmentId);
+      allow write: if isAuthenticated() && institutionMatch(institutionId) && (isInstitutionAdmin() || isStaff());
     }
 
-    match /institutions/{institutionId}/analytics/{doc} {
-      allow read: if isInstitutionAdmin(institutionId);
-      allow write: if false;
+    match /institutions/{institutionId}/analytics/{docId} {
+      allow read: if isAuthenticated() && institutionMatch(institutionId) && (isInstitutionAdmin() || isStaff());
+      allow write: if false; // backend-only
     }
 
     match /institutions/{institutionId}/libraryItems/{itemId} {
-      allow read: if canAccessDepartment(institutionId, resource.data.departmentId);
-      allow write: if false;
+      allow read: if canReadInstitutionDepartment(institutionId, resource.data.departmentId);
+      allow write: if false; // backend-only for now
+    }
+
+    match /institutions/{institutionId}/announcements/{announcementId} {
+      allow read: if canReadInstitutionDepartment(institutionId, resource.data.departmentId);
+      allow write: if isAuthenticated() && institutionMatch(institutionId) && (isInstitutionAdmin() || isStaff());
     }
 
     match /institutions/{institutionId}/audits/{auditId} {
-      allow read: if isInstitutionAdmin(institutionId) || isDepartmentAdmin(institutionId);
-      allow write: if false;
+      allow read: if isAuthenticated() && institutionMatch(institutionId) && (isInstitutionAdmin() || isStaff());
+      allow write: if false; // backend-only
     }
 
     match /institutions/{institutionId}/reports/{departmentId}/weekly/{weekKey} {
-      allow read: if canAccessDepartment(institutionId, departmentId);
-      allow write: if false;
-    }
-
-    match /institutions/{institutionId}/notes/{noteId} {
-      allow read: if (
-        isAuthenticated()
-        && request.auth.uid == resource.data.ownerUid
-        && (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
-      );
-
-      allow create, update: if (
-        isAuthenticated()
-        && request.auth.uid == request.resource.data.ownerUid
-        && (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
-      );
-
-      allow delete: if (
-        isAuthenticated()
-        && request.auth.uid == resource.data.ownerUid
-        && (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
-      );
+      allow read: if canReadInstitutionDepartment(institutionId, departmentId);
+      allow write: if false; // backend-only
     }
 
     match /institutions/{institutionId}/assignments/{assignmentId} {
-      allow read: if canAccessDepartment(institutionId, resource.data.departmentId);
+      allow read: if canReadInstitutionDepartment(institutionId, resource.data.departmentId);
+      allow create, update: if isAuthenticated()
+        && institutionMatch(institutionId)
+        && (isInstitutionAdmin() || (isStaff() && departmentMatch(request.resource.data.departmentId)));
+      allow delete: if isAuthenticated()
+        && institutionMatch(institutionId)
+        && (isInstitutionAdmin() || (isStaff() && departmentMatch(resource.data.departmentId)));
+    }
 
-      allow create, update: if
-        (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
-        && (
-          isInstitutionAdmin(institutionId) ||
-          (
-            isDepartmentAdmin(institutionId)
-            && (
-              request.resource.data.departmentId == profileDepartmentId()
-              || request.resource.data.departmentId == "general"
-            )
-          )
-        );
-
-      allow delete: if
-        (request.auth.token.institutionId == institutionId || profileInstitutionId() == institutionId)
-        && (
-          isInstitutionAdmin(institutionId) ||
-          (
-            isDepartmentAdmin(institutionId)
-            && (
-              resource.data.departmentId == profileDepartmentId()
-              || resource.data.departmentId == "general"
-            )
-          )
-        );
+    match /institutions/{institutionId}/notes/{noteId} {
+      allow read: if isAuthenticated()
+        && institutionMatch(institutionId)
+        && request.auth.uid == resource.data.ownerUid;
+      allow create, update: if isAuthenticated()
+        && institutionMatch(institutionId)
+        && request.auth.uid == request.resource.data.ownerUid;
+      allow delete: if isAuthenticated()
+        && institutionMatch(institutionId)
+        && request.auth.uid == resource.data.ownerUid;
     }
 
     match /institutions/{institutionId}/cases/{caseId} {
-      allow read: if isInstitutionAdmin(institutionId)
-        || (isDepartmentAdmin(institutionId) && resource.data.departmentId == profileDepartmentId())
-        || (isStudentInInstitution(institutionId) && resource.data.studentId == request.auth.uid);
-
-      allow create: if validCaseData(request.resource.data, institutionId, caseId)
+      allow read: if isAuthenticated()
+        && institutionMatch(institutionId)
         && (
-          isInstitutionAdmin(institutionId)
-          || (isDepartmentAdmin(institutionId) && request.resource.data.departmentId == profileDepartmentId())
-          || (isStudentInInstitution(institutionId) && request.resource.data.studentId == request.auth.uid)
+          isInstitutionAdmin()
+          || (isStaff() && departmentMatch(resource.data.departmentId))
+          || (isStudentRole() && request.auth.uid == resource.data.studentId)
         );
-
-      allow update: if validCaseData(request.resource.data, institutionId, caseId)
+      allow create: if isAuthenticated()
+        && institutionMatch(institutionId)
         && (
-          isInstitutionAdmin(institutionId)
-          || (
-            isDepartmentAdmin(institutionId)
-            && resource.data.departmentId == profileDepartmentId()
-            && request.resource.data.departmentId == resource.data.departmentId
-            && request.resource.data.studentId == resource.data.studentId
-            && request.resource.data.institutionId == resource.data.institutionId
-          )
-          || (
-            isStudentInInstitution(institutionId)
-            && resource.data.studentId == request.auth.uid
-            && request.resource.data.studentId == resource.data.studentId
-            && request.resource.data.departmentId == resource.data.departmentId
-            && request.resource.data.institutionId == resource.data.institutionId
-          )
+          isInstitutionAdmin()
+          || (isStaff() && departmentMatch(request.resource.data.departmentId))
+          || (isStudentRole() && request.auth.uid == request.resource.data.studentId)
         );
-
+      allow update: if isAuthenticated()
+        && institutionMatch(institutionId)
+        && (
+          isInstitutionAdmin()
+          || (isStaff() && departmentMatch(resource.data.departmentId) && departmentMatch(request.resource.data.departmentId))
+          || (isStudentRole()
+            && request.auth.uid == resource.data.studentId
+            && request.auth.uid == request.resource.data.studentId
+            && resource.data.departmentId == request.resource.data.departmentId)
+        );
       allow delete: if false;
     }
 
@@ -223,36 +214,26 @@ service cloud.firestore {
         return get(/databases/$(database)/documents/institutions/$(institutionId)/cases/$(caseId)).data;
       }
 
-      allow read: if isInstitutionAdmin(institutionId)
-        || (
-          isDepartmentAdmin(institutionId)
-          && parentCase().departmentId == profileDepartmentId()
-          && resource.data.departmentId == profileDepartmentId()
-        )
-        || (
-          isStudentInInstitution(institutionId)
-          && parentCase().studentId == request.auth.uid
-          && resource.data.departmentId == parentCase().departmentId
+      allow read: if isAuthenticated()
+        && institutionMatch(institutionId)
+        && (
+          isInstitutionAdmin()
+          || (isStaff() && departmentMatch(parentCase().departmentId) && departmentMatch(resource.data.departmentId))
+          || (isStudentRole() && request.auth.uid == parentCase().studentId && resource.data.departmentId == parentCase().departmentId)
         );
 
-      allow create: if validMessageData(request.resource.data, parentCase())
+      allow create: if isAuthenticated()
+        && institutionMatch(institutionId)
         && (
-          isInstitutionAdmin(institutionId)
-          || (
-            isDepartmentAdmin(institutionId)
-            && parentCase().departmentId == profileDepartmentId()
-            && request.resource.data.departmentId == profileDepartmentId()
-          )
-          || (
-            isStudentInInstitution(institutionId)
-            && parentCase().studentId == request.auth.uid
-          )
+          isInstitutionAdmin()
+          || (isStaff() && departmentMatch(parentCase().departmentId) && departmentMatch(request.resource.data.departmentId))
+          || (isStudentRole() && request.auth.uid == parentCase().studentId)
         );
 
       allow update, delete: if false;
     }
 
-    match /public/{doc} {
+    match /public/{docId} {
       allow read: if true;
       allow write: if isSuperAdmin();
     }
@@ -262,3 +243,8 @@ service cloud.firestore {
     }
   }
 }
+
+// Index suggestions (if queries require them):
+// 1) institutions/{institutionId}/cases: departmentId ASC, lastUpdated DESC
+// 2) institutions/{institutionId}/assignments: departmentId ASC, createdAt DESC
+// 3) institutions/{institutionId}/libraryItems: departmentId ASC, updatedAt DESC

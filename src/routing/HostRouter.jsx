@@ -14,6 +14,7 @@ import {
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import App from '../App.jsx';
 import InstitutionApp from '../institution/InstitutionApp.jsx';
+import StudentApp from '../student/StudentApp.jsx';
 import { auth, db, firebaseInitErrorMessage } from '../lib/firebase';
 import { apiUrl } from '../lib/apiUrl';
 import { getResolvedHostMode } from './hostMode';
@@ -123,10 +124,6 @@ function LoadingScreen() {
 
 function PublicApp({ modeUrls }) {
   return <App hostMode="public" modeUrls={modeUrls} />;
-}
-
-function StudentApp({ modeUrls }) {
-  return <App hostMode="student" modeUrls={modeUrls} />;
 }
 
 function LoginPage({

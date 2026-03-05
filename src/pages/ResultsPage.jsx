@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { apiGet, apiPost } from "../lib/apiClient";
+import { auth } from "../lib/firebase";
 import {
   BarChart3,
   TrendingUp,
@@ -14,14 +16,55 @@ import {
   SlidersHorizontal,
   FileText,
   X,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+
+const DESKTOP_TABS = [
+  { key: "overview", label: "Overview", icon: TrendingUp },
+  { key: "semester", label: "Semester Results", icon: BookOpen },
+  { key: "trends", label: "Trends", icon: BarChart3 },
+  { key: "insights", label: "Insights", icon: Sparkles },
+  { key: "transcript", label: "Transcript", icon: FileText },
+];
+
+const MOBILE_TABS = [
+  { key: "overview", label: "Overview", icon: TrendingUp },
+  { key: "semester", label: "Semester", icon: BookOpen },
+  { key: "trends", label: "Trends", icon: BarChart3 },
+  { key: "insights", label: "Insights", icon: Sparkles },
+  { key: "transcript", label: "Transcript", icon: FileText },
+];
+
+const RESULTS_HISTORY_KEY = "resultsMobileState";
+const DEFAULT_SNAPSHOT = {
+  gpa: 3.52,
+  cgpa: 3.31,
+  credits: 74,
+  standing: "Good Standing",
+};
+const DEFAULT_SEMESTER_ROWS = [
+  { code: "CSC 210", name: "Data Structures", cat: 18, exam: 42, total: 60, grade: "B", credits: 3, remark: "Pass" },
+  { code: "MAT 201", name: "Calculus II", cat: 14, exam: 31, total: 45, grade: "C", credits: 3, remark: "Pass" },
+  { code: "STA 205", name: "Probability", cat: 11, exam: 28, total: 39, grade: "D", credits: 3, remark: "Repeat" },
+  { code: "CSC 220", name: "OOP (Java)", cat: 20, exam: 48, total: 68, grade: "B+", credits: 3, remark: "Pass" },
+  { code: "COM 212", name: "Technical Writing", cat: 22, exam: 50, total: 72, grade: "A-", credits: 2, remark: "Pass" },
+];
+
+function resolveBackendUserId() {
+  const uid = String(auth?.currentUser?.uid || "");
+  const digits = uid.match(/\d+/g)?.join("") || "";
+  const numeric = Number.parseInt(digits, 10);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  return 1;
+}
 
 function TabButton({ active, icon: Icon, label, onClick }) {
   return (
     <button
       onClick={onClick}
       className={[
-        "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition",
+        "inline-flex items-center gap-2 rounded-full whitespace-nowrap px-4 py-2 text-sm font-semibold transition",
         active
           ? "bg-indigo-600 text-white shadow-sm"
           : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50",
@@ -80,11 +123,15 @@ function Badge({ tone = "gray", children }) {
   );
 }
 
-function PrimaryButton({ icon: Icon, children, onClick }) {
+function PrimaryButton({ icon: Icon, children, onClick, disabled = false }) {
   return (
     <button
       onClick={onClick}
-      className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 shadow-sm"
+      disabled={disabled}
+      className={[
+        "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold shadow-sm",
+        disabled ? "bg-indigo-400 text-white/80 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700",
+      ].join(" ")}
     >
       {Icon ? <Icon size={16} /> : null}
       {children}
@@ -197,10 +244,17 @@ function Drawer({ open, title, onClose, children }) {
 
 export default function ResultsPage() {
   const [tab, setTab] = useState("overview");
+  const [mobileTabsCollapsed, setMobileTabsCollapsed] = useState(true);
+  const [mobileTabFullscreen, setMobileTabFullscreen] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 767px)").matches : false
+  );
   const [aiInput, setAiInput] = useState("");
   const [aiMsgs, setAiMsgs] = useState([
-    { role: "assistant", text: "Hi! I can explain your results and suggest what to improve (backend later)." },
+    { role: "assistant", text: "Hi! I can explain your results and suggest what to improve." },
   ]);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   const [year, setYear] = useState("2025/2026");
   const [semester, setSemester] = useState("Semester 2");
@@ -208,15 +262,9 @@ export default function ResultsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState(null);
 
-  const snapshot = useMemo(
-    () => ({
-      gpa: 3.52,
-      cgpa: 3.31,
-      credits: 74,
-      standing: "Good Standing",
-    }),
-    []
-  );
+  const [snapshot, setSnapshot] = useState(DEFAULT_SNAPSHOT);
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsError, setResultsError] = useState("");
 
   const gpaTrend = useMemo(() => [2.9, 3.1, 3.15, 3.22, 3.31, 3.52], []);
   const creditsTrend = useMemo(() => [12, 15, 15, 16, 16, 0], []);
@@ -225,16 +273,7 @@ export default function ResultsPage() {
     []
   );
 
-  const semesterRows = useMemo(
-    () => [
-      { code: "CSC 210", name: "Data Structures", cat: 18, exam: 42, total: 60, grade: "B", credits: 3, remark: "Pass" },
-      { code: "MAT 201", name: "Calculus II", cat: 14, exam: 31, total: 45, grade: "C", credits: 3, remark: "Pass" },
-      { code: "STA 205", name: "Probability", cat: 11, exam: 28, total: 39, grade: "D", credits: 3, remark: "Repeat" },
-      { code: "CSC 220", name: "OOP (Java)", cat: 20, exam: 48, total: 68, grade: "B+", credits: 3, remark: "Pass" },
-      { code: "COM 212", name: "Technical Writing", cat: 22, exam: 50, total: 72, grade: "A-", credits: 2, remark: "Pass" },
-    ],
-    []
-  );
+  const [semesterRows, setSemesterRows] = useState(DEFAULT_SEMESTER_ROWS);
 
   const risks = useMemo(
     () => [
@@ -299,21 +338,24 @@ export default function ResultsPage() {
     setDrawerOpen(true);
   }
 
-  function sendAI(text) {
+  async function sendAI(text) {
     const clean = text.trim();
-    if (!clean) return;
+    if (!clean || aiBusy) return;
     setAiMsgs((m) => [...m, { role: "user", text: clean }]);
     setAiInput("");
-    setTimeout(() => {
-      setAiMsgs((m) => [
-        ...m,
-        {
-          role: "assistant",
-          text:
-            "Got it. When backend is ready, I will use your real GPA, attendance, and course scores for accurate recommendations.",
-        },
-      ]);
-    }, 350);
+    setAiBusy(true);
+    setAiError("");
+    try {
+      const data = await apiPost("/api/ai/chat", { message: clean });
+      const reply = String(data?.response || data?.message || "No response available.");
+      setAiMsgs((m) => [...m, { role: "assistant", text: reply }]);
+    } catch (error) {
+      const message = error?.message || "AI request failed.";
+      setAiError(message);
+      setAiMsgs((m) => [...m, { role: "assistant", text: `Error: ${message}` }]);
+    } finally {
+      setAiBusy(false);
+    }
   }
 
   const standingTone =
@@ -424,8 +466,63 @@ export default function ResultsPage() {
         </div>
 
         <Card title="Results Table" subtitle={`${year} • ${semester}`} icon={BookOpen}>
-          <div className="overflow-auto">
-            <table className="w-full text-sm">
+          <div className="space-y-3 md:hidden">
+            {semesterRows.map((r) => {
+              const gradeText = String(r.grade || "N/A");
+              const gradeTone = gradeText.includes("A")
+                ? "green"
+                : gradeText.includes("B")
+                ? "indigo"
+                : gradeText === "C"
+                ? "amber"
+                : "red";
+              const remark = r.remark || (gradeText.includes("F") ? "Repeat" : "Pass");
+              return (
+                <div key={r.code} className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900">{r.name}</div>
+                      <div className="mt-1 text-xs text-slate-600">{r.code}</div>
+                    </div>
+                    <Badge tone={gradeTone}>{gradeText}</Badge>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                    <div>
+                      CAT/Assgn: <span className="font-semibold text-slate-800">{r.cat ?? "-"}</span>
+                    </div>
+                    <div>
+                      Exam: <span className="font-semibold text-slate-800">{r.exam ?? "-"}</span>
+                    </div>
+                    <div>
+                      Total: <span className="font-semibold text-slate-900">{r.total ?? "-"}</span>
+                    </div>
+                    <div>
+                      Credits: <span className="font-semibold text-slate-800">{r.credits ?? "-"}</span>
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    {remark === "Pass" ? (
+                      <span className="inline-flex items-center gap-2 text-emerald-700 font-semibold text-xs">
+                        <CheckCircle2 size={14} /> Pass
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-2 text-red-700 font-semibold text-xs">
+                        <AlertTriangle size={14} /> Repeat
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3">
+                    <GhostButton onClick={() => openCourse(r)} icon={Info}>
+                      Breakdown
+                    </GhostButton>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden md:block overflow-auto">
+            <table className="min-w-[900px] w-full text-sm">
               <thead className="text-slate-500">
                 <tr className="text-left border-b border-slate-200">
                   <th className="py-2 pr-3 font-semibold">Course Code</th>
@@ -440,40 +537,46 @@ export default function ResultsPage() {
                 </tr>
               </thead>
               <tbody>
-                {semesterRows.map((r) => (
-                  <tr key={r.code} className="border-b border-slate-100">
-                    <td className="py-3 pr-3 text-slate-800 font-semibold">{r.code}</td>
-                    <td className="py-3 pr-3 text-slate-700">{r.name}</td>
-                    <td className="py-3 pr-3 text-slate-700">{r.cat}</td>
-                    <td className="py-3 pr-3 text-slate-700">{r.exam}</td>
-                    <td className="py-3 pr-3 text-slate-900 font-extrabold">{r.total}</td>
-                    <td className="py-3 pr-3">
-                      <Badge tone={r.grade.includes("A") ? "green" : r.grade.includes("B") ? "indigo" : r.grade === "C" ? "amber" : "red"}>
-                        {r.grade}
-                      </Badge>
-                    </td>
-                    <td className="py-3 pr-3 text-slate-700">{r.credits}</td>
-                    <td className="py-3 pr-3">
-                      {r.remark === "Pass" ? (
-                        <span className="inline-flex items-center gap-2 text-emerald-700 font-semibold">
-                          <CheckCircle2 size={16} /> Pass
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-2 text-red-700 font-semibold">
-                          <AlertTriangle size={16} /> Repeat
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 pr-3 text-right">
-                      <GhostButton
-                        onClick={() => openCourse(r)}
-                        icon={Info}
-                      >
-                        Breakdown
-                      </GhostButton>
-                    </td>
-                  </tr>
-                ))}
+                {semesterRows.map((r) => {
+                  const gradeText = String(r.grade || "N/A");
+                  const gradeTone = gradeText.includes("A")
+                    ? "green"
+                    : gradeText.includes("B")
+                    ? "indigo"
+                    : gradeText === "C"
+                    ? "amber"
+                    : "red";
+                  const remark = r.remark || (gradeText.includes("F") ? "Repeat" : "Pass");
+                  return (
+                    <tr key={r.code} className="border-b border-slate-100">
+                      <td className="py-3 pr-3 text-slate-800 font-semibold">{r.code}</td>
+                      <td className="py-3 pr-3 text-slate-700">{r.name}</td>
+                      <td className="py-3 pr-3 text-slate-700">{r.cat ?? "-"}</td>
+                      <td className="py-3 pr-3 text-slate-700">{r.exam ?? "-"}</td>
+                      <td className="py-3 pr-3 text-slate-900 font-extrabold">{r.total ?? "-"}</td>
+                      <td className="py-3 pr-3">
+                        <Badge tone={gradeTone}>{gradeText}</Badge>
+                      </td>
+                      <td className="py-3 pr-3 text-slate-700">{r.credits ?? "-"}</td>
+                      <td className="py-3 pr-3">
+                        {remark === "Pass" ? (
+                          <span className="inline-flex items-center gap-2 text-emerald-700 font-semibold">
+                            <CheckCircle2 size={16} /> Pass
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-2 text-red-700 font-semibold">
+                            <AlertTriangle size={16} /> Repeat
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-3 text-right">
+                        <GhostButton onClick={() => openCourse(r)} icon={Info}>
+                          Breakdown
+                        </GhostButton>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -555,8 +658,11 @@ export default function ResultsPage() {
                 className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-200"
                 placeholder="Type a question..."
               />
-              <PrimaryButton onClick={() => sendAI(aiInput)}>Send</PrimaryButton>
+              <PrimaryButton onClick={() => sendAI(aiInput)} disabled={aiBusy}>
+                {aiBusy ? "Sending..." : "Send"}
+              </PrimaryButton>
             </div>
+            {aiError ? <div className="text-xs font-semibold text-rose-600">{aiError}</div> : null}
           </div>
         </Card>
       </div>
@@ -586,32 +692,229 @@ export default function ResultsPage() {
   }
 
   const breakdown = selectedCourse ? courseBreakdowns[selectedCourse.code] : null;
+  const activeMobileTab = useMemo(
+    () => MOBILE_TABS.find((item) => item.key === tab) || MOBILE_TABS[0],
+    [tab]
+  );
+  const hideMobilePageHeader = isMobileViewport && mobileTabFullscreen;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const syncViewport = () => setIsMobileViewport(media.matches);
+    syncViewport();
+    media.addEventListener?.("change", syncViewport);
+    window.addEventListener("resize", syncViewport);
+    return () => {
+      media.removeEventListener?.("change", syncViewport);
+      window.removeEventListener("resize", syncViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileViewport) {
+      setMobileTabFullscreen(false);
+      setMobileTabsCollapsed(true);
+    }
+  }, [isMobileViewport]);
+
+  useEffect(() => {
+    if (!hideMobilePageHeader || typeof document === "undefined") return;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [hideMobilePageHeader]);
+
+  useEffect(() => {
+    let active = true;
+    const loadResults = async () => {
+      setResultsLoading(true);
+      setResultsError("");
+      const userId = resolveBackendUserId();
+      try {
+        const data = await apiGet(`/api/results/${userId}`);
+        if (!active) return;
+        const nextSnapshot = {
+          ...DEFAULT_SNAPSHOT,
+          gpa: Number.isFinite(Number(data?.gpa)) ? Number(data.gpa) : DEFAULT_SNAPSHOT.gpa,
+          cgpa: Number.isFinite(Number(data?.cgpa)) ? Number(data.cgpa) : DEFAULT_SNAPSHOT.cgpa,
+        };
+        setSnapshot(nextSnapshot);
+        if (Array.isArray(data?.semester) && data.semester.length > 0) {
+          const mapped = data.semester.map((item, idx) => {
+            const gradeText = String(item?.grade || "B");
+            return {
+              code: String(item?.course || `COURSE ${idx + 1}`),
+              name: String(item?.course || `Course ${idx + 1}`),
+              cat: item?.cat ?? 0,
+              exam: item?.exam ?? 0,
+              total: item?.total ?? 0,
+              grade: gradeText,
+              credits: item?.credits ?? 3,
+              remark: item?.remark || (gradeText.includes("F") ? "Repeat" : "Pass"),
+            };
+          });
+          setSemesterRows(mapped);
+        }
+      } catch (error) {
+        if (!active) return;
+        setResultsError(error?.message || "Failed to load results.");
+      } finally {
+        if (active) setResultsLoading(false);
+      }
+    };
+
+    loadResults();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPopState = (event) => {
+      const snapshot = event?.state?.[RESULTS_HISTORY_KEY];
+      if (!snapshot || typeof snapshot !== "object") {
+        setMobileTabFullscreen(false);
+        return;
+      }
+      const nextTab = MOBILE_TABS.some((item) => item.key === snapshot.tab) ? snapshot.tab : "overview";
+      setTab(nextTab);
+      setMobileTabFullscreen(Boolean(snapshot.fullscreen));
+      setMobileTabsCollapsed(!Boolean(snapshot.fullscreen));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  function updateResultsHistory(nextTab, nextFullscreen, mode = "replace") {
+    if (typeof window === "undefined") return;
+    const payload = {
+      tab: nextTab,
+      fullscreen: Boolean(nextFullscreen),
+    };
+    const nextState = {
+      ...(window.history.state || {}),
+      [RESULTS_HISTORY_KEY]: payload,
+    };
+    if (mode === "push") {
+      window.history.pushState(nextState, "", window.location.href);
+      return;
+    }
+    window.history.replaceState(nextState, "", window.location.href);
+  }
+
+  useEffect(() => {
+    updateResultsHistory(tab, mobileTabFullscreen, "replace");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, mobileTabFullscreen]);
+
+  function handleMobileTabSelect(nextTab) {
+    setTab(nextTab);
+    setMobileTabsCollapsed(true);
+    if (isMobileViewport) {
+      setMobileTabFullscreen(true);
+      updateResultsHistory(nextTab, true, "push");
+    }
+  }
 
   return (
-    <div className="min-h-[100dvh] w-full bg-slate-100 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-xl font-extrabold text-slate-900">Results</div>
-          <div className="text-sm text-slate-600">
-            Understand your performance with trends, breakdowns, and improvement guidance.
+    <div className="w-full bg-slate-100 p-4 md:p-6 h-[100dvh] overflow-hidden flex flex-col md:min-h-[100dvh] md:h-auto md:overflow-visible">
+      {!hideMobilePageHeader ? (
+        <>
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold text-slate-900">Results</div>
+              <div className="text-sm text-slate-600">
+                Understand your performance with trends, breakdowns, and improvement guidance.
+              </div>
+              {resultsLoading ? <div className="mt-2 text-xs font-semibold text-slate-500">Loading results...</div> : null}
+              {resultsError ? <div className="mt-2 text-xs font-semibold text-rose-600">{resultsError}</div> : null}
+            </div>
+
+            <div className="hidden md:flex items-center gap-2 flex-wrap">
+              {DESKTOP_TABS.map((t) => (
+                <TabButton key={t.key} active={tab === t.key} icon={t.icon} label={t.label} onClick={() => setTab(t.key)} />
+              ))}
+            </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <TabButton active={tab === "overview"} icon={TrendingUp} label="Overview" onClick={() => setTab("overview")} />
-          <TabButton active={tab === "semester"} icon={BookOpen} label="Semester Results" onClick={() => setTab("semester")} />
-          <TabButton active={tab === "trends"} icon={BarChart3} label="Trends" onClick={() => setTab("trends")} />
-          <TabButton active={tab === "insights"} icon={Sparkles} label="Insights" onClick={() => setTab("insights")} />
-          <TabButton active={tab === "transcript"} icon={FileText} label="Transcript" onClick={() => setTab("transcript")} />
-        </div>
-      </div>
+          <div className="w-full md:hidden">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setMobileTabsCollapsed((prev) => !prev)}
+                className="w-full px-4 py-3 flex items-center justify-between gap-3 bg-slate-50"
+              >
+                <div className="min-w-0 text-left">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Result Sections</div>
+                  <div className="text-sm font-semibold text-slate-900 truncate">{activeMobileTab?.label || "Overview"}</div>
+                </div>
+                {mobileTabsCollapsed ? <ChevronDown size={18} className="text-slate-500" /> : <ChevronUp size={18} className="text-slate-500" />}
+              </button>
 
-      <div className="mt-5">
-        {tab === "overview" ? <Overview /> : null}
-        {tab === "semester" ? <SemesterResults /> : null}
-        {tab === "trends" ? <Trends /> : null}
-        {tab === "insights" ? <Insights /> : null}
-        {tab === "transcript" ? <Transcript /> : null}
+              {!mobileTabsCollapsed ? (
+                <div className="border-t border-slate-200 p-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    {MOBILE_TABS.map((t, idx) => {
+                      const Icon = t.icon;
+                      const active = tab === t.key;
+                      const shouldSpanTwo = MOBILE_TABS.length % 2 === 1 && idx === MOBILE_TABS.length - 1;
+                      return (
+                        <button
+                          key={t.key}
+                          type="button"
+                          onClick={() => handleMobileTabSelect(t.key)}
+                          className={[
+                            "inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition",
+                            shouldSpanTwo ? "col-span-2" : "",
+                            active
+                              ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
+                              : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
+                          ].join(" ")}
+                        >
+                          <Icon size={16} />
+                          <span>{t.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      <div
+        className={[
+          hideMobilePageHeader ? "mt-0 fixed inset-0 z-40 bg-slate-100 p-4 pb-8 overflow-y-auto" : "mt-5 flex-1 min-h-0 overflow-y-auto md:overflow-visible",
+          "md:static md:p-0",
+        ].join(" ")}
+      >
+        {hideMobilePageHeader ? (
+          <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-4 border-b border-slate-200 bg-white/95 backdrop-blur">
+            <div className="px-4 py-3 flex items-center justify-end gap-3">
+              <div className="min-w-0 text-right">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Result Section</div>
+                <div className="text-sm font-semibold text-slate-900 truncate">{activeMobileTab?.label}</div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        
+        <div className="md:mt-0">
+          {tab === "overview" ? <Overview /> : null}
+          {tab === "semester" ? <SemesterResults /> : null}
+          {tab === "trends" ? <Trends /> : null}
+          {tab === "insights" ? <Insights /> : null}
+          {tab === "transcript" ? <Transcript /> : null}
+        </div>
       </div>
 
       <Drawer

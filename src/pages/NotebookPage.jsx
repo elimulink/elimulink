@@ -326,9 +326,16 @@ function RibbonIconButton({ icon: Icon, label, onClick, active = false }) {
   );
 }
 
-export default function NotebookPage({ onBack }) {
-  const [noteTitle, setNoteTitle] = useState("Note_ElimuLink_1_2026");
-  const [noteBody, setNoteBody] = useState("");
+export default function NotebookPage({
+  onBack,
+  onSaveNote = null,
+  embedded = false,
+  initialTitle = "",
+  initialBody = "",
+  loadToken = "",
+}) {
+  const [noteTitle, setNoteTitle] = useState(() => String(initialTitle || "Note_ElimuLink_1_2026"));
+  const [noteBody, setNoteBody] = useState(() => String(initialBody || ""));
   const [activeNotebookTab, setActiveNotebookTab] = useState("home");
   const [penTheme, setPenTheme] = useState("slate");
   const [customPenColor, setCustomPenColor] = useState("#1e40af");
@@ -361,6 +368,7 @@ export default function NotebookPage({ onBack }) {
   const [downloadFormat, setDownloadFormat] = useState("pdf");
   const [attachments, setAttachments] = useState([]);
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
   const [notes, setNotes] = useState([
     { id: makeId(), title: "Intro to Biology", updatedAt: Date.now() },
     { id: makeId(), title: "Assignment Ideas", updatedAt: Date.now() - 3600_000 },
@@ -394,6 +402,22 @@ export default function NotebookPage({ onBack }) {
   useEffect(() => {
     setFontSizeInput(String(fontSizePx));
   }, [fontSizePx]);
+
+  useEffect(() => {
+    const editor = noteBodyRef.current;
+    if (!editor) return;
+    const current = (editor.innerText || "").replace(/\u00A0/g, " ");
+    const next = String(noteBody || "");
+    if (current === next) return;
+    editor.innerText = next;
+  }, [noteBody, loadToken]);
+
+  useEffect(() => {
+    if (!loadToken) return;
+    setNoteTitle(String(initialTitle || "Note_ElimuLink_1_2026"));
+    setNoteBody(String(initialBody || ""));
+    setSaveMessage("");
+  }, [initialBody, initialTitle, loadToken]);
 
   useEffect(() => {
     const onDocumentMouseDown = (event) => {
@@ -441,6 +465,25 @@ export default function NotebookPage({ onBack }) {
 
   const deleteNoteById = (noteId) => {
     setNotes((prev) => prev.filter((note) => note.id !== noteId));
+  };
+
+  const upsertNoteMeta = (title) => {
+    const cleanTitle = String(title || "").trim() || "Untitled Note";
+    setNotes((prev) => {
+      const existing = prev.find((item) => String(item.title || "").trim().toLowerCase() === cleanTitle.toLowerCase());
+      if (existing) {
+        return prev.map((item) =>
+          item.id === existing.id
+            ? {
+                ...item,
+                title: cleanTitle,
+                updatedAt: Date.now(),
+              }
+            : item
+        );
+      }
+      return [{ id: makeId(), title: cleanTitle, updatedAt: Date.now() }, ...prev];
+    });
   };
 
   const syncEditorTextState = () => {
@@ -871,6 +914,36 @@ export default function NotebookPage({ onBack }) {
     downloadBlob(docContent, `${baseName}.doc`, "application/msword;charset=utf-8");
   };
 
+  const handleSaveNote = () => {
+    const title = String(noteTitle || "").trim() || "Untitled Note";
+    const content = syncEditorTextState() || "";
+    if (!content.trim()) {
+      window.alert("Note is empty.");
+      return;
+    }
+    const payload = {
+      id: makeId(),
+      title,
+      content,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    upsertNoteMeta(title);
+    let message = "Saved locally.";
+    if (typeof onSaveNote === "function") {
+      try {
+        const result = onSaveNote(payload);
+        if (result && typeof result === "object" && typeof result.message === "string" && result.message.trim()) {
+          message = result.message.trim();
+        }
+      } catch {
+        message = "Saved note, but linked save failed.";
+      }
+    }
+    setSaveMessage(message);
+    setTimeout(() => setSaveMessage(""), 2000);
+  };
+
   const applyStylePreset = (preset) => {
     if (preset === "normal") {
       runEditorCommand("removeFormat", null, {
@@ -895,7 +968,7 @@ export default function NotebookPage({ onBack }) {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-slate-100 p-4 md:p-6">
+    <div className={embedded ? "bg-slate-100" : "min-h-[100dvh] bg-slate-100 p-4 md:p-6"}>
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="sticky top-0 z-30">
           <div className="border-b border-slate-700 bg-slate-950 px-3 py-2 text-white">
@@ -963,7 +1036,7 @@ export default function NotebookPage({ onBack }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => window.alert("Save is local for now. Backend later.")}
+                    onClick={handleSaveNote}
                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
                     Save
@@ -985,6 +1058,7 @@ export default function NotebookPage({ onBack }) {
                   >
                     Download
                   </button>
+                  {saveMessage ? <div className="text-xs text-emerald-700">{saveMessage}</div> : null}
                 </div>
               ) : null}
 

@@ -213,7 +213,7 @@ FIREBASE_ADMIN_SA = (your Firebase service account JSON)
 - If not there, CORS was rejected
 - Update server.js CORS if needed
 
-### Console shows: "Failed to fetch https://localhost:4000"
+### Console shows: "Failed to fetch https://127.0.0.1:8000"
 **Problem:** `VITE_API_BASE` not set, using localhost fallback
 
 **Action:**
@@ -325,3 +325,4 @@ All changes have been:
 - ✅ Ready for deployment
 
 The app now provides comprehensive error visibility, making "Error: Failed to fetch" much easier to diagnose and fix.
+

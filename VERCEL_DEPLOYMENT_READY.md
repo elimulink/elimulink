@@ -24,7 +24,7 @@ The ElimuLink app is now ready for Vercel deployment with comprehensive environm
 
 #### 3. Production-Safe API Base
 - **File:** `src/App.jsx` (lines 47-50)
-- **Feature:** `API_BASE` only defaults to `http://localhost:4000` during development
+- **Feature:** `API_BASE` only defaults to `http://127.0.0.1:8000` during development
   - In production (Vercel), defaults to empty string (not localhost)
   - Prevents accidental localhost API calls on production
   - Uses `import.meta.env.VITE_API_BASE` if set
@@ -120,7 +120,7 @@ The ElimuLink app is now ready for Vercel deployment with comprehensive environm
 ```jsx
 const API_BASE = 
   import.meta.env.VITE_API_BASE || 
-  (import.meta.env.MODE === 'development' ? 'http://localhost:4000' : '');
+  (import.meta.env.MODE === 'development' ? 'http://127.0.0.1:8000' : '');
 ```
 
 #### Lines 91-116: Env Var Logging & Error Detection
@@ -233,3 +233,4 @@ If deployment fails:
 6. Verify console logs show all vars populated
 
 For details, see [VERCEL_ENV_VARS.md](VERCEL_ENV_VARS.md).
+

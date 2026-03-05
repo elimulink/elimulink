@@ -50,6 +50,7 @@ export default function NotebookPage({ onBack = null }) {
   const [isNotesPanelOpen, setIsNotesPanelOpen] = useState(true);
   const [activeTab, setActiveTab] = useState("notes");
   const [theme, setTheme] = useState("classic");
+  const [ribbonOpen, setRibbonOpen] = useState(false);
 
   const [notes, setNotes] = useState(() => {
     const saved = localStorage.getItem("elimulink_notebook_notes");
@@ -172,9 +173,10 @@ export default function NotebookPage({ onBack = null }) {
   }, [notes, query]);
 
   return (
-    <div className={`min-h-screen ${themeObj.boardBg}`}>
-      <div className="border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
+    <div className={`w-full h-[100dvh] overflow-hidden md:min-h-screen md:h-auto md:overflow-visible ${themeObj.boardBg} flex flex-col`}>
+      <div className="fixed top-0 left-0 right-0 z-50 md:static md:z-auto">
+        <div className="bg-gradient-to-b from-white/80 via-white/40 to-transparent backdrop-blur-sm md:backdrop-blur-0 md:bg-white md:border-b md:border-slate-200">
+          <div className="w-full px-3 py-3 md:mx-auto md:max-w-7xl md:px-6 md:py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
               className="h-10 w-10 rounded-lg border border-slate-200 hover:bg-slate-50"
@@ -194,6 +196,13 @@ export default function NotebookPage({ onBack = null }) {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setRibbonOpen((v) => !v)}
+              className="md:hidden rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700"
+              type="button"
+            >
+              Tools
+            </button>
             <select
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={theme}
@@ -225,15 +234,17 @@ export default function NotebookPage({ onBack = null }) {
           </div>
         </div>
       </div>
+      </div>
 
-      <div className="mx-auto max-w-7xl px-6 py-6 grid grid-cols-12 gap-6">
+      <div className="flex-1 overflow-y-auto overscroll-none touch-pan-y md:overflow-visible">
+        <div className="w-full px-3 pt-20 pb-6 md:mx-auto md:max-w-7xl md:px-6 md:py-6 grid grid-cols-12 gap-6">
         <aside
           className={[
             "col-span-12 md:col-span-4 lg:col-span-3 transition-all",
             isNotesPanelOpen ? "" : "md:col-span-1 lg:col-span-1",
           ].join(" ")}
         >
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="rounded-none border-0 shadow-none md:rounded-2xl md:border md:border-slate-200 md:bg-white md:shadow-sm overflow-hidden">
             <div className="p-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
               <div className="flex gap-2">
                 <button
@@ -389,8 +400,8 @@ export default function NotebookPage({ onBack = null }) {
         </aside>
 
         <main className="col-span-12 md:col-span-8 lg:col-span-9">
-          <div className={`rounded-2xl border border-slate-200 shadow-sm overflow-hidden ${themeObj.editorBg}`}>
-            <div className="p-4 border-b border-slate-200 bg-slate-50">
+          <div className={`rounded-none border-0 shadow-none md:rounded-2xl md:border md:border-slate-200 md:shadow-sm overflow-hidden ${themeObj.editorBg}`}>
+            <div className={`p-4 border-b border-slate-200 bg-slate-50 max-h-[40dvh] overflow-auto md:max-h-none md:overflow-visible ${ribbonOpen ? "" : "hidden"} md:block`}>
               <div className="flex flex-col md:flex-row md:items-center gap-3 md:justify-between">
                 <input
                   className="w-full md:max-w-xl rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
@@ -411,7 +422,7 @@ export default function NotebookPage({ onBack = null }) {
 
             <div className="p-4">
               <textarea
-                className="w-full min-h-[520px] rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none leading-relaxed"
+                className="w-full min-h-[520px] rounded-none border-0 bg-transparent px-0 py-0 text-sm outline-none leading-relaxed md:rounded-2xl md:border md:border-slate-200 md:bg-white md:px-4 md:py-3"
                 value={selectedNote?.content || ""}
                 onChange={(e) => updateSelected({ content: e.target.value })}
                 placeholder="Write your note here..."
@@ -425,6 +436,7 @@ export default function NotebookPage({ onBack = null }) {
         </main>
       </div>
     </div>
+  </div>
   );
 }
 

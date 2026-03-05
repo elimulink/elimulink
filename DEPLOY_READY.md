@@ -9,7 +9,7 @@ npm install
 npm run build
 # confirm build output exists (dist/) and server can start
 NODE_ENV=production node server.js
-# visit http://localhost:4000/ to see health JSON
+# visit http://127.0.0.1:8000/ to see health JSON
 ```
 
 2) Generate admin passcode hash (if you haven't already)

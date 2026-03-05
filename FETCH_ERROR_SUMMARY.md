@@ -192,8 +192,8 @@ All now use `fetchWithErrorLog()` instead of plain `fetch()`.
 ```
 [ENV] VITE_API_BASE: (empty - using direct Firestore)
 [API] Will call: (object not shown)
-[API] Fetching: http://localhost:4000/api/ai/student
-[API] Failed to fetch http://localhost:4000/api/ai/student: Failed to fetch
+[API] Fetching: http://127.0.0.1:8000/api/ai/student
+[API] Failed to fetch http://127.0.0.1:8000/api/ai/student: Failed to fetch
 ```
 
 **CORS Blocked:**
@@ -275,3 +275,4 @@ d7df09c3 fix: add comprehensive error logging for fetch failures and improve COR
 6. **Refer to [DIAGNOSTIC_CHECKLIST.md](DIAGNOSTIC_CHECKLIST.md) for step-by-step debugging**
 
 All fixes are backward compatible. No UI changes. Only better error visibility and logging.
+

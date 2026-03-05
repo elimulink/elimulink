@@ -67,7 +67,7 @@ Testing locally with environment variables
 - Create a `.env.local` for Vite (example variables):
 
 ```
-VITE_API_BASE=http://localhost:4000
+VITE_API_BASE=http://127.0.0.1:8000
 VITE_FIREBASE_API_KEY=...
 VITE_FIREBASE_AUTH_DOMAIN=...
 VITE_FIREBASE_PROJECT_ID=...
@@ -110,4 +110,5 @@ curl -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
 Notes
 - Do not commit tokens or service IDs to the repo. Store them as GitHub Actions secrets.
 - If you need help finding a specific value, tell me which dashboard you're in and I can give exact click-by-click guidance.
+
 

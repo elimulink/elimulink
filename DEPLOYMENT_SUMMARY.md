@@ -217,11 +217,11 @@ if (envError && envError.length > 0) {
 ```jsx
 const API_BASE = 
   import.meta.env.VITE_API_BASE || 
-  (import.meta.env.MODE === 'development' ? 'http://localhost:4000' : '');
+  (import.meta.env.MODE === 'development' ? 'http://127.0.0.1:8000' : '');
 ```
 
 This ensures:
-- In **development** mode: Falls back to `http://localhost:4000` (safe for local dev)
+- In **development** mode: Falls back to `http://127.0.0.1:8000` (safe for local dev)
 - In **production** mode: Empty string (no localhost leakage to Vercel)
 - Always uses `VITE_API_BASE` if explicitly set (preferred)
 
@@ -400,3 +400,4 @@ The ElimuLink app is **ready for Vercel deployment**. All environment variable d
 **Last Commit:** `a58ae60c` — Quick reference card added  
 **Status:** ✅ Ready for Production  
 **Date:** February 8, 2025
+
