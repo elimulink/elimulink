@@ -144,20 +144,6 @@ async def chat(request: Request, user: CurrentUser = Depends(get_current_user)) 
     return await _handle_chat(request, user)
 
 
-@router.post("/api/ai/chat")
-async def ai_chat(request: Request, user: CurrentUser = Depends(get_current_user)) -> object:
-    print(
-        f"[AUTH_ROUTE] rid={getattr(request.state, 'request_id', None)} "
-        f"endpoint=/api/ai/chat authHeaderExists={bool(request.headers.get('authorization'))} uid={user.uid or 'none'}"
-    )
-    return await _handle_chat(
-        request,
-        user,
-        system_instruction=ACADEMIC_ASSISTANT_SYSTEM,
-        message_prefix="Student question:",
-    )
-
-
 @router.post("/api/chat/upload")
 async def chat_upload(
     request: Request,

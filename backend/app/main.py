@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import init_firebase_admin
 from .database import Base, engine, DATABASE_URL
+from . import models
 from .routes.chat import router as chat_router
 from .routes.admin_ai import router as admin_ai_router
 from .routes.admin_analytics import router as admin_analytics_router
@@ -29,7 +30,7 @@ from .routes.announcements import router as announcements_router
 from .routes.attendance import router as attendance_router
 from .routes.finance import router as finance_router
 from .routes.audit import router as audit_router
-from .routes.student_ai import router as student_ai_router
+from .routes.ai import router as ai_router
 from .routes.tts import router as tts_router
 from .utils import err_response
 
@@ -139,7 +140,7 @@ app.include_router(chat_router)
 app.include_router(admin_ai_router)
 app.include_router(admin_analytics_router)
 app.include_router(admin_settings_router)
-app.include_router(student_ai_router)
+app.include_router(ai_router)
 app.include_router(tts_router)
 app.include_router(image_router)
 app.include_router(groups_router)
