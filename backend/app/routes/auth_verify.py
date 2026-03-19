@@ -19,6 +19,7 @@ async def verify_app_access(
     payload: VerifyAccessRequest,
     authorization: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
+    print(f"[AUTH_VERIFY_ROUTE] verify-app-access start app={payload.app!r} hasAuth={bool(authorization)}")
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
 
@@ -33,6 +34,7 @@ async def verify_app_access(
 
     app_name = (payload.app or "").strip().lower()
     if app_name not in {"public", "student", "institution"}:
+        print(f"[AUTH_VERIFY_ROUTE] invalid app app={app_name!r}")
         return {
             "allowed": False,
             "uid": None,
@@ -43,8 +45,13 @@ async def verify_app_access(
             "default_app": None,
         }
 
-    return await resolve_ai_family_access(
+    result = await resolve_ai_family_access(
         uid=uid,
         email=email,
         app_name=app_name,
     )
+    print(
+        f"[AUTH_VERIFY_ROUTE] verify-app-access success app={app_name} uid={uid} "
+        f"allowed={result.get('allowed')} access={result.get('app_access')}"
+    )
+    return result

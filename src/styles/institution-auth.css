@@ -603,7 +603,7 @@ body {
     grid-template-columns: 1fr;
     min-height: 100dvh;
     height: auto;
-    overflow: hidden;
+    overflow-y: auto;
   }
 
   .inst-auth-brand {
@@ -612,21 +612,51 @@ body {
 
   .inst-auth-panel {
     min-height: 100dvh;
-    padding: 16px;
-    align-items: center;
+    padding: 18px 14px;
+    align-items: flex-start;
   }
 
   .inst-auth-card {
     width: 100%;
-    max-width: 460px;
+    max-width: 500px;
     max-height: none;
     overflow: visible;
-    padding: 22px 18px;
-    border-radius: 24px;
+    margin: 0 auto;
+    padding: 20px 16px 16px;
+    border-radius: 28px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 22px 54px rgba(15, 23, 42, 0.10);
   }
 
   .inst-auth-socials.compact-two-col {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .inst-auth-social-btn {
+    min-height: 48px;
+    height: 48px;
+    border-radius: 16px;
+    font-size: 15px;
+  }
+
+  .inst-auth-field input {
+    height: 50px;
+    border-radius: 16px;
+    font-size: 16px;
+  }
+
+  .inst-auth-primary.compact-primary {
+    height: 52px;
+    border-radius: 17px;
+    font-size: 15px;
+  }
+
+  .inst-auth-links,
+  .inst-auth-sub-actions,
+  .compact-links {
+    flex-direction: row;
+    align-items: center;
   }
 
   .staff-entry-page {
@@ -644,23 +674,65 @@ body {
 
 @media (max-width: 640px) {
   .inst-auth-card-top {
-    flex-direction: column;
+    flex-direction: row;
     align-items: flex-start;
+    gap: 10px;
   }
 
   .inst-auth-card-top h2 {
+    font-size: 27px;
+    line-height: 1.04;
+  }
+
+  .inst-auth-card-top p {
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .inst-auth-chip {
+    padding: 8px 14px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .inst-auth-divider {
+    margin: 14px 0;
+  }
+
+  .inst-auth-link-button,
+  .inst-auth-links a,
+  .inst-auth-secondary-link {
+    font-size: 14px;
+  }
+
+  .staff-entry-header h1 {
     font-size: 28px;
+  }
+}
+
+@media (max-width: 420px) {
+  .inst-auth-panel {
+    padding: 14px 10px;
+  }
+
+  .inst-auth-card {
+    padding: 18px 14px 15px;
+    border-radius: 24px;
+  }
+
+  .inst-auth-card-top h2 {
+    font-size: 25px;
+  }
+
+  .inst-auth-social-btn {
+    padding: 0 10px;
+    font-size: 14px;
   }
 
   .inst-auth-links,
   .inst-auth-sub-actions,
   .compact-links {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .staff-entry-header h1 {
-    font-size: 28px;
+    gap: 10px;
   }
 }
 

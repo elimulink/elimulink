@@ -1,8 +1,11 @@
+import asyncio
 from typing import Any, Dict
 
 from fastapi import HTTPException
 
 from app.db.supabase_client import get_supabase_client
+
+AI_ACCESS_TIMEOUT_SECONDS = 8
 
 
 def _normalize_role(role: str | None, app_name: str) -> str:
@@ -41,17 +44,32 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
             detail="Supabase client not configured",
         )
 
-    response = (
-        supabase.table("user_profiles")
-        .select("uid,email,role,institution_id,app_access,default_app,status")
-        .eq("uid", uid)
-        .limit(1)
-        .execute()
-    )
+    print(f"[AI_ACCESS] resolve:start uid={uid} app={app_name} email={email}")
+    try:
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: (
+                    supabase.table("user_profiles")
+                    .select("uid,email,role,institution_id,app_access,default_app,status")
+                    .eq("uid", uid)
+                    .limit(1)
+                    .execute()
+                )
+            ),
+            timeout=AI_ACCESS_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as exc:
+        print(f"[AI_ACCESS] resolve:timeout uid={uid} app={app_name}")
+        raise HTTPException(status_code=504, detail="AI family access lookup timed out") from exc
+    except Exception as exc:  # noqa: BLE001
+        print(f"[AI_ACCESS] resolve:error uid={uid} app={app_name} error={exc}")
+        raise HTTPException(status_code=500, detail="AI family access lookup failed") from exc
 
     rows = response.data or []
+    print(f"[AI_ACCESS] resolve:rows uid={uid} app={app_name} count={len(rows)}")
     if not rows:
         if app_name == "public":
+            print(f"[AI_ACCESS] resolve:fallback_public uid={uid}")
             return {
                 "allowed": True,
                 "uid": uid,
@@ -66,11 +84,13 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
     user = rows[0]
 
     if user.get("status") != "active":
+        print(f"[AI_ACCESS] resolve:inactive uid={uid} status={user.get('status')}")
         return _deny()
 
     app_access = [str(item or "").strip().lower() for item in (user.get("app_access") or []) if str(item or "").strip()]
 
     if app_name == "public" and ("public" in app_access or len(app_access) > 0):
+        print(f"[AI_ACCESS] resolve:allow_public uid={uid} access={app_access}")
         return {
             "allowed": True,
             "uid": user.get("uid"),
@@ -82,8 +102,10 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
         }
 
     if app_name not in app_access:
+        print(f"[AI_ACCESS] resolve:deny_missing_app uid={uid} app={app_name} access={app_access}")
         return _deny()
 
+    print(f"[AI_ACCESS] resolve:allow uid={uid} app={app_name} access={app_access}")
     return {
         "allowed": True,
         "uid": user.get("uid"),

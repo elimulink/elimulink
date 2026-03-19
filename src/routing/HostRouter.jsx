@@ -28,9 +28,15 @@ import { getResolvedHostMode } from './hostMode';
 
 const APP_ID = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const DEBUG_HOST_ROUTER = import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_HOST_ROUTER || '').trim() === '1';
+const BOOTSTRAP_TIMEOUT_MS = 20000;
 
 function hostLog(...args) {
   if (DEBUG_HOST_ROUTER) console.log(...args);
+}
+
+function hostDebug(step, payload = {}) {
+  console.info(`[HOST_BOOT] ${step}`, payload);
+  hostLog(`[HOST_BOOT] ${step}`, payload);
 }
 
 function profileDisplayName(profile, user) {
@@ -287,6 +293,7 @@ export default function HostRouter() {
   const [flashMessage, setFlashMessage] = useState('');
   const [bootstrapError, setBootstrapError] = useState(null);
   const [bootstrapNonce, setBootstrapNonce] = useState(0);
+  const bootAttemptRef = useRef(0);
   const handledInitialRedirect = useRef(false);
   const authStateLogged = useRef(false);
   const hostRouteLogged = useRef(false);
@@ -351,6 +358,11 @@ export default function HostRouter() {
   useEffect(() => {
     if (authStateLogged.current) return;
     if (!authReady) return;
+    hostDebug('auth:ready', {
+      authReady,
+      uid: user?.uid || null,
+      anonymous: Boolean(user?.isAnonymous),
+    });
     hostLog("AUTH_STATE", { authReady, uid: user?.uid || null, host: window.location.host });
     authStateLogged.current = true;
   }, [authReady, user]);
@@ -372,11 +384,17 @@ export default function HostRouter() {
 
     return watchFirebaseAuth(
       (nextUser) => {
+        hostDebug('auth:changed', {
+          uid: nextUser?.uid || null,
+          anonymous: Boolean(nextUser?.isAnonymous),
+          email: nextUser?.email || null,
+        });
         setUser(nextUser);
         setAuthReady(true);
       },
       (err) => {
         console.error('HostRouter auth initialization failed:', err?.message || err);
+        hostDebug('auth:error', { message: String(err?.message || err || 'unknown auth error') });
         setUser(null);
         setAuthReady(true);
         setBootState('guest');
@@ -389,9 +407,21 @@ export default function HostRouter() {
   }, [hostMode]);
 
   useEffect(() => {
+    let cancelled = false;
     async function loadProfile() {
+      const attempt = bootAttemptRef.current + 1;
+      bootAttemptRef.current = attempt;
+      hostDebug('bootstrap:start', {
+        attempt,
+        authReady,
+        uid: user?.uid || null,
+        hostMode,
+        pathname,
+      });
       if (!authReady) return;
       if (!user || user.isAnonymous) {
+        if (cancelled || attempt !== bootAttemptRef.current) return;
+        hostDebug('bootstrap:guest', { attempt, uid: user?.uid || null });
         clearFamilySession();
         setProfile(null);
         setAccessAllowed(true);
@@ -404,43 +434,106 @@ export default function HostRouter() {
       setBootState('loading');
       setBootstrapError(null);
       const cachedSession = loadFamilySession(user.uid);
+      hostDebug('bootstrap:cache', {
+        attempt,
+        hasCachedSession: Boolean(cachedSession),
+        hasCachedProfile: Boolean(cachedSession?.profile),
+      });
       if (cachedSession?.profile) {
         setProfile(cachedSession.profile);
         setAccessAllowed(canAccessApp(cachedSession, hostMode));
       }
 
       try {
+        hostDebug('bootstrap:verify_begin', { attempt, uid: user.uid, hostMode });
         const familySession = await verifyFamilySession(user, hostMode);
+        if (cancelled || attempt !== bootAttemptRef.current) {
+          hostDebug('bootstrap:stale_success_ignored', { attempt, uid: user.uid });
+          return;
+        }
         const loadedProfile = { ...(familySession?.profile || {}) };
-        hostLog('[HOST_AUTH] profile_loaded', { uid: user.uid, email: user.email || null, loadedProfile });
+        hostDebug('bootstrap:verify_success', {
+          attempt,
+          uid: user.uid,
+          email: user.email || null,
+          loadedProfile,
+        });
         setProfile(loadedProfile);
         const allowed = canAccessApp(familySession, hostMode);
         setAccessAllowed(allowed);
         setBootstrapError(null);
         setBootState(allowed ? 'ready' : 'denied');
       } catch (err) {
+        if (cancelled || attempt !== bootAttemptRef.current) {
+          hostDebug('bootstrap:stale_error_ignored', {
+            attempt,
+            uid: user?.uid || null,
+            message: String(err?.message || err || 'stale bootstrap error'),
+          });
+          return;
+        }
         console.warn('Failed to bootstrap family session for host routing:', err?.message || err);
+        hostDebug('bootstrap:verify_failed', {
+          attempt,
+          uid: user.uid,
+          message: String(err?.message || err || 'Session bootstrap failed'),
+          status: err?.status ?? null,
+          verifyUrl: err?.verifyUrl || null,
+        });
         const fallbackSession = loadFamilySession(user.uid);
         if (fallbackSession?.profile) {
+          hostDebug('bootstrap:fallback_session', {
+            attempt,
+            uid: user.uid,
+            role: fallbackSession?.role || null,
+          });
           setProfile(fallbackSession.profile);
           const allowed = canAccessApp(fallbackSession, hostMode);
           setAccessAllowed(allowed);
           setBootstrapError(null);
           setBootState(allowed ? 'ready' : 'denied');
         } else {
+          hostDebug('bootstrap:error_no_fallback', { attempt, uid: user.uid });
           setProfile(null);
           setAccessAllowed(true);
           setBootstrapError(err || new Error('Session bootstrap failed'));
           setBootState('error');
         }
       } finally {
+        if (cancelled || attempt !== bootAttemptRef.current) return;
+        hostDebug('bootstrap:finalize', {
+          attempt,
+          uid: user?.uid || null,
+          nextBootState: cancelled ? 'cancelled' : 'resolved',
+        });
         setProfileReady(true);
       }
     }
 
     setProfileReady(false);
     loadProfile();
+    return () => {
+      cancelled = true;
+    };
   }, [authReady, user, hostMode, bootstrapNonce]);
+
+  useEffect(() => {
+    if (!authReady || profileReady || bootState !== 'loading') return undefined;
+    const timeoutId = window.setTimeout(() => {
+      hostDebug('watchdog:triggered', {
+        uid: user?.uid || null,
+        hostMode,
+        pathname,
+        authReady,
+        profileReady,
+        bootState,
+      });
+      setBootstrapError((prev) => prev || new Error(`Session restore timed out after ${Math.round(BOOTSTRAP_TIMEOUT_MS / 1000)}s.`));
+      setBootState('error');
+      setProfileReady(true);
+    }, BOOTSTRAP_TIMEOUT_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [authReady, profileReady, bootState, user?.uid, hostMode, pathname]);
 
   useEffect(() => {
     if (!authReady || !profileReady || handledInitialRedirect.current) return;
@@ -458,6 +551,7 @@ export default function HostRouter() {
     });
 
     if (bootState === 'error') {
+      hostDebug('route:selected_after_bootstrap', { route: 'bootstrap-error', hostMode, pathname });
       handledInitialRedirect.current = true;
       return;
     }
@@ -469,6 +563,7 @@ export default function HostRouter() {
     if (shouldRedirectToModeHome) {
       const suffix = window.location.search || '';
       replacePath(`${expectedPrefix}${suffix}`, setPathname);
+      hostDebug('route:selected_after_bootstrap', { route: `${expectedPrefix}${suffix}`, hostMode, pathname });
       handledInitialRedirect.current = true;
       return;
     }
@@ -522,6 +617,7 @@ export default function HostRouter() {
       const target = resolvePostAuthTarget(profile, returnTo);
       hostLog("[REDIRECT]", { from: pathname, to: target.path });
       navigateToModePath(target.mode, target.path);
+      hostDebug('route:selected_after_bootstrap', { route: target.path, hostMode, pathname });
       handledInitialRedirect.current = true;
       return;
     }
@@ -533,6 +629,7 @@ export default function HostRouter() {
       pathname !== '/institution/activate'
     ) {
       replacePath(expectedPrefix, setPathname);
+      hostDebug('route:selected_after_bootstrap', { route: expectedPrefix, hostMode, pathname });
       handledInitialRedirect.current = true;
       return;
     }
@@ -549,6 +646,7 @@ export default function HostRouter() {
     }
 
     handledInitialRedirect.current = true;
+    hostDebug('route:selected_after_bootstrap', { route: pathname, hostMode, pathname });
   }, [authReady, profileReady, user, profile, hostMode, pathname, modeUrls, accessAllowed, bootState]);
 
   useEffect(() => {
