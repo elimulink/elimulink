@@ -30,6 +30,7 @@ from .routes.announcements import router as announcements_router
 from .routes.attendance import router as attendance_router
 from .routes.finance import router as finance_router
 from .routes.audit import router as audit_router
+from .routes.auth_verify import router as auth_verify_router
 from .routes.ai import router as ai_router
 from .routes.tts import router as tts_router
 from .routes.workflows import router as workflows_router
@@ -142,6 +143,7 @@ async def startup_log() -> None:
       print(f"[STARTUP] Alembic migration failed: {exc}")
   print(f"[STARTUP] API running | gemini_key_present={gemini_present} | APP_ID={app_id}")
 app.include_router(health_router)
+app.include_router(auth_verify_router)
 app.include_router(chat_router)
 app.include_router(admin_ai_router)
 app.include_router(admin_analytics_router)

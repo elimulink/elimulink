@@ -42,7 +42,7 @@ import {
   X,
 } from "lucide-react";
 import { auth } from "../lib/firebase";
-import { signOut } from "firebase/auth";
+import { logoutFamilySession } from "../auth/familySession";
 import { apiUrl } from "../lib/apiUrl";
 import { readScopedJson, writeScopedJson } from "../lib/userScopedStorage";
 import { getStoredPreferences, getStoredProfile } from "../lib/userSettings";
@@ -1748,11 +1748,9 @@ export default function NewChatLanding({
     clearSessionUiState();
     setIsProfileMenuOpen(false);
     setIsProfileSheetOpen(false);
-    try {
-      await signOut(auth);
-    } catch {
-      // no-op, keep frontend flow
-    }
+    await logoutFamilySession({
+      clearKeys: ["activeDepartmentId", "activeDepartmentName", "elimulink_admin_token"],
+    });
     try {
       localStorage.removeItem("elimulink_admin_token");
     } catch {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
@@ -13,6 +14,7 @@ from firebase_admin import credentials
 
 _firebase_ready = False
 _dev_fallback_warned = False
+_service_account_path = Path(__file__).resolve().parent / "keys" / "firebase-service-account.json"
 
 
 def _is_production() -> bool:
@@ -27,17 +29,28 @@ def init_firebase_admin() -> None:
         return
 
     sa_json = os.getenv("FIREBASE_ADMIN_SA", "").strip()
-    if not sa_json:
+    google_credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+
+    if sa_json:
+        sa_data = json.loads(sa_json)
+        cred_obj = credentials.Certificate(sa_data)
+        firebase_admin.initialize_app(cred_obj)
+    elif google_credentials_path:
+        cred_obj = credentials.Certificate(google_credentials_path)
+        firebase_admin.initialize_app(cred_obj)
+        sa_data = {}
+    elif _service_account_path.exists():
+        cred_obj = credentials.Certificate(str(_service_account_path))
+        firebase_admin.initialize_app(cred_obj)
+        sa_data = {}
+    else:
         if _is_production():
             raise RuntimeError(
-                "FIREBASE_ADMIN_SA is required in production for token verification."
+                "Firebase Admin credentials are required in production for token verification."
             )
         print("[AUTH_STARTUP] DEV AUTH FALLBACK ACTIVE - Firebase token verification disabled")
         _firebase_ready = False
         return
-    sa_data = json.loads(sa_json)
-    cred_obj = credentials.Certificate(sa_data)
-    firebase_admin.initialize_app(cred_obj)
 
     project_id = (sa_data or {}).get("project_id")
     frontend_project_id = os.getenv("VITE_FIREBASE_PROJECT_ID")

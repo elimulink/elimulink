@@ -5,7 +5,7 @@
   "hosting": [
     {
       "target": "elimulink-app-ai",
-      "public": "dist",
+      "public": "dist-public",
       "ignore": [
         "firebase.json",
         "**/.*",
@@ -20,7 +20,7 @@
     },
     {
       "target": "elimulink-student",
-      "public": "dist",
+      "public": "dist-student",
       "ignore": [
         "firebase.json",
         "**/.*",
@@ -35,7 +35,7 @@
     },
     {
       "target": "elimulink-institution",
-      "public": "dist",
+      "public": "dist-institution",
       "ignore": [
         "firebase.json",
         "**/.*",

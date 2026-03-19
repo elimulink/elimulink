@@ -38,7 +38,7 @@ import {
   X,
 } from "lucide-react";
 import { auth } from "../lib/firebase";
-import { signOut } from "firebase/auth";
+import { logoutFamilySession } from "../auth/familySession";
 import { apiUrl } from "../lib/apiUrl";
 import { getStoredPreferences, getStoredProfile } from "../lib/userSettings";
 import SettingsPage from "../pages/SettingsPage";
@@ -619,12 +619,10 @@ export default function StudentLanding() {
 
   async function handleLogout() {
     setIsProfileMenuOpen(false);
-    try {
-      await signOut(auth);
-    } catch {
-      // no-op, keep frontend flow
-    }
-    window.location.href = "/login?returnTo=%2Finstitution";
+    await logoutFamilySession({
+      clearKeys: ["activeDepartmentId", "activeDepartmentName", "elimulink_admin_token"],
+    });
+    window.location.href = "/login?returnTo=%2Fstudent";
   }
 
   function startNewChat() {

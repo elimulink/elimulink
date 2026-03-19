@@ -1,41 +1,29 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  browserLocalPersistence,
-  setPersistence,
-  GoogleAuthProvider,
-  createUserWithEmailAndPassword,
-  onAuthStateChanged,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  updateProfile,
-} from 'firebase/auth';
+import { browserLocalPersistence, setPersistence, updateProfile } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import App from '../App.jsx';
 import InstitutionApp from '../institution/InstitutionApp.jsx';
 import StudentApp from '../student/StudentApp.jsx';
+import StudentLoginPage from '../student/StudentLoginPage.jsx';
+import InstitutionLogin from '../pages/InstitutionLogin.jsx';
 import InstitutionActivatePage from '../pages/InstitutionActivatePage.jsx';
+import PublicLogin from '../pages/PublicLogin.jsx';
 import { auth, db, firebaseInitErrorMessage } from '../lib/firebase';
-import { apiUrl } from '../lib/apiUrl';
+import { watchFirebaseAuth } from '../auth/firebaseAuth';
+import {
+  canAccessApp,
+  clearFamilySession,
+  loadFamilySession,
+  logoutFamilySession,
+  verifyFamilySession,
+} from '../auth/familySession';
 import { getResolvedHostMode } from './hostMode';
 
 const APP_ID = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
-const INSTITUTION_EMAIL_DOMAIN = String(import.meta.env.VITE_INSTITUTION_EMAIL_DOMAIN || 'elimulink.co.ke').toLowerCase();
 const DEBUG_HOST_ROUTER = import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_HOST_ROUTER || '').trim() === '1';
-// const INSTITUTION_FALLBACK_ID = String(import.meta.env.VITE_INSTITUTION_ID || 'YOUR_INSTITUTION_ID');
-const INSTITUTION_FALLBACK_ID = String(import.meta.env.VITE_INSTITUTION_ID || 'YOUR_INSTITUTION_ID');
 
 function hostLog(...args) {
   if (DEBUG_HOST_ROUTER) console.log(...args);
-}
-
-function shouldBackfillInstitutionProfile(nextUser, profile) {
-  const email = String(nextUser?.email || '').trim().toLowerCase();
-  const matchesDomain = email.endsWith(`@${INSTITUTION_EMAIL_DOMAIN}`);
-  if (!matchesDomain) return false;
-  const missingRole = !profile?.role || profile?.role === 'public' || profile?.role === 'student_general';
-  return missingRole;
 }
 
 function profileDisplayName(profile, user) {
@@ -117,8 +105,86 @@ function sanitizeReturnTo(returnToRaw, { mode, isAuthenticated = false } = {}) {
 
 function LoadingScreen() {
   return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      Loading...
+    <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef6ff_100%)] text-slate-900 flex items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-[28px] border border-white/70 bg-white/80 px-8 py-10 text-center shadow-[0_24px_70px_rgba(15,23,42,0.10)] backdrop-blur-xl">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-600 via-blue-600 to-teal-500 text-sm font-black tracking-[0.16em] text-white shadow-[0_18px_40px_rgba(14,116,144,0.22)]">
+          EL
+        </div>
+        <div className="mt-5 text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-700/80">ElimuLink</div>
+        <div className="mt-3 text-xl font-semibold tracking-tight text-slate-950">Restoring your session</div>
+        <div className="mt-2 text-sm leading-6 text-slate-500">Verifying your workspace access and preparing the app.</div>
+      </div>
+    </div>
+  );
+}
+
+function BootstrapErrorScreen({ hostMode, error, onRetry }) {
+  const details = String(error?.message || 'Session bootstrap failed.');
+  const endpoint = String(error?.verifyUrl || '').trim();
+
+  return (
+    <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef6ff_100%)] text-slate-900 flex items-center justify-center px-4">
+      <div className="w-full max-w-lg rounded-[28px] border border-white/70 bg-white/84 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:p-8">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-700/80">Session Check</div>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">We couldn&apos;t verify this {hostMode} session yet</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          Firebase sign-in succeeded, but the backend verification route did not complete. This usually means the deployed API is missing the current AI-family verify endpoint.
+        </p>
+        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {details}
+        </div>
+        {endpoint ? (
+          <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 break-all">
+            {endpoint}
+          </div>
+        ) : null}
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <button
+            className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-500"
+            type="button"
+            onClick={onRetry}
+          >
+            Retry verification
+          </button>
+          <button
+            className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            type="button"
+            onClick={async () => {
+              await logoutFamilySession({
+                clearKeys: ['activeDepartmentId', 'activeDepartmentName', 'elimulink_admin_token'],
+              });
+              window.location.replace('/login');
+            }}
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccessDeniedScreen({ hostMode }) {
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+      <div className="max-w-md w-full rounded-xl border border-white/10 bg-slate-900 p-6">
+        <h1 className="text-lg font-bold">Access restricted</h1>
+        <p className="text-sm text-slate-300 mt-2">
+          Your current ElimuLink family account does not have access to the {hostMode} workspace.
+        </p>
+        <button
+          className="mt-4 w-full rounded bg-sky-500 px-3 py-2 text-sm font-semibold text-white"
+          type="button"
+          onClick={async () => {
+            await logoutFamilySession({
+              clearKeys: ['activeDepartmentId', 'activeDepartmentName', 'elimulink_admin_token'],
+            });
+            window.location.replace('/login');
+          }}
+        >
+          Sign out
+        </button>
+      </div>
     </div>
   );
 }
@@ -127,255 +193,77 @@ function PublicApp({ modeUrls }) {
   return <App hostMode="public" modeUrls={modeUrls} />;
 }
 
-function LoginPage({
-  mode,
-  hostMode,
-  profile,
-  user,
-  authReady,
-  onAuthSuccess,
-  onCompleteOnboarding,
-}) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState(profileDisplayName(profile, user));
+function OnboardingPage({ hostMode, user, authReady, onCompleteOnboarding }) {
+  const [fullName, setFullName] = useState(profileDisplayName(null, user));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const [signup, setSignup] = useState(false);
   const [returnTo, setReturnTo] = useState('');
-  const navigate = (nextPath) => {
-    window.history.replaceState({}, '', nextPath);
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const message = params.get('message');
     const incomingReturnTo = params.get('returnTo') || '';
-    if (message) setNotice(message);
     setReturnTo(sanitizeReturnTo(incomingReturnTo, { mode: hostMode, isAuthenticated: Boolean(user && !user.isAnonymous) }));
-  }, []);
+  }, [hostMode, user]);
 
-  const normalizeAuthError = (err) => {
-    const code = String(err?.code || '');
-    const message = String(err?.message || '');
-    if (code.includes('auth/operation-not-allowed')) {
-      return 'Firebase Auth provider disabled. Enable Email/Password and Google in Firebase Console.';
-    }
-    if (code.includes('auth/popup-closed-by-user')) {
-      return 'Google sign-in was cancelled.';
-    }
-    return message || 'Authentication failed.';
-  };
-
-  const runPostLoginSync = async (firebaseUser) => {
-    const idToken = await firebaseUser.getIdToken();
-    const response = await fetch(apiUrl('/api/auth/post-login-sync'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error || 'Post-login sync failed');
-    return data;
-  };
-
-  const handleEmailAuth = async (event) => {
-    event.preventDefault();
-    setPending(true);
-    setError('');
-    try {
-      let credential = null;
-      if (signup) {
-        credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        if (fullName.trim()) {
-          await updateProfile(credential.user, { displayName: fullName.trim() });
-        }
-        await sendEmailVerification(credential.user);
-        setNotice('Check your email to verify your account.');
-      } else {
-        credential = await signInWithEmailAndPassword(auth, email.trim(), password);
-      }
-      const synced = await runPostLoginSync(credential.user);
-      await onAuthSuccess(synced, returnTo);
-    } catch (err) {
-      setError(normalizeAuthError(err));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const handleGoogle = async () => {
-    setPending(true);
-    setError('');
-    try {
-      const provider = new GoogleAuthProvider();
-      const credential = await signInWithPopup(auth, provider);
-      const synced = await runPostLoginSync(credential.user);
-      await onAuthSuccess(synced, returnTo);
-    } catch (err) {
-      setError(normalizeAuthError(err));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  if (mode === 'onboarding') {
-    const canContinue = authReady && !!user && !pending;
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-        <div className="max-w-md w-full rounded-xl border border-white/10 bg-slate-900 p-6">
-          <h1 className="text-lg font-bold">Complete your profile</h1>
-          <p className="text-sm text-slate-300 mt-2">Your full name is required before continuing.</p>
-          {!authReady ? <div className="mt-3 text-xs text-slate-400">Loading...</div> : null}
-          {authReady && !user ? (
-            <div className="mt-3 rounded bg-amber-900/40 border border-amber-500/40 px-3 py-2 text-xs">
-              Please login again.
-              <a
-                className="ml-2 underline text-amber-200"
-                href={`/login?returnTo=${encodeURIComponent(sanitizeReturnTo('/onboarding', { mode: hostMode, isAuthenticated: false }))}`}
-              >
-                Login
-              </a>
-            </div>
-          ) : null}
-          {error && <div className="mt-3 rounded bg-red-900/40 border border-red-500/40 px-3 py-2 text-xs">{error}</div>}
-          <form
-            className="mt-4 space-y-3"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!authReady) {
-                setError('Loading...');
-                return;
-              }
-              if (!user) {
-                // isAuthenticated: false
-                const nextReturnTo = sanitizeReturnTo('/', { mode: hostMode, isAuthenticated:  true});
-                window.location.replace(`/login?returnTo=${encodeURIComponent(nextReturnTo)}`);
-                return;
-              }
-              setPending(true);
-              setError('');
-              try {
-                await onCompleteOnboarding(fullName.trim(), returnTo);
-              } catch (err) {
-                setError(String(err?.message || err || 'Failed to save profile'));
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            <input
-              className="w-full rounded border border-white/10 bg-slate-800 px-3 py-2 text-sm"
-              placeholder="Full name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-            />
-            <button
-              className="w-full rounded bg-sky-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              type="submit"
-              disabled={!canContinue}
-            >
-              {pending ? 'Saving...' : 'Continue'}
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
+  const canContinue = authReady && !!user && !pending;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
       <div className="max-w-md w-full rounded-xl border border-white/10 bg-slate-900 p-6">
-        <h1 className="text-lg font-bold">{signup ? 'Create account' : 'Sign in to continue'}</h1>
-        <p className="text-sm text-slate-300 mt-2">
-          Access on <span className="font-mono">{hostMode}.elimulink.co.ke</span> requires login.
-        </p>
-        {notice && <div className="mt-3 rounded bg-amber-900/40 border border-amber-500/40 px-3 py-2 text-xs">{notice}</div>}
+        <h1 className="text-lg font-bold">Complete your profile</h1>
+        <p className="text-sm text-slate-300 mt-2">Your full name is required before continuing.</p>
+        {!authReady ? <div className="mt-3 text-xs text-slate-400">Loading...</div> : null}
+        {authReady && !user ? (
+          <div className="mt-3 rounded bg-amber-900/40 border border-amber-500/40 px-3 py-2 text-xs">
+            Please login again.
+            <a
+              className="ml-2 underline text-amber-200"
+              href={`/login?returnTo=${encodeURIComponent(sanitizeReturnTo('/onboarding', { mode: hostMode, isAuthenticated: false }))}`}
+            >
+              Login
+            </a>
+          </div>
+        ) : null}
         {error && <div className="mt-3 rounded bg-red-900/40 border border-red-500/40 px-3 py-2 text-xs">{error}</div>}
-        <form className="mt-4 space-y-3" onSubmit={handleEmailAuth}>
-          {signup ? (
-            <input
-              className="w-full rounded border border-white/10 bg-slate-800 px-3 py-2 text-sm"
-              placeholder="Full name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-            />
-          ) : null}
+        <form
+          className="mt-4 space-y-3"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!authReady) {
+              setError('Loading...');
+              return;
+            }
+            if (!user) {
+              const nextReturnTo = sanitizeReturnTo('/', { mode: hostMode, isAuthenticated: true });
+              window.location.replace(`/login?returnTo=${encodeURIComponent(nextReturnTo)}`);
+              return;
+            }
+            setPending(true);
+            setError('');
+            try {
+              await onCompleteOnboarding(fullName.trim(), returnTo);
+            } catch (err) {
+              setError(String(err?.message || err || 'Failed to save profile'));
+            } finally {
+              setPending(false);
+            }
+          }}
+        >
           <input
             className="w-full rounded border border-white/10 bg-slate-800 px-3 py-2 text-sm"
-            placeholder="Email"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <input
-            className="w-full rounded border border-white/10 bg-slate-800 px-3 py-2 text-sm"
-            placeholder="Password"
-            type="password"
-            autoComplete={signup ? 'new-password' : 'current-password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Full name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
             required
           />
           <button
             className="w-full rounded bg-sky-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
             type="submit"
-            disabled={pending}
+            disabled={!canContinue}
           >
-            {pending ? 'Please wait...' : signup ? 'Sign up' : 'Sign in'}
+            {pending ? 'Saving...' : 'Continue'}
           </button>
         </form>
-        <button
-          className="mt-3 w-full rounded bg-white/10 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-          onClick={handleGoogle}
-          disabled={pending}
-          type="button"
-        >
-          Continue with Google
-        </button>
-        <button
-          className="mt-3 w-full text-xs text-slate-300 underline"
-          type="button"
-          onClick={() => setSignup((prev) => !prev)}
-        >
-          {signup ? 'Already have an account? Sign in' : "New here? Create account"}
-        </button>
-        {!signup ? (
-          <button
-            className="mt-2 w-full text-xs text-slate-300 underline"
-            type="button"
-            onClick={async () => {
-              setError('');
-              setNotice('');
-              try {
-                if (!email.trim()) throw new Error('Enter your email first.');
-                await sendPasswordResetEmail(auth, email.trim());
-                setNotice('Password reset email sent. Check your inbox.');
-              } catch (err) {
-                setError(normalizeAuthError(err));
-              }
-            }}
-          >
-            Forgot password?
-          </button>
-        ) : null}
-        {hostMode === 'institution' ? (
-          <button
-            className="mt-2 w-full text-xs text-slate-300 underline"
-            type="button"
-            onClick={() => navigate('/institution/activate')}
-          >
-            First-time staff/admin activation
-          </button>
-        ) : null}
       </div>
     </div>
   );
@@ -385,9 +273,13 @@ export default function HostRouter() {
   const [pathname, setPathname] = useState(window.location.pathname);
   const [authReady, setAuthReady] = useState(false);
   const [profileReady, setProfileReady] = useState(false);
+  const [bootState, setBootState] = useState('loading');
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [accessAllowed, setAccessAllowed] = useState(true);
   const [flashMessage, setFlashMessage] = useState('');
+  const [bootstrapError, setBootstrapError] = useState(null);
+  const [bootstrapNonce, setBootstrapNonce] = useState(0);
   const handledInitialRedirect = useRef(false);
   const authStateLogged = useRef(false);
   const hostRouteLogged = useRef(false);
@@ -458,11 +350,11 @@ export default function HostRouter() {
     if (!auth) {
       setUser(null);
       setAuthReady(true);
+      setBootState('guest');
       return;
     }
 
-    return onAuthStateChanged(
-      auth,
+    return watchFirebaseAuth(
       (nextUser) => {
         setUser(nextUser);
         setAuthReady(true);
@@ -471,6 +363,7 @@ export default function HostRouter() {
         console.error('HostRouter auth initialization failed:', err?.message || err);
         setUser(null);
         setAuthReady(true);
+        setBootState('guest');
       },
     );
   }, []);
@@ -483,30 +376,47 @@ export default function HostRouter() {
     async function loadProfile() {
       if (!authReady) return;
       if (!user || user.isAnonymous) {
+        clearFamilySession();
         setProfile(null);
+        setAccessAllowed(true);
+        setBootstrapError(null);
+        setBootState('guest');
         setProfileReady(true);
         return;
       }
 
+      setBootState('loading');
+      setBootstrapError(null);
+      const cachedSession = loadFamilySession(user.uid);
+      if (cachedSession?.profile) {
+        setProfile(cachedSession.profile);
+        setAccessAllowed(canAccessApp(cachedSession, hostMode));
+      }
+
       try {
-        const snap = await getDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid));
-        let loadedProfile = snap.exists() ? snap.data() : null;
+        const familySession = await verifyFamilySession(user, hostMode);
+        const loadedProfile = { ...(familySession?.profile || {}) };
         hostLog('[HOST_AUTH] profile_loaded', { uid: user.uid, email: user.email || null, loadedProfile });
-
-        if (user && shouldBackfillInstitutionProfile(user, loadedProfile)) {
-          const patch = {
-            role: 'institution_student',
-            updatedAt: serverTimestamp(),
-          };
-          await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid), patch, { merge: true });
-          loadedProfile = { ...(loadedProfile || {}), ...patch };
-          hostLog('[HOST_AUTH] institution_backfill_applied', { uid: user.uid, email: user.email || null, patch });
-        }
-
         setProfile(loadedProfile);
+        const allowed = canAccessApp(familySession, hostMode);
+        setAccessAllowed(allowed);
+        setBootstrapError(null);
+        setBootState(allowed ? 'ready' : 'denied');
       } catch (err) {
-        console.warn('Failed to load user profile for host routing:', err?.message || err);
-        setProfile(null);
+        console.warn('Failed to bootstrap family session for host routing:', err?.message || err);
+        const fallbackSession = loadFamilySession(user.uid);
+        if (fallbackSession?.profile) {
+          setProfile(fallbackSession.profile);
+          const allowed = canAccessApp(fallbackSession, hostMode);
+          setAccessAllowed(allowed);
+          setBootstrapError(null);
+          setBootState(allowed ? 'ready' : 'denied');
+        } else {
+          setProfile(null);
+          setAccessAllowed(true);
+          setBootstrapError(err || new Error('Session bootstrap failed'));
+          setBootState('error');
+        }
       } finally {
         setProfileReady(true);
       }
@@ -514,19 +424,27 @@ export default function HostRouter() {
 
     setProfileReady(false);
     loadProfile();
-  }, [authReady, user]);
+  }, [authReady, user, hostMode, bootstrapNonce]);
 
   useEffect(() => {
     if (!authReady || !profileReady || handledInitialRedirect.current) return;
 
-    const loggedIn = !!user && !user.isAnonymous;
+    const hasAuthenticatedUser = !!user && !user.isAnonymous;
+    const loggedIn = hasAuthenticatedUser && bootState === 'ready';
     const expectedPrefix = `/${hostMode}`;
     hostLog("[AUTH]", {
       host: window.location.host,
       uid: user?.uid || null,
       path: pathname,
       isAnon: user?.isAnonymous,
+      accessAllowed,
+      bootState,
     });
+
+    if (bootState === 'error') {
+      handledInitialRedirect.current = true;
+      return;
+    }
 
     const shouldRedirectToModeHome =
       pathname === '/' ||
@@ -615,7 +533,7 @@ export default function HostRouter() {
     }
 
     handledInitialRedirect.current = true;
-  }, [authReady, profileReady, user, profile, hostMode, pathname, modeUrls]);
+  }, [authReady, profileReady, user, profile, hostMode, pathname, modeUrls, accessAllowed, bootState]);
 
   useEffect(() => {
     handledInitialRedirect.current = false;
@@ -648,7 +566,26 @@ export default function HostRouter() {
     return <div style={{ padding: 16 }}>Firebase init failed: {firebaseInitErrorMessage}</div>;
   }
 
-  if (!authReady || !profileReady) return <LoadingScreen />;
+  if (!authReady || !profileReady || bootState === 'loading') return <LoadingScreen />;
+
+  if (bootState === 'error' && user && !user.isAnonymous) {
+    return (
+      <BootstrapErrorScreen
+        hostMode={hostMode}
+        error={bootstrapError}
+        onRetry={() => {
+          setBootstrapError(null);
+          setBootState('loading');
+          setProfileReady(false);
+          setBootstrapNonce((value) => value + 1);
+        }}
+      />
+    );
+  }
+
+  if (bootState === 'denied' && user && !user.isAnonymous) {
+    return <AccessDeniedScreen hostMode={hostMode} />;
+  }
 
   if (
     (hostMode === 'student' || hostMode === 'institution') &&
@@ -663,14 +600,10 @@ export default function HostRouter() {
     return <InstitutionActivatePage />;
   }
 
-  if (pathname === '/login' || pathname === '/onboarding') {
+  if (hostMode === 'student' && pathname === '/login') {
     return (
-      <LoginPage
-        mode={pathname === '/onboarding' ? 'onboarding' : 'login'}
-        hostMode={hostMode}
-        profile={profile}
-        user={user}
-        authReady={authReady}
+      <StudentLoginPage
+        profileDisplayName={profileDisplayName(profile, user)}
         onAuthSuccess={async (syncedProfile, returnTo) => {
           const merged = {
             ...(profile || {}),
@@ -689,6 +622,70 @@ export default function HostRouter() {
           navigateToModePath(target.mode, target.path);
           handledInitialRedirect.current = false;
         }}
+      />
+    );
+  }
+
+  if (hostMode === 'institution' && pathname === '/login') {
+    return (
+      <InstitutionLogin
+        hostMode={hostMode}
+        user={user}
+        profileDisplayName={profileDisplayName(profile, user)}
+        onAuthSuccess={async (syncedProfile, returnTo) => {
+          const merged = {
+            ...(profile || {}),
+            ...(syncedProfile || {}),
+            displayName: profileDisplayName(profile, auth?.currentUser),
+          };
+          setProfile(merged);
+          const complete = isProfileComplete(merged, auth?.currentUser);
+          const safeReturnTo = sanitizeReturnTo(returnTo, { mode: hostMode, isAuthenticated: true });
+          if (!complete) {
+            window.history.replaceState({}, '', `/onboarding?returnTo=${encodeURIComponent(safeReturnTo)}`);
+            setPathname('/onboarding');
+            return;
+          }
+          const target = resolvePostAuthTarget(merged, safeReturnTo);
+          navigateToModePath(target.mode, target.path);
+          handledInitialRedirect.current = false;
+        }}
+      />
+    );
+  }
+
+  if (hostMode === 'public' && pathname === '/login') {
+    return (
+      <PublicLogin
+        profileDisplayName={profileDisplayName(profile, user)}
+        onAuthSuccess={async (syncedProfile, returnTo) => {
+          const merged = {
+            ...(profile || {}),
+            ...(syncedProfile || {}),
+            displayName: profileDisplayName(profile, auth?.currentUser),
+          };
+          setProfile(merged);
+          const complete = isProfileComplete(merged, auth?.currentUser);
+          const safeReturnTo = sanitizeReturnTo(returnTo, { mode: hostMode, isAuthenticated: true });
+          if (!complete) {
+            window.history.replaceState({}, '', `/onboarding?returnTo=${encodeURIComponent(safeReturnTo)}`);
+            setPathname('/onboarding');
+            return;
+          }
+          const target = resolvePostAuthTarget(merged, safeReturnTo);
+          navigateToModePath(target.mode, target.path);
+          handledInitialRedirect.current = false;
+        }}
+      />
+    );
+  }
+
+  if (pathname === '/login' || pathname === '/onboarding') {
+    return (
+      <OnboardingPage
+        hostMode={hostMode}
+        user={user}
+        authReady={authReady}
         onCompleteOnboarding={async (fullName, returnTo) => {
           const activeUser = user || auth?.currentUser || null;
           if (!activeUser) {

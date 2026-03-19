@@ -44,8 +44,10 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { getDepartments } from './lib/institution';
-import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword } from 'firebase/auth';
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { logoutFamilySession } from './auth/familySession';
+import { verifyFamilySession } from './auth/familySession';
 
 const appId = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ''; 
@@ -475,24 +477,18 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
   const runPostLoginSync = async (firebaseUser) => {
     if (!firebaseUser) return null;
-    const idToken = await firebaseUser.getIdToken();
-    const res = await fetch(apiUrl('/api/auth/post-login-sync'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || 'Post-login sync failed');
-    const role = data?.role || 'student_general';
+    const session = await verifyFamilySession(firebaseUser, hostMode);
+    if (!session?.allowed) throw new Error('You do not have access to this workspace.');
+    const data = session.profile || {};
+    const role = data?.role || 'public_user';
     setUserRole(role);
     setUserProfile((prev) => ({
       ...(prev || {}),
       role,
-      institutionId: data?.institutionId || null,
+      institutionId: data?.institution_id || data?.institutionId || null,
       departmentId: data?.departmentId || prev?.departmentId || null,
-      subscriptionActive: data?.subscriptionActive === true,
+      app_access: data?.app_access || [],
+      default_app: data?.default_app || hostMode,
     }));
     return data;
   };
@@ -539,7 +535,9 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
   const handleLogout = async () => {
     try {
-      if (auth) await signOut(auth);
+      await logoutFamilySession({
+        clearKeys: ['activeDepartmentId', 'activeDepartmentName', 'elimulink_admin_token'],
+      });
     } catch (e) {
       console.error('Logout failed', e);
     } finally {
