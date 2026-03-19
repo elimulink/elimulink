@@ -1,0 +1,141 @@
+.elu-audio-shell {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 24px));
+  z-index: 1200;
+}
+
+.elu-audio-bar {
+  display: grid;
+  grid-template-columns: 54px auto 1fr auto 44px 44px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.elu-audio-play,
+.elu-audio-close,
+.elu-audio-more {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.elu-audio-play {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0c5ea8 0%, #49c0b8 100%);
+  color: white;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 12px 26px rgba(12, 94, 168, 0.24);
+}
+
+.elu-audio-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.elu-audio-time {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.elu-audio-range,
+.elu-audio-speed-range {
+  width: 100%;
+  accent-color: #0c5ea8;
+}
+
+.elu-audio-more,
+.elu-audio-close {
+  width: 40px;
+  height: 40px;
+  font-size: 30px;
+  line-height: 1;
+  color: #1f2937;
+  border-radius: 999px;
+}
+
+.elu-audio-more:hover,
+.elu-audio-close:hover {
+  background: rgba(241, 245, 249, 0.96);
+}
+
+.elu-audio-settings {
+  margin-top: 12px;
+  padding: 18px;
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.14);
+}
+
+.elu-audio-settings__section + .elu-audio-settings__section {
+  margin-top: 16px;
+}
+
+.elu-audio-settings__label {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 10px;
+}
+
+.elu-audio-speed-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.elu-audio-select {
+  width: 100%;
+  height: 50px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  padding: 0 14px;
+  font-size: 15px;
+}
+
+.elu-audio-done {
+  width: 100%;
+  height: 52px;
+  margin-top: 18px;
+  border: none;
+  border-radius: 18px;
+  background: linear-gradient(90deg, #0c5ea8 0%, #49c0b8 100%);
+  color: white;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .elu-audio-shell {
+    width: calc(100vw - 16px);
+    top: 10px;
+  }
+
+  .elu-audio-bar {
+    grid-template-columns: 50px auto 1fr auto 40px 40px;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 24px;
+  }
+
+  .elu-audio-time {
+    font-size: 14px;
+  }
+}

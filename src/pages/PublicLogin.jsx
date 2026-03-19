@@ -13,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { verifyFamilySession } from '../auth/familySession';
+import { requestPostSignupLock } from '../auth/secureLock';
 import '../styles/public-auth.css';
 
 function sanitizeReturnTo(returnToRaw) {
@@ -171,6 +172,7 @@ export default function PublicLogin({ onAuthSuccess, profileDisplayName }) {
         credential = await signInWithEmailAndPassword(auth, email.trim(), password);
       }
       const synced = await verifyAccess(credential.user);
+      if (signup) requestPostSignupLock(credential.user.uid, 'ai');
       await onAuthSuccess(synced, returnTo);
     } catch (err) {
       setError(normalizeAuthError(err));

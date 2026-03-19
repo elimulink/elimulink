@@ -41,6 +41,17 @@ import { auth } from "../lib/firebase";
 import { logoutFamilySession } from "../auth/familySession";
 import { apiUrl } from "../lib/apiUrl";
 import { getStoredPreferences, getStoredProfile } from "../lib/userSettings";
+import AttachmentChipsTray from "../shared/chat-media/AttachmentChipsTray.jsx";
+import ChatMediaPreviewModal from "../shared/chat-media/ImagePreviewModal.jsx";
+import ScreenshotPreviewToast from "../shared/chat-media/ScreenshotPreviewToast.jsx";
+import useCapturedMedia from "../shared/chat-media/useCapturedMedia.js";
+import AudioPlaybackBar from "../shared/audio/AudioPlaybackBar.jsx";
+import AudioSettingsPanel from "../shared/audio/AudioSettingsPanel.jsx";
+import { useAudioPlayer } from "../shared/audio/useAudioPlayer.js";
+import "../shared/audio/audio-ui.css";
+import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
+import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
+import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
 import SettingsPage from "../pages/SettingsPage";
 import NotebookPage from "../pages/NotebookPage";
 import SubgroupRoom from "../pages/SubgroupRoom";
@@ -230,7 +241,20 @@ function isErrorText(text) {
   return value.includes("failed to reach ai service") || value.includes("error (");
 }
 
-function Bubble({ role, text, onAssistantSpeak, onRetry, onLearnMore, onCopy, onEdit, isCopied }) {
+function Bubble({
+  role,
+  text,
+  imageSearchResults = [],
+  imageSearchQuery = "",
+  onImagePreview,
+  onImageReuse,
+  onAssistantSpeak,
+  onRetry,
+  onLearnMore,
+  onCopy,
+  onEdit,
+  isCopied,
+}) {
   const isUser = role === "user";
   const isError = !isUser && isErrorText(text);
   return (
@@ -243,6 +267,17 @@ function Bubble({ role, text, onAssistantSpeak, onRetry, onLearnMore, onCopy, on
             : "bg-white text-slate-900 border border-slate-200 rounded-bl-md",
         ].join(" ")}
       >
+        {!isUser && imageSearchResults.length ? (
+          <div className="mb-3">
+            <ImageSearchResults
+              query={imageSearchQuery}
+              results={imageSearchResults}
+              onPreview={onImagePreview}
+              onReuse={onImageReuse}
+            />
+          </div>
+        ) : null}
+
         <div>{text}</div>
 
         {!isUser ? (
@@ -397,11 +432,24 @@ export default function StudentLanding() {
   const promptInputRef = useRef(null);
   const lastSpokenRef = useRef({ text: "", at: 0 });
 
-  const [attachments, setAttachments] = useState([]);
+  const [imageSearchPreview, setImageSearchPreview] = useState(null);
+  const audioPlayer = useAudioPlayer({ defaultVoice: "Caspian", defaultLanguage: "English" });
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const scanInputRef = useRef(null);
+  const {
+    mediaItems: attachments,
+    previewItem,
+    toastItem,
+    addFiles: addCapturedFiles,
+    removeMedia,
+    clearMedia,
+    openPreview,
+    closePreview,
+    dismissToast,
+    handlePaste,
+  } = useCapturedMedia();
 
   useEffect(() => {
     try {
@@ -657,23 +705,11 @@ export default function StudentLanding() {
   }
 
   function addFiles(fileList) {
-    if (!fileList || fileList.length === 0) return;
-    const next = [];
-    for (const f of Array.from(fileList)) {
-      const url = URL.createObjectURL(f);
-      next.push({
-        id: `${f.name}-${f.size}-${f.lastModified}-${Math.random().toString(16).slice(2)}`,
-        name: f.name,
-        type: f.type || "application/octet-stream",
-        url,
-        file: f,
-      });
-    }
-    setAttachments((prev) => [...prev, ...next]);
+    addCapturedFiles(fileList, "file");
   }
 
   function removeAttachment(id) {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    removeMedia(id);
   }
 
   function toggleMic() {
@@ -721,6 +757,7 @@ export default function StudentLanding() {
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
+    const imageSearchQuery = pendingAttachments.length === 0 ? getImageSearchQuery(clean) : "";
 
     const attachSummary =
       pendingAttachments.length > 0
@@ -733,7 +770,36 @@ export default function StudentLanding() {
     );
     if (clean) setLastPrompt(clean);
     setInput("");
-    setAttachments([]);
+    clearMedia();
+
+    if (imageSearchQuery) {
+      try {
+        const results = await searchWebImages(imageSearchQuery, { limit: 8 });
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: results.length
+                ? `Here are some web image results for "${imageSearchQuery}".`
+                : `I couldn't find image results for "${imageSearchQuery}" right now.`,
+              imageSearchResults: results,
+              imageSearchQuery,
+            },
+          ],
+          clean || "Web image search"
+        );
+      } catch (error) {
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            { role: "assistant", text: String(error?.message || "Web image search is unavailable right now.") },
+          ],
+          clean || "Web image search"
+        );
+      }
+      return;
+    }
 
     try {
       const token = await auth?.currentUser?.getIdToken(true).catch(() => null);
@@ -794,17 +860,12 @@ export default function StudentLanding() {
   }
 
   function speakAssistantText(text) {
-    if (!text || !("speechSynthesis" in window)) return;
+    if (!text) return;
     const now = Date.now();
     const normalized = String(text).trim();
     if (!normalized) return;
     if (lastSpokenRef.current.text === normalized && now - lastSpokenRef.current.at < 2500) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(normalized);
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    utterance.lang = resolveSpeechLanguage(settingsPrefs?.language);
-    window.speechSynthesis.speak(utterance);
+    audioPlayer.playText(normalized);
     lastSpokenRef.current = { text: normalized, at: now };
   }
 
@@ -1820,6 +1881,10 @@ export default function StudentLanding() {
                   key={idx}
                   role={m.role}
                   text={m.text}
+                  imageSearchResults={m.imageSearchResults || []}
+                  imageSearchQuery={m.imageSearchQuery || ""}
+                  onImagePreview={setImageSearchPreview}
+                  onImageReuse={(result) => setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`)}
                   onAssistantSpeak={speakAssistantText}
                   onRetry={() => {
                     if (lastPrompt) sendMessage(lastPrompt);
@@ -1834,7 +1899,13 @@ export default function StudentLanding() {
             </div>
 
             <div className="fixed left-0 right-0 bottom-0 bg-white/95 backdrop-blur border-t border-slate-200 px-3 py-3">
-              <div className="max-w-xl mx-auto flex items-end gap-2">
+              <div className="max-w-xl mx-auto">
+                <AttachmentChipsTray
+                  items={attachments}
+                  onPreview={openPreview}
+                  onRemove={removeAttachment}
+                />
+                <div className="flex items-end gap-2">
                 <div ref={attachmentMenuRef} className="relative">
                   <button
                     onClick={() => setIsAttachmentMenuOpen((v) => !v)}
@@ -1896,6 +1967,7 @@ export default function StudentLanding() {
                     rows={1}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
+                    onPaste={handlePaste}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
@@ -1918,6 +1990,7 @@ export default function StudentLanding() {
                 >
                   <Send size={16} />
                 </button>
+              </div>
               </div>
             </div>
           </div>
@@ -1960,6 +2033,10 @@ export default function StudentLanding() {
                     key={idx}
                     role={m.role}
                     text={m.text}
+                    imageSearchResults={m.imageSearchResults || []}
+                    imageSearchQuery={m.imageSearchQuery || ""}
+                    onImagePreview={setImageSearchPreview}
+                    onImageReuse={(result) => setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`)}
                     onAssistantSpeak={speakAssistantText}
                     onRetry={() => {
                       if (lastPrompt) sendMessage(lastPrompt);
@@ -1988,28 +2065,11 @@ export default function StudentLanding() {
                 </div>
               ) : null}
 
-              {attachments.length > 0 ? (
-                <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 shrink-0">
-                  <div className="text-xs font-semibold text-slate-500">Attachments</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {attachments.map((a) => (
-                      <div
-                        key={a.id}
-                        className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
-                      >
-                        <span className="text-xs text-slate-700">{a.name}</span>
-                        <button
-                          className="text-xs text-slate-500 hover:text-slate-900"
-                          onClick={() => removeAttachment(a.id)}
-                          title="Remove"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+              <AttachmentChipsTray
+                items={attachments}
+                onPreview={openPreview}
+                onRemove={removeAttachment}
+              />
 
               <div ref={attachmentMenuRef} className="mt-3 flex items-end gap-2 shrink-0 relative">
                 <button
@@ -2070,6 +2130,7 @@ export default function StudentLanding() {
                     ref={promptInputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
+                    onPaste={handlePaste}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") sendMessage(input);
                     }}
@@ -2125,6 +2186,43 @@ export default function StudentLanding() {
           ) : null}
         </main>
       </div>
+      {audioPlayer.isOpen ? (
+        <div className="elu-audio-shell">
+          <AudioPlaybackBar
+            isPlaying={audioPlayer.isPlaying}
+            currentTime={audioPlayer.currentTime}
+            duration={audioPlayer.duration}
+            onTogglePlay={audioPlayer.togglePlay}
+            onSeek={audioPlayer.seekTo}
+            onClose={audioPlayer.closePlayer}
+            onOpenSettings={() => audioPlayer.setIsSettingsOpen((value) => !value)}
+          />
+          {audioPlayer.isSettingsOpen ? (
+            <AudioSettingsPanel
+              playbackRate={audioPlayer.playbackRate}
+              setPlaybackRate={audioPlayer.setPlaybackRate}
+              voice={audioPlayer.voice}
+              setVoice={audioPlayer.setVoice}
+              language={audioPlayer.language}
+              setLanguage={audioPlayer.setLanguage}
+              voices={audioPlayer.voices}
+              languages={audioPlayer.languages}
+              onDone={() => audioPlayer.setIsSettingsOpen(false)}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      {toastItem ? (
+        <div className="fixed left-1/2 -translate-x-1/2 z-[95] bottom-[calc(120px+env(safe-area-inset-bottom))] md:bottom-6">
+          <ScreenshotPreviewToast
+            item={toastItem}
+            onPreview={openPreview}
+            onDismiss={dismissToast}
+          />
+        </div>
+      ) : null}
+      <ChatMediaPreviewModal item={previewItem} onClose={closePreview} />
+      <ImageSearchPreviewModal result={imageSearchPreview} onClose={() => setImageSearchPreview(null)} />
     </div>
   );
 }

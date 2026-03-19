@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { browserLocalPersistence, setPersistence, updateProfile } from 'firebase/auth';
+import { browserLocalPersistence, sendPasswordResetEmail, setPersistence, updateProfile } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import App from '../App.jsx';
+import SecureLockScreen from '../components/SecureLockScreen.jsx';
 import InstitutionApp from '../institution/InstitutionApp.jsx';
 import StudentApp from '../student/StudentApp.jsx';
 import StudentLoginPage from '../student/StudentLoginPage.jsx';
@@ -17,6 +18,12 @@ import {
   logoutFamilySession,
   verifyFamilySession,
 } from '../auth/familySession';
+import {
+  unlockWithBiometrics,
+  unlockWithPasskey,
+  unlockWithPassword,
+} from '../auth/secureLock';
+import useSecureSessionLock from '../hooks/useSecureSessionLock';
 import { getResolvedHostMode } from './hostMode';
 
 const APP_ID = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
@@ -288,6 +295,15 @@ export default function HostRouter() {
     () => getResolvedHostMode(window.location.hostname),
     [],
   );
+  const {
+    lockState,
+    clearLock,
+    capabilities: secureUnlockCapabilities,
+  } = useSecureSessionLock({
+    user,
+    family: 'ai',
+    enabled: Boolean(user && !user.isAnonymous),
+  });
 
   useEffect(() => {
     hostLog('[HOST_MODE]', { host: window.location.host, mode: hostMode });
@@ -562,6 +578,23 @@ export default function HostRouter() {
     </>
   );
 
+  const finalizeSecureUnlock = async (unlockAction) => {
+    const activeUser = user || auth?.currentUser || null;
+    if (!activeUser) throw new Error('Your session is no longer available. Please sign in again.');
+    await unlockAction(activeUser);
+    const refreshedSession = await verifyFamilySession(activeUser, hostMode);
+    const allowed = canAccessApp(refreshedSession, hostMode);
+    if (!allowed) {
+      setAccessAllowed(false);
+      setBootState('denied');
+      throw new Error('Your current account no longer has access to this workspace.');
+    }
+    setProfile({ ...(profile || {}), ...(refreshedSession?.profile || {}) });
+    setAccessAllowed(true);
+    setBootState('ready');
+    clearLock();
+  };
+
   if (firebaseInitErrorMessage) {
     return <div style={{ padding: 16 }}>Firebase init failed: {firebaseInitErrorMessage}</div>;
   }
@@ -585,6 +618,32 @@ export default function HostRouter() {
 
   if (bootState === 'denied' && user && !user.isAnonymous) {
     return <AccessDeniedScreen hostMode={hostMode} />;
+  }
+
+  if (user && !user.isAnonymous && bootState === 'ready' && lockState?.locked) {
+    return (
+      <SecureLockScreen
+        user={user}
+        profile={profile}
+        lockReason={lockState.reason}
+        capabilities={secureUnlockCapabilities}
+        onUnlockPassword={(password) => finalizeSecureUnlock((activeUser) => unlockWithPassword(activeUser, password))}
+        onUnlockBiometric={() => finalizeSecureUnlock((activeUser) => unlockWithBiometrics(activeUser))}
+        onUnlockPasskey={() => finalizeSecureUnlock(() => unlockWithPasskey())}
+        onForgotPassword={async () => {
+          const email = String(user?.email || '').trim();
+          if (!email) throw new Error('Password reset is not available for this account.');
+          await sendPasswordResetEmail(auth, email);
+        }}
+        onSignOut={async () => {
+          clearLock();
+          await logoutFamilySession({
+            clearKeys: ['activeDepartmentId', 'activeDepartmentName', 'elimulink_admin_token'],
+          });
+          window.location.replace('/login');
+        }}
+      />
+    );
   }
 
   if (

@@ -14,6 +14,7 @@ import {
 import { ArrowRight, Building2, ShieldCheck, Smartphone } from "lucide-react";
 import { auth } from "../lib/firebase";
 import { resolveAppName, verifyFamilySession } from "../auth/familySession";
+import { requestPostSignupLock } from "../auth/secureLock";
 import "../styles/institution-auth.css";
 
 function sanitizeReturnTo(returnToRaw, mode = "institution", isAuthenticated = false) {
@@ -152,6 +153,7 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
         credential = await signInWithEmailAndPassword(auth, email.trim(), password);
       }
       const synced = await verifyAccess(credential.user);
+      if (signup) requestPostSignupLock(credential.user.uid, "ai");
       await onAuthSuccess(synced, returnTo);
     } catch (err) {
       setError(normalizeAuthError(err));

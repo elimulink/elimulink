@@ -46,6 +46,17 @@ import { logoutFamilySession } from "../auth/familySession";
 import { apiUrl } from "../lib/apiUrl";
 import { readScopedJson, writeScopedJson } from "../lib/userScopedStorage";
 import { getStoredPreferences, getStoredProfile } from "../lib/userSettings";
+import AttachmentChipsTray from "../shared/chat-media/AttachmentChipsTray.jsx";
+import ChatMediaPreviewModal from "../shared/chat-media/ImagePreviewModal.jsx";
+import ScreenshotPreviewToast from "../shared/chat-media/ScreenshotPreviewToast.jsx";
+import useCapturedMedia from "../shared/chat-media/useCapturedMedia.js";
+import AudioPlaybackBar from "../shared/audio/AudioPlaybackBar.jsx";
+import AudioSettingsPanel from "../shared/audio/AudioSettingsPanel.jsx";
+import { useAudioPlayer } from "../shared/audio/useAudioPlayer.js";
+import "../shared/audio/audio-ui.css";
+import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
+import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
+import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
 import SettingsPage from "./SettingsPage";
 import NotebookPage from "./NotebookPage";
 import SubgroupRoom from "./SubgroupRoom";
@@ -585,6 +596,10 @@ function Bubble({
   role,
   text,
   streaming = false,
+  imageSearchResults = [],
+  imageSearchQuery = "",
+  onImagePreview,
+  onImageReuse,
   onAssistantSpeak,
   onRetry,
   onLearnMore,
@@ -703,6 +718,14 @@ function Bubble({
           <div className="leading-relaxed">{text}</div>
         ) : (
           <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 md:leading-[1.78] text-slate-800/95">
+            {imageSearchResults.length ? (
+              <ImageSearchResults
+                query={imageSearchQuery}
+                results={imageSearchResults}
+                onPreview={onImagePreview}
+                onReuse={onImageReuse}
+              />
+            ) : null}
             {assistantParagraphs.length ? (
               assistantParagraphs.map((block, idx) => renderAssistantBlock(block, idx))
             ) : streaming ? (
@@ -1065,17 +1088,35 @@ export default function NewChatLanding({
   const mobileHeightMapRef = useRef(new Map());
   const desktopHeightMapRef = useRef(new Map());
 
-  const [attachments, setAttachments] = useState([]);
   const fileInputRef = useRef(null);
   const attachmentSourceRef = useRef("file");
   const [fileAcceptMode, setFileAcceptMode] = useState("");
   const [fileCaptureMode, setFileCaptureMode] = useState("");
+  const [imageSearchPreview, setImageSearchPreview] = useState(null);
+  const audioPlayer = useAudioPlayer({ defaultVoice: "Caspian", defaultLanguage: "English" });
+  const {
+    mediaItems: attachments,
+    previewItem,
+    toastItem,
+    addFiles: addCapturedFiles,
+    removeMedia,
+    clearMedia,
+    openPreview,
+    closePreview,
+    dismissToast,
+    handlePaste,
+  } = useCapturedMedia();
+
+  useEffect(() => {
+    setIsSpeaking(audioPlayer.isPlaying);
+    setSpeakingText(audioPlayer.isPlaying ? audioPlayer.activeText : "");
+  }, [audioPlayer.activeText, audioPlayer.isPlaying]);
 
   function clearSessionUiState() {
     setChats([]);
     setActiveChatId(null);
     setInput("");
-    setAttachments([]);
+    clearMedia();
     setNotifications([]);
     setSelectedStarter?.(null);
     setStarterSuggestions?.([]);
@@ -1823,25 +1864,11 @@ export default function NewChatLanding({
   }
 
   function addFiles(fileList, source = "file") {
-    if (!fileList || fileList.length === 0) return;
-    const next = [];
-    for (const f of Array.from(fileList)) {
-      const url = URL.createObjectURL(f);
-      next.push({
-        id: `${f.name}-${f.size}-${f.lastModified}-${Math.random().toString(16).slice(2)}`,
-        name: f.name,
-        size: f.size,
-        type: f.type || "application/octet-stream",
-        url,
-        file: f,
-        source,
-      });
-    }
-    setAttachments((prev) => [...prev, ...next]);
+    addCapturedFiles(fileList, source);
   }
 
   function removeAttachment(id) {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    removeMedia(id);
   }
 
   function toggleAttachmentPanel() {
@@ -2201,6 +2228,7 @@ export default function NewChatLanding({
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
+    const imageSearchQuery = pendingAttachments.length === 0 ? getImageSearchQuery(clean) : "";
 
     const attachSummary =
       pendingAttachments.length > 0
@@ -2220,10 +2248,46 @@ export default function NewChatLanding({
     );
     if (clean) setLastPrompt(clean);
     setInput("");
-    setAttachments([]);
+    clearMedia();
     setSelectedStarter(null);
     setStarterSuggestions([]);
     requestAnimationFrame(() => scrollToBottom("smooth"));
+
+    if (imageSearchQuery) {
+      try {
+        const results = await searchWebImages(imageSearchQuery, { limit: 8 });
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: results.length
+                ? `Here are some web image results for "${imageSearchQuery}". You can preview, open the source, or reuse one in your workspace flow.`
+                : `I couldn't find image results for "${imageSearchQuery}" right now.`,
+              imageSearchResults: results,
+              imageSearchQuery,
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || untitledChatBase
+        );
+      } catch (error) {
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: String(error?.message || "Web image search is unavailable right now."),
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || untitledChatBase
+        );
+      }
+      return;
+    }
 
     let streamId = null;
     try {
@@ -2291,53 +2355,13 @@ export default function NewChatLanding({
       .trim();
   }
 
-  function resolveTtsLang() {
-    const storedPrefs = getStoredPreferences({}, currentUid);
-    const storedLang = readScopedJson(currentUid, "language", null);
-    const rawLang =
-      settingsPrefs?.language ||
-      storedPrefs?.language ||
-      storedLang ||
-      "en-US";
-    return resolveSpeechLanguage(rawLang);
-  }
-
-  function pickVoice(allVoices, lang) {
-    if (!Array.isArray(allVoices) || allVoices.length === 0) return null;
-    const normalized = String(lang || "").toLowerCase();
-    const base = normalized.split("-")[0];
-    const byLang = allVoices.filter((v) => String(v.lang || "").toLowerCase().startsWith(normalized));
-    const byBase = allVoices.filter((v) => String(v.lang || "").toLowerCase().startsWith(base));
-    const byEn = allVoices.filter((v) => String(v.lang || "").toLowerCase().startsWith("en"));
-    const preferGoogle = (list) => list.find((v) => String(v.name || "").toLowerCase().includes("google")) || list[0];
-    return preferGoogle(byLang) || preferGoogle(byBase) || preferGoogle(byEn) || null;
-  }
-
   function speakText(rawText) {
-    if (!rawText || !("speechSynthesis" in window)) return;
+    if (!rawText) return;
     const cleaned = stripMarkdown(rawText);
     if (!cleaned) return;
     const clipped = cleaned.length > 1800 ? `${cleaned.slice(0, 1800)}…` : cleaned;
     const now = Date.now();
-    window.speechSynthesis.cancel();
-    setIsSpeaking(true);
-    setSpeakingText(rawText);
-    const utterance = new SpeechSynthesisUtterance(clipped);
-    const resolvedLang = resolveTtsLang() || "en-US";
-    const chosenVoice = pickVoice(voices, resolvedLang);
-    utterance.lang = resolvedLang;
-    if (chosenVoice) utterance.voice = chosenVoice;
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      setSpeakingText("");
-    };
-    utterance.onerror = () => {
-      setIsSpeaking(false);
-      setSpeakingText("");
-    };
-    window.speechSynthesis.speak(utterance);
+    audioPlayer.playText(clipped);
     lastSpokenRef.current = { text: clipped, at: now };
   }
 
@@ -3554,6 +3578,13 @@ export default function NewChatLanding({
                       role={m.role}
                       text={m.text}
                       streaming={Boolean(m.streaming)}
+                      imageSearchResults={m.imageSearchResults || []}
+                      imageSearchQuery={m.imageSearchQuery || ""}
+                      onImagePreview={setImageSearchPreview}
+                      onImageReuse={(result) => {
+                        setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`);
+                        requestAnimationFrame(() => focusPromptInput());
+                      }}
                       onAssistantSpeak={speakAssistantText}
                       isSpeaking={isSpeaking}
                       speakingText={speakingText}
@@ -3609,26 +3640,11 @@ export default function NewChatLanding({
                   ) : null}
 
                   <div className="surface-elevated rounded-[26px] border border-slate-200/90 bg-white/90 backdrop-blur-md px-2.5 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
-                    {attachments.length > 0 ? (
-                      <div className="mb-2.5 flex flex-wrap gap-1.5 px-1">
-                        {attachments.map((a) => (
-                          <div
-                            key={a.id}
-                            className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/90 px-2.5 py-1.5 shadow-[0_2px_10px_rgba(15,23,42,0.04)]"
-                          >
-                            <span className="text-[12px] font-medium text-slate-700 truncate max-w-[130px]">{a.name}</span>
-                            <span className="text-[10px] text-slate-500">{formatFileSize(a.size)}</span>
-                            <button
-                              className="rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                              onClick={() => removeAttachment(a.id)}
-                              title="Remove"
-                            >
-                              <X size={12} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
+                    <AttachmentChipsTray
+                      items={attachments}
+                      onPreview={openPreview}
+                      onRemove={removeAttachment}
+                    />
 
                     <div className="flex items-end gap-2">
                       <div ref={mobileAttachmentMenuRef} className="relative shrink-0">
@@ -3734,14 +3750,15 @@ export default function NewChatLanding({
                         rows={1}
                         value={input}
                         onChange={(e) => handleComposerInputChange(e.target.value, e.target)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            sendMessage(input);
-                          }
-                        }}
-                        className="min-h-[42px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400"
-                        placeholder="Type your message..."
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage(input);
+                        }
+                      }}
+                      onPaste={handlePaste}
+                      className="min-h-[42px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400"
+                      placeholder="Type your message..."
                       />
 
                       <button
@@ -3842,6 +3859,13 @@ export default function NewChatLanding({
                       role={m.role}
                       text={m.text}
                       streaming={Boolean(m.streaming)}
+                      imageSearchResults={m.imageSearchResults || []}
+                      imageSearchQuery={m.imageSearchQuery || ""}
+                      onImagePreview={setImageSearchPreview}
+                      onImageReuse={(result) => {
+                        setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`);
+                        requestAnimationFrame(() => focusPromptInput());
+                      }}
                       onAssistantSpeak={speakAssistantText}
                       isSpeaking={isSpeaking}
                       speakingText={speakingText}
@@ -3916,26 +3940,11 @@ export default function NewChatLanding({
 
               <div ref={desktopAttachmentMenuRef} className="mt-3 shrink-0 relative max-w-[760px] w-full mx-auto border-t border-slate-200/70 pt-4 pb-1">
                 <div className="surface-elevated rounded-[28px] border border-slate-200/85 bg-white/95 backdrop-blur-md px-3 py-2.5 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition focus-within:border-sky-300/70 focus-within:ring-2 focus-within:ring-sky-100/80">
-                  {attachments.length > 0 ? (
-                    <div className="mb-2.5 flex flex-wrap gap-1.5">
-                      {attachments.map((a) => (
-                        <div
-                          key={a.id}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/90 px-2.5 py-1.5"
-                        >
-                          <span className="text-[12px] font-medium text-slate-700 truncate max-w-[220px]">{a.name}</span>
-                          <span className="text-[10px] text-slate-500">{formatFileSize(a.size)}</span>
-                          <button
-                            className="rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                            onClick={() => removeAttachment(a.id)}
-                            title="Remove"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+                  <AttachmentChipsTray
+                    items={attachments}
+                    onPreview={openPreview}
+                    onRemove={removeAttachment}
+                  />
 
                   <div className="flex items-end gap-2">
                     <button
@@ -3958,6 +3967,7 @@ export default function NewChatLanding({
                           sendMessage(input);
                         }
                       }}
+                      onPaste={handlePaste}
                       className="min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400"
                       placeholder="Type your message..."
                     />
@@ -4111,11 +4121,47 @@ export default function NewChatLanding({
         </main>
       </div>
       </div>
+      {audioPlayer.isOpen ? (
+        <div className="elu-audio-shell">
+          <AudioPlaybackBar
+            isPlaying={audioPlayer.isPlaying}
+            currentTime={audioPlayer.currentTime}
+            duration={audioPlayer.duration}
+            onTogglePlay={audioPlayer.togglePlay}
+            onSeek={audioPlayer.seekTo}
+            onClose={audioPlayer.closePlayer}
+            onOpenSettings={() => audioPlayer.setIsSettingsOpen((value) => !value)}
+          />
+
+          {audioPlayer.isSettingsOpen ? (
+            <AudioSettingsPanel
+              playbackRate={audioPlayer.playbackRate}
+              setPlaybackRate={audioPlayer.setPlaybackRate}
+              voice={audioPlayer.voice}
+              setVoice={audioPlayer.setVoice}
+              language={audioPlayer.language}
+              setLanguage={audioPlayer.setLanguage}
+              voices={audioPlayer.voices}
+              languages={audioPlayer.languages}
+              onDone={() => audioPlayer.setIsSettingsOpen(false)}
+            />
+          ) : null}
+        </div>
+      ) : null}
       {feedbackToast.open ? (
         <div className="fixed left-1/2 -translate-x-1/2 z-[90] bottom-[calc(82px+env(safe-area-inset-bottom))] md:bottom-5">
           <div className="rounded-xl border border-slate-200 bg-slate-900 text-white/95 px-4 py-2 text-sm shadow-lg">
             {feedbackToast.text || "Thank you for your feedback!"}
           </div>
+        </div>
+      ) : null}
+      {toastItem ? (
+        <div className="fixed left-1/2 -translate-x-1/2 z-[95] bottom-[calc(138px+env(safe-area-inset-bottom))] md:bottom-6">
+          <ScreenshotPreviewToast
+            item={toastItem}
+            onPreview={openPreview}
+            onDismiss={dismissToast}
+          />
         </div>
       ) : null}
       <div
@@ -4134,6 +4180,8 @@ export default function NewChatLanding({
           />
         </div>
       </div>
+      <ChatMediaPreviewModal item={previewItem} onClose={closePreview} />
+      <ImageSearchPreviewModal result={imageSearchPreview} onClose={() => setImageSearchPreview(null)} />
     </div>
   );
 }
