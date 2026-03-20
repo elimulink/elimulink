@@ -5,7 +5,7 @@ import InstitutionAssignments from "./pages/institution/InstitutionAssignments";
 import InstitutionHome from "./pages/institution/InstitutionHome";
 import { app, db, auth, firebaseMissingEnvVars, firebaseInitErrorMessage } from './lib/firebase';
 import imageAPI from './services/imageAPI.js';
-import { isSpeechRecognitionSupported, startRecognition, stopRecognition, speak, cancelSpeak } from './lib/voice';
+import { isSpeechRecognitionSupported, startRecognition, stopRecognition } from './lib/voice';
 import { 
   Plus, 
   FolderHeart, 
@@ -44,13 +44,17 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { getDepartments } from './lib/institution';
+import { getStoredLanguage } from './lib/userSettings';
 import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword } from 'firebase/auth';
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 import { logoutFamilySession } from './auth/familySession';
 import { verifyFamilySession } from './auth/familySession';
+import AudioPlaybackBar from './shared/audio/AudioPlaybackBar.jsx';
+import AudioSettingsPanel from './shared/audio/AudioSettingsPanel.jsx';
+import { useAudioPlayer } from './shared/audio/useAudioPlayer.js';
+import './shared/audio/audio-ui.css';
 
 const appId = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ''; 
 const INSTITUTION_EMAIL_DOMAIN = String(import.meta.env.VITE_INSTITUTION_EMAIL_DOMAIN || 'elimulink.co.ke').toLowerCase();
 const INSTITUTION_FALLBACK_ID = String(import.meta.env.VITE_INSTITUTION_ID || 'YOUR_INSTITUTION_ID');
 // API base for backend (set this in Vercel to your Render service URL)
@@ -92,31 +96,6 @@ async function fetchWithErrorLog(url, options = {}) {
     console.error(`[API] Failed to fetch ${url}:`, err.message);
     throw err;
   }
-}
-
-// PCM to WAV converter for TTS
-function encodeWAV(samples, sampleRate) {
-  const buffer = new ArrayBuffer(44 + samples.length * 2);
-  const view = new DataView(buffer);
-  const writeString = (offset, string) => {
-    for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
-  };
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + samples.length * 2, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(36, 'data');
-  view.setUint32(40, samples.length * 2, true);
-  let offset = 44;
-  for (let i = 0; i < samples.length; i++, offset += 2) view.setInt16(offset, samples[i], true);
-  return buffer;
 }
 
 // Greeting helper used on Home
@@ -256,6 +235,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
     const saved = localStorage.getItem('voiceEnabled');
     return saved == null ? true : saved === 'true';
   });
+  const [audioLanguage, setAudioLanguage] = useState(() => getStoredLanguage('en-US'));
   const [onboardEmail, setOnboardEmail] = useState('');
   const [onboardRegNo, setOnboardRegNo] = useState('');
   const [onboardInstitutions, setOnboardInstitutions] = useState([]);
@@ -265,6 +245,10 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
     hostMode === 'institution' ||
     (typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('institution.'));
   const speechSupported = isSpeechRecognitionSupported();
+  const audioPlayer = useAudioPlayer({
+    uid: user?.uid || null,
+    appLanguage: audioLanguage,
+  });
 
   // Time-aware greeting helper (keeps inside component scope)
   const getGreeting = () => {
@@ -498,16 +482,25 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
   }, [voiceEnabled]);
 
   useEffect(() => {
+    const syncAudioLanguage = () => {
+      setAudioLanguage(getStoredLanguage('en-US', user?.uid || null));
+    };
+    syncAudioLanguage();
+    window.addEventListener('elimulink-preferences-change', syncAudioLanguage);
+    return () => window.removeEventListener('elimulink-preferences-change', syncAudioLanguage);
+  }, [user?.uid]);
+
+  useEffect(() => {
     if (!isInstitutionHost) {
       stopRecognition();
-      cancelSpeak();
+      audioPlayer.closePlayer();
       setIsListening(false);
     }
     return () => {
       stopRecognition();
-      cancelSpeak();
+      audioPlayer.closePlayer();
     };
-  }, [isInstitutionHost]);
+  }, [audioPlayer.closePlayer, isInstitutionHost]);
 
   const handleMicToggle = () => {
     if (!isInstitutionHost || !speechSupported) return;
@@ -530,7 +523,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
   const speakIfInstitutionVoiceEnabled = (text) => {
     if (!isInstitutionHost || !voiceEnabled) return;
-    speak(text);
+    audioPlayer.playText(text);
   };
 
   const handleLogout = async () => {
@@ -766,30 +759,8 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, isThinking]);
 
-  const handleTTS = async (text) => {
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: text.substring(0, 300) }] }],
-          generationConfig: { 
-            responseModalities: ["AUDIO"], 
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } } 
-          }
-        })
-      });
-      const data = await res.json();
-      const base64Data = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (!base64Data) return;
-      const binaryString = window.atob(base64Data);
-      const bytes = new Int16Array(binaryString.length / 2);
-      for (let i = 0; i < binaryString.length; i += 2) {
-        bytes[i / 2] = binaryString.charCodeAt(i) | (binaryString.charCodeAt(i + 1) << 8);
-      }
-      const wavBuffer = encodeWAV(bytes, 24000);
-      const audio = new Audio(URL.createObjectURL(new Blob([wavBuffer], { type: 'audio/wav' })));
-      audio.play();
-    } catch (e) { console.error(e); }
+  const handleTTS = (text) => {
+    audioPlayer.playText(text);
   };
 
   const handleFileUpload = () => fileInputRef.current?.click();
@@ -1847,13 +1818,13 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            setVoiceEnabled((prev) => {
-                              const next = !prev;
-                              if (!next) cancelSpeak();
-                              return next;
-                            });
-                          }}
+                            onClick={() => {
+                              setVoiceEnabled((prev) => {
+                                const next = !prev;
+                                if (!next) audioPlayer.closePlayer();
+                                return next;
+                              });
+                            }}
                           title={voiceEnabled ? 'Voice playback on' : 'Voice playback off'}
                           className={`p-2 rounded-lg transition-colors ${voiceEnabled ? 'text-sky-300 hover:bg-white/5' : 'text-slate-500 hover:bg-white/5'}`}
                         >
@@ -1879,6 +1850,39 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
           </div>
         </div>
       </main>
+
+      {audioPlayer.isOpen && (
+        <div className="elu-audio-shell">
+          <AudioPlaybackBar
+            isPlaying={audioPlayer.isPlaying}
+            currentTime={audioPlayer.currentTime}
+            duration={audioPlayer.duration}
+            onTogglePlay={audioPlayer.togglePlay}
+            onSeek={audioPlayer.seekTo}
+            onOpenSettings={() => audioPlayer.setIsSettingsOpen((value) => !value)}
+            onClose={audioPlayer.closePlayer}
+          />
+          {audioPlayer.isSettingsOpen ? (
+            <AudioSettingsPanel
+              playbackRate={audioPlayer.playbackRate}
+              playbackRates={audioPlayer.playbackRates}
+              setPlaybackRate={audioPlayer.setPlaybackRate}
+              voiceId={audioPlayer.voiceId}
+              setVoice={audioPlayer.setVoice}
+              language={audioPlayer.language}
+              setLanguage={audioPlayer.setLanguage}
+              languages={audioPlayer.languages}
+              voices={audioPlayer.voiceOptions}
+              isSupported={audioPlayer.isSupported}
+              followAppLanguage={audioPlayer.followAppLanguage}
+              isPreviewingVoice={audioPlayer.isPreviewingVoice}
+              previewVoiceId={audioPlayer.previewVoiceId}
+              onPreviewVoice={audioPlayer.previewVoice}
+              onDone={() => audioPlayer.setIsSettingsOpen(false)}
+            />
+          ) : null}
+        </div>
+      )}
 
       {/* Settings Modal */}
       {/* Institution Staff Code Modal */}

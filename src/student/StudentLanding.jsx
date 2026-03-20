@@ -433,7 +433,6 @@ export default function StudentLanding() {
   const lastSpokenRef = useRef({ text: "", at: 0 });
 
   const [imageSearchPreview, setImageSearchPreview] = useState(null);
-  const audioPlayer = useAudioPlayer({ defaultVoice: "Caspian", defaultLanguage: "English" });
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -571,6 +570,10 @@ export default function StudentLanding() {
       }),
     [active]
   );
+  const audioPlayer = useAudioPlayer({
+    uid: firebaseUser?.uid || null,
+    appLanguage: settingsPrefs?.language || "en",
+  });
 
   const user = useMemo(
     () => ({
@@ -2211,13 +2214,19 @@ export default function StudentLanding() {
           {audioPlayer.isSettingsOpen ? (
             <AudioSettingsPanel
               playbackRate={audioPlayer.playbackRate}
+              playbackRates={audioPlayer.playbackRates}
               setPlaybackRate={audioPlayer.setPlaybackRate}
-              voice={audioPlayer.voice}
+              voiceId={audioPlayer.voiceId}
               setVoice={audioPlayer.setVoice}
               language={audioPlayer.language}
               setLanguage={audioPlayer.setLanguage}
-              voices={audioPlayer.voices}
+              voices={audioPlayer.voiceOptions}
               languages={audioPlayer.languages}
+              isSupported={audioPlayer.isSupported}
+              followAppLanguage={audioPlayer.followAppLanguage}
+              isPreviewingVoice={audioPlayer.isPreviewingVoice}
+              previewVoiceId={audioPlayer.previewVoiceId}
+              onPreviewVoice={audioPlayer.previewVoice}
               onDone={() => audioPlayer.setIsSettingsOpen(false)}
             />
           ) : null}

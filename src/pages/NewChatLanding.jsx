@@ -1093,7 +1093,6 @@ export default function NewChatLanding({
   const [fileAcceptMode, setFileAcceptMode] = useState("");
   const [fileCaptureMode, setFileCaptureMode] = useState("");
   const [imageSearchPreview, setImageSearchPreview] = useState(null);
-  const audioPlayer = useAudioPlayer({ defaultVoice: "Caspian", defaultLanguage: "English" });
   const {
     mediaItems: attachments,
     previewItem,
@@ -1412,6 +1411,10 @@ export default function NewChatLanding({
       }, currentUid),
     [active, currentUid]
   );
+  const audioPlayer = useAudioPlayer({
+    uid: currentUid,
+    appLanguage: settingsPrefs?.language || "en-KE",
+  });
 
   const user = useMemo(
     () => ({
@@ -4142,13 +4145,19 @@ export default function NewChatLanding({
           {audioPlayer.isSettingsOpen ? (
             <AudioSettingsPanel
               playbackRate={audioPlayer.playbackRate}
+              playbackRates={audioPlayer.playbackRates}
               setPlaybackRate={audioPlayer.setPlaybackRate}
-              voice={audioPlayer.voice}
+              voiceId={audioPlayer.voiceId}
               setVoice={audioPlayer.setVoice}
               language={audioPlayer.language}
               setLanguage={audioPlayer.setLanguage}
-              voices={audioPlayer.voices}
+              voices={audioPlayer.voiceOptions}
               languages={audioPlayer.languages}
+              isSupported={audioPlayer.isSupported}
+              followAppLanguage={audioPlayer.followAppLanguage}
+              isPreviewingVoice={audioPlayer.isPreviewingVoice}
+              previewVoiceId={audioPlayer.previewVoiceId}
+              onPreviewVoice={audioPlayer.previewVoice}
               onDone={() => audioPlayer.setIsSettingsOpen(false)}
             />
           ) : null}

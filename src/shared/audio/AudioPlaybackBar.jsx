@@ -3,13 +3,32 @@ import { formatAudioTime } from "./useAudioPlayer";
 
 function PlayIcon({ playing }) {
   return playing ? (
-    <svg viewBox="0 0 24 24" className="elu-audio-icon" fill="currentColor">
-      <rect x="6" y="5" width="4" height="14" rx="1.4" />
-      <rect x="14" y="5" width="4" height="14" rx="1.4" />
+    <svg viewBox="0 0 24 24" className="elu-audio-icon" fill="currentColor" aria-hidden="true">
+      <rect x="7" y="5" width="3.5" height="14" rx="1.2" />
+      <rect x="13.5" y="5" width="3.5" height="14" rx="1.2" />
     </svg>
   ) : (
-    <svg viewBox="0 0 24 24" className="elu-audio-icon" fill="currentColor">
-      <path d="M8 5.5v13l10-6.5-10-6.5Z" />
+    <svg viewBox="0 0 24 24" className="elu-audio-icon" fill="currentColor" aria-hidden="true">
+      <path d="M8 5.6v12.8l9.8-6.4L8 5.6Z" />
+    </svg>
+  );
+}
+
+function MoreIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="elu-audio-icon elu-audio-icon--small" fill="currentColor" aria-hidden="true">
+      <circle cx="6.5" cy="12" r="1.5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <circle cx="17.5" cy="12" r="1.5" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="elu-audio-icon elu-audio-icon--small" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M6 6l12 12" />
+      <path d="M18 6L6 18" />
     </svg>
   );
 }
@@ -24,31 +43,34 @@ export default function AudioPlaybackBar({
   onOpenSettings,
 }) {
   return (
-    <div className="elu-audio-bar">
-      <button type="button" className="elu-audio-play" onClick={onTogglePlay}>
+    <div className="elu-audio-bar" role="region" aria-label="Audio playback controls">
+      <button type="button" className="elu-audio-play" onClick={onTogglePlay} aria-label={isPlaying ? "Pause audio" : "Play audio"}>
         <PlayIcon playing={isPlaying} />
       </button>
 
-      <span className="elu-audio-time">{formatAudioTime(currentTime)}</span>
+      <div className="elu-audio-main">
+        <div className="elu-audio-track-row">
+          <span className="elu-audio-time">{formatAudioTime(currentTime)}</span>
+          <input
+            className="elu-audio-range"
+            type="range"
+            min="0"
+            max={Math.max(duration || 0, 1)}
+            step="0.1"
+            value={currentTime}
+            onChange={(event) => onSeek(event.target.value)}
+            aria-label="Seek audio position"
+          />
+          <span className="elu-audio-time">{formatAudioTime(duration)}</span>
+        </div>
+      </div>
 
-      <input
-        className="elu-audio-range"
-        type="range"
-        min="0"
-        max={Math.max(duration || 0, 1)}
-        step="0.1"
-        value={currentTime}
-        onChange={(e) => onSeek(e.target.value)}
-      />
-
-      <span className="elu-audio-time">{formatAudioTime(duration)}</span>
-
-      <button type="button" className="elu-audio-more" onClick={onOpenSettings} aria-label="Open audio settings">
-        ⋯
+      <button type="button" className="elu-audio-icon-btn" onClick={onOpenSettings} aria-label="Open audio settings">
+        <MoreIcon />
       </button>
 
-      <button type="button" className="elu-audio-close" onClick={onClose} aria-label="Close audio player">
-        ×
+      <button type="button" className="elu-audio-icon-btn" onClick={onClose} aria-label="Close audio player">
+        <CloseIcon />
       </button>
     </div>
   );
