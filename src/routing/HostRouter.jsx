@@ -118,14 +118,16 @@ function sanitizeReturnTo(returnToRaw, { mode, isAuthenticated = false } = {}) {
 
 function LoadingScreen() {
   return (
-    <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef6ff_100%)] text-slate-900 flex items-center justify-center px-4">
-      <div className="w-full max-w-md rounded-[28px] border border-white/70 bg-white/80 px-8 py-10 text-center shadow-[0_24px_70px_rgba(15,23,42,0.10)] backdrop-blur-xl">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-600 via-blue-600 to-teal-500 text-sm font-black tracking-[0.16em] text-white shadow-[0_18px_40px_rgba(14,116,144,0.22)]">
-          EL
+    <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef6ff_100%)] px-2 py-4 text-slate-900 sm:px-4 sm:py-6">
+      <div className="mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-[30rem] items-center justify-center sm:min-h-[calc(100dvh-3rem)]">
+        <div className="w-full rounded-[24px] border border-white/70 bg-white/84 px-5 py-7 text-center shadow-[0_24px_70px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:rounded-[28px] sm:px-8 sm:py-10">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-600 via-blue-600 to-teal-500 text-sm font-black tracking-[0.16em] text-white shadow-[0_18px_40px_rgba(14,116,144,0.22)]">
+            EL
+          </div>
+          <div className="mt-4 text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-700/80 sm:mt-5 sm:text-[11px]">ElimuLink</div>
+          <div className="mt-3 text-[clamp(1.45rem,5vw,1.9rem)] font-semibold tracking-tight text-slate-950 sm:text-xl">Restoring your session</div>
+          <div className="mt-2 text-sm leading-6 text-slate-500">Verifying your workspace access and preparing the app.</div>
         </div>
-        <div className="mt-5 text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-700/80">ElimuLink</div>
-        <div className="mt-3 text-xl font-semibold tracking-tight text-slate-950">Restoring your session</div>
-        <div className="mt-2 text-sm leading-6 text-slate-500">Verifying your workspace access and preparing the app.</div>
       </div>
     </div>
   );
@@ -136,31 +138,60 @@ function BootstrapErrorScreen({ hostMode, error, onRetry }) {
   const endpoint = String(error?.verifyUrl || '').trim();
 
   return (
-    <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef6ff_100%)] text-slate-900 flex items-center justify-center px-4">
-      <div className="w-full max-w-lg rounded-[28px] border border-white/70 bg-white/84 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:p-8">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-700/80">Session Check</div>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">We couldn&apos;t verify this {hostMode} session yet</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600">
-          Firebase sign-in succeeded, but the backend verification route did not complete. This usually means the deployed API is missing the current AI-family verify endpoint.
-        </p>
-        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          {details}
-        </div>
-        {endpoint ? (
-          <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 break-all">
-            {endpoint}
+    <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef6ff_100%)] px-2 py-4 text-slate-900 sm:px-4 sm:py-6">
+      <div className="mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-[34rem] items-center justify-center sm:min-h-[calc(100dvh-3rem)]">
+        <div className="w-full rounded-[24px] border border-white/70 bg-white/84 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:rounded-[28px] sm:p-8">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-700/80 sm:text-[11px]">Session Check</div>
+          <h1 className="mt-3 text-[clamp(1.45rem,5vw,2rem)] font-semibold tracking-tight text-slate-950">We couldn&apos;t verify this {hostMode} session yet</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            Firebase sign-in succeeded, but the backend verification route did not complete. This usually means the deployed API is missing the current AI-family verify endpoint.
+          </p>
+          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {details}
           </div>
-        ) : null}
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          {endpoint ? (
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 break-all">
+              {endpoint}
+            </div>
+          ) : null}
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <button
+              className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-500"
+              type="button"
+              onClick={onRetry}
+            >
+              Retry verification
+            </button>
+            <button
+              className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              type="button"
+              onClick={async () => {
+                await logoutFamilySession({
+                  clearKeys: ['activeDepartmentId', 'activeDepartmentName', 'elimulink_admin_token'],
+                });
+                window.location.replace('/login');
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccessDeniedScreen({ hostMode }) {
+  return (
+    <div className="min-h-[100dvh] bg-slate-950 px-2 py-4 text-slate-100 sm:p-4">
+      <div className="mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-[32rem] items-center justify-center sm:min-h-[calc(100dvh-2.5rem)]">
+        <div className="w-full rounded-[22px] border border-white/10 bg-slate-900/95 p-5 shadow-[0_24px_64px_rgba(2,8,23,0.35)] sm:rounded-[24px] sm:p-6">
+          <h1 className="text-[clamp(1.45rem,5vw,1.9rem)] font-bold leading-tight sm:text-lg">Access restricted</h1>
+          <p className="mt-3 text-base leading-8 text-slate-300 sm:mt-2 sm:text-sm sm:leading-7">
+            Your current ElimuLink family account does not have access to the {hostMode} workspace.
+          </p>
           <button
-            className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-500"
-            type="button"
-            onClick={onRetry}
-          >
-            Retry verification
-          </button>
-          <button
-            className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            className="mt-5 w-full rounded-[16px] bg-sky-500 px-3 py-3 text-base font-semibold text-white sm:mt-4 sm:rounded-xl sm:py-2 sm:text-sm"
             type="button"
             onClick={async () => {
               await logoutFamilySession({
@@ -172,31 +203,6 @@ function BootstrapErrorScreen({ hostMode, error, onRetry }) {
             Sign out
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function AccessDeniedScreen({ hostMode }) {
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-      <div className="max-w-md w-full rounded-xl border border-white/10 bg-slate-900 p-6">
-        <h1 className="text-lg font-bold">Access restricted</h1>
-        <p className="text-sm text-slate-300 mt-2">
-          Your current ElimuLink family account does not have access to the {hostMode} workspace.
-        </p>
-        <button
-          className="mt-4 w-full rounded bg-sky-500 px-3 py-2 text-sm font-semibold text-white"
-          type="button"
-          onClick={async () => {
-            await logoutFamilySession({
-              clearKeys: ['activeDepartmentId', 'activeDepartmentName', 'elimulink_admin_token'],
-            });
-            window.location.replace('/login');
-          }}
-        >
-          Sign out
-        </button>
       </div>
     </div>
   );
@@ -662,6 +668,11 @@ export default function HostRouter() {
 
   const appElement = (
     <>
+      {hostMode === 'institution' && profile?.access_mode === 'temporary' ? (
+        <div className="fixed top-3 left-1/2 z-50 w-[calc(100vw-1rem)] max-w-xl -translate-x-1/2 rounded-2xl border border-amber-200/80 bg-amber-50/95 px-4 py-3 text-xs font-medium text-amber-900 shadow-[0_16px_40px_rgba(120,53,15,0.12)] backdrop-blur md:text-sm">
+          Temporary institution access enabled for testing. Detailed institution permission mapping is still being finalized.
+        </div>
+      ) : null}
       {user && !user.emailVerified ? (
         <div className="fixed top-3 left-1/2 z-50 -translate-x-1/2 rounded border border-amber-500/40 bg-amber-900/60 px-4 py-2 text-xs text-amber-100">
           Your email is not verified yet. Check your inbox.

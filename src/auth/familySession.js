@@ -25,6 +25,12 @@ function normalizeAppAccess(appAccess, fallbackApp) {
   return normalized;
 }
 
+function normalizeAccessMode(accessMode, { allowed = false } = {}) {
+  const value = String(accessMode || "").trim().toLowerCase();
+  if (value === "verified" || value === "temporary" || value === "denied") return value;
+  return allowed ? "verified" : "denied";
+}
+
 export function resolveAppName(hostMode) {
   const value = String(hostMode || "public").trim().toLowerCase();
   if (value === "institution") return "institution";
@@ -41,6 +47,8 @@ export function normalizeVerifyResponse(data = {}, { appName, firebaseUser } = {
   const institution_id = data?.institution_id ?? null;
   const app_access = normalizeAppAccess(data?.app_access, allowed ? normalizedApp : null);
   const default_app = String(data?.default_app || normalizedApp || "public").trim().toLowerCase();
+  const access_mode = normalizeAccessMode(data?.access_mode, { allowed });
+  const temporary_reason = data?.temporary_reason || null;
 
   return {
     allowed,
@@ -50,6 +58,8 @@ export function normalizeVerifyResponse(data = {}, { appName, firebaseUser } = {
     institution_id,
     app_access,
     default_app,
+    access_mode,
+    temporary_reason,
   };
 }
 
@@ -62,6 +72,8 @@ export function buildFamilySession(verifyData, { firebaseUser } = {}) {
     institutionId: verifyData.institution_id,
     app_access: verifyData.app_access,
     default_app: verifyData.default_app,
+    access_mode: verifyData.access_mode,
+    temporary_reason: verifyData.temporary_reason,
     displayName: firebaseUser?.displayName || "",
   };
 
@@ -73,6 +85,8 @@ export function buildFamilySession(verifyData, { firebaseUser } = {}) {
     institution_id: verifyData.institution_id,
     app_access: verifyData.app_access,
     default_app: verifyData.default_app,
+    access_mode: verifyData.access_mode,
+    temporary_reason: verifyData.temporary_reason,
     profile,
     verifiedAt: Date.now(),
   };
@@ -81,7 +95,8 @@ export function buildFamilySession(verifyData, { firebaseUser } = {}) {
 export function canAccessApp(session, appName) {
   const normalizedApp = resolveAppName(appName);
   const access = Array.isArray(session?.app_access) ? session.app_access : [];
-  return session?.allowed === true && access.includes(normalizedApp);
+  const accessMode = normalizeAccessMode(session?.access_mode, { allowed: session?.allowed === true });
+  return session?.allowed === true && access.includes(normalizedApp) && accessMode !== "denied";
 }
 
 export async function verifyFamilySession(firebaseUser, appName) {
@@ -185,6 +200,8 @@ export async function verifyFamilySession(firebaseUser, appName) {
     uid: session.uid,
     role: session.role,
     allowed: session.allowed,
+    accessMode: session.access_mode,
+    temporaryReason: session.temporary_reason,
     access: session.app_access,
   });
   return session;

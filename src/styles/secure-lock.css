@@ -317,7 +317,7 @@
 
 @media (max-width: 900px) {
   .els-page {
-    padding: 18px;
+    padding: 10px 8px;
   }
 
   .els-desktop-shell {
@@ -329,10 +329,10 @@
   }
 
   .els-card {
-    width: 100%;
-    max-width: 390px;
-    padding: 24px 22px 22px;
-    border-radius: 30px;
+    width: calc(100vw - 16px);
+    max-width: 100%;
+    padding: 22px 18px 20px;
+    border-radius: 26px;
   }
 
   .els-logo {
@@ -365,5 +365,31 @@
   .els-switch-btn,
   .els-link-btn {
     font-size: 15px;
+  }
+}
+
+@media (max-width: 420px) {
+  .els-page {
+    padding: 8px 6px;
+  }
+
+  .els-card {
+    width: calc(100vw - 12px);
+    padding: 20px 14px 18px;
+    border-radius: 22px;
+  }
+
+  .els-title {
+    font-size: 24px;
+  }
+
+  .els-subtitle {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .els-status-pill {
+    padding: 7px 11px;
+    font-size: 11px;
   }
 }

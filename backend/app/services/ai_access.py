@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Any, Dict
 
 from fastapi import HTTPException
@@ -6,6 +7,19 @@ from fastapi import HTTPException
 from app.db.supabase_client import get_supabase_client
 
 AI_ACCESS_TIMEOUT_SECONDS = 8
+TEMP_INSTITUTION_ACCESS_ENABLED = str(os.getenv("TEMP_INSTITUTION_ACCESS_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
+PUBLIC_EMAIL_DOMAINS = {
+    "gmail.com",
+    "yahoo.com",
+    "hotmail.com",
+    "outlook.com",
+    "live.com",
+    "icloud.com",
+    "aol.com",
+    "protonmail.com",
+    "gmx.com",
+    "mail.com",
+}
 
 
 def _normalize_role(role: str | None, app_name: str) -> str:
@@ -33,12 +47,45 @@ def _deny() -> Dict[str, Any]:
         "institution_id": None,
         "app_access": [],
         "default_app": None,
+        "access_mode": "denied",
+    }
+
+
+def _email_domain(email: str | None) -> str:
+    value = str(email or "").strip().lower()
+    if "@" not in value:
+        return ""
+    return value.rsplit("@", 1)[-1]
+
+
+def _is_work_email(email: str | None) -> bool:
+    domain = _email_domain(email)
+    if not domain:
+        return False
+    return domain not in PUBLIC_EMAIL_DOMAINS
+
+
+def _temporary_institution_access(uid: str, email: str, reason: str) -> Dict[str, Any]:
+    domain = _email_domain(email)
+    print(f"[AI_ACCESS] resolve:temporary_allow uid={uid} email={email} domain={domain} reason={reason}")
+    return {
+        "allowed": True,
+        "uid": uid,
+        "email": email,
+        "role": "institution_member",
+        "institution_id": None,
+        "app_access": ["institution"],
+        "default_app": "institution",
+        "access_mode": "temporary",
+        "temporary_reason": reason,
     }
 
 
 async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[str, Any]:
     supabase = get_supabase_client()
     if supabase is None:
+        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _is_work_email(email):
+            return _temporary_institution_access(uid, email, "supabase_unavailable")
         raise HTTPException(
             status_code=500,
             detail="Supabase client not configured",
@@ -78,7 +125,10 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
                 "institution_id": None,
                 "app_access": ["public"],
                 "default_app": "public",
+                "access_mode": "verified",
             }
+        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _is_work_email(email):
+            return _temporary_institution_access(uid, email, "missing_profile")
         return _deny()
 
     user = rows[0]
@@ -99,9 +149,12 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
             "institution_id": user.get("institution_id"),
             "app_access": app_access,
             "default_app": user.get("default_app") or "public",
+            "access_mode": "verified",
         }
 
     if app_name not in app_access:
+        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _is_work_email(user.get("email") or email):
+            return _temporary_institution_access(uid, user.get("email") or email, "missing_institution_mapping")
         print(f"[AI_ACCESS] resolve:deny_missing_app uid={uid} app={app_name} access={app_access}")
         return _deny()
 
@@ -114,4 +167,5 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
         "institution_id": user.get("institution_id"),
         "app_access": app_access,
         "default_app": user.get("default_app") or app_name,
+        "access_mode": "verified",
     }

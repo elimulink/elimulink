@@ -25,8 +25,8 @@ body {
 }
 
 .inst-auth-page {
-  min-height: 100vh;
-  height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
   overflow: hidden;
   display: grid;
   grid-template-columns: 1.08fr 480px;
@@ -146,12 +146,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px 20px;
+  padding: 18px 20px;
 }
 
 .inst-auth-card {
   width: min(480px, 100%);
-  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 36px);
   overflow: hidden;
   padding: 20px 22px;
   border-radius: 24px;
@@ -612,25 +612,29 @@ body {
 
   .inst-auth-panel {
     min-height: 100dvh;
-    padding: 18px 14px;
-    align-items: flex-start;
+    padding: 14px 10px;
+    align-items: center;
   }
 
   .inst-auth-card {
-    width: 100%;
-    max-width: 500px;
+    width: min(100%, 100vw - 20px);
+    max-width: 100%;
     max-height: none;
     overflow: visible;
     margin: 0 auto;
-    padding: 20px 16px 16px;
-    border-radius: 28px;
+    padding: 18px 16px 16px;
+    border-radius: 26px;
     background: rgba(255, 255, 255, 0.9);
     box-shadow: 0 22px 54px rgba(15, 23, 42, 0.10);
   }
 
+  .inst-auth-card-top {
+    margin-bottom: 14px;
+  }
+
   .inst-auth-socials.compact-two-col {
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: 10px;
   }
 
   .inst-auth-social-btn {
@@ -657,52 +661,71 @@ body {
   .compact-links {
     flex-direction: row;
     align-items: center;
+    justify-content: space-between;
   }
 
   .staff-entry-page {
     min-height: 100dvh;
     height: auto;
-    padding: 16px;
+    padding: 12px 10px;
   }
 
   .staff-entry-card {
-    max-height: calc(100dvh - 32px);
-    padding: 22px;
+    width: min(100%, 100vw - 20px);
+    max-height: calc(100dvh - 24px);
+    padding: 20px 18px;
     border-radius: 24px;
   }
 }
 
 @media (max-width: 640px) {
+  .inst-auth-panel {
+    padding: 10px 8px;
+  }
+
+  .inst-auth-card {
+    width: calc(100vw - 16px);
+    padding: 18px 14px 15px;
+    border-radius: 24px;
+  }
+
   .inst-auth-card-top {
-    flex-direction: row;
+    flex-wrap: wrap;
     align-items: flex-start;
-    gap: 10px;
+    gap: 8px 10px;
   }
 
   .inst-auth-card-top h2 {
-    font-size: 27px;
+    font-size: 24px;
     line-height: 1.04;
   }
 
   .inst-auth-card-top p {
     font-size: 13px;
-    line-height: 1.55;
+    line-height: 1.5;
   }
 
   .inst-auth-chip {
-    padding: 8px 14px;
-    font-size: 12px;
+    margin-left: 0;
+    padding: 7px 12px;
+    font-size: 11px;
     white-space: nowrap;
   }
 
   .inst-auth-divider {
-    margin: 14px 0;
+    margin: 12px 0;
   }
 
   .inst-auth-link-button,
   .inst-auth-links a,
   .inst-auth-secondary-link {
-    font-size: 14px;
+    font-size: 13px;
+  }
+
+  .inst-auth-links,
+  .inst-auth-sub-actions,
+  .compact-links {
+    gap: 8px 12px;
   }
 
   .staff-entry-header h1 {
@@ -712,27 +735,42 @@ body {
 
 @media (max-width: 420px) {
   .inst-auth-panel {
-    padding: 14px 10px;
+    padding: 8px 6px;
   }
 
   .inst-auth-card {
-    padding: 18px 14px 15px;
-    border-radius: 24px;
+    width: calc(100vw - 12px);
+    padding: 16px 12px 14px;
+    border-radius: 22px;
   }
 
   .inst-auth-card-top h2 {
-    font-size: 25px;
+    font-size: 22px;
   }
 
   .inst-auth-social-btn {
-    padding: 0 10px;
+    padding: 0 12px;
     font-size: 14px;
+  }
+
+  .inst-auth-field input {
+    padding: 0 12px;
+    font-size: 15px;
   }
 
   .inst-auth-links,
   .inst-auth-sub-actions,
   .compact-links {
-    gap: 10px;
+    gap: 8px 10px;
+  }
+
+  .staff-entry-page {
+    padding: 8px 6px;
+  }
+
+  .staff-entry-card {
+    width: calc(100vw - 12px);
+    padding: 18px 14px;
   }
 }
 
