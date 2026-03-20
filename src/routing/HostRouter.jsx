@@ -21,6 +21,7 @@ import {
 import {
   unlockWithBiometrics,
   unlockWithPasskey,
+  unlockWithProvider,
   unlockWithPassword,
 } from '../auth/secureLock';
 import useSecureSessionLock from '../hooks/useSecureSessionLock';
@@ -738,8 +739,14 @@ export default function HostRouter() {
         capabilities={secureUnlockCapabilities}
         onUnlockPassword={(password) => finalizeSecureUnlock((activeUser) => unlockWithPassword(activeUser, password))}
         onUnlockBiometric={() => finalizeSecureUnlock((activeUser) => unlockWithBiometrics(activeUser))}
-        onUnlockPasskey={() => finalizeSecureUnlock(() => unlockWithPasskey())}
+        onUnlockPasskey={() => finalizeSecureUnlock((activeUser) => unlockWithPasskey(activeUser))}
+        onUnlockProvider={() =>
+          finalizeSecureUnlock((activeUser) => unlockWithProvider(activeUser, secureUnlockCapabilities?.federatedProviderId))
+        }
         onForgotPassword={async () => {
+          if (!secureUnlockCapabilities?.forgotPassword) {
+            throw new Error('Password reset is only available for password-based accounts.');
+          }
           const email = String(user?.email || '').trim();
           if (!email) throw new Error('Password reset is not available for this account.');
           await sendPasswordResetEmail(auth, email);

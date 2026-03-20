@@ -706,18 +706,18 @@ function Bubble({
 
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
+        <div
         className={[
           "max-w-[92%] md:max-w-[80%] text-[15px]",
           isUser
             ? "user-msg-bubble rounded-2xl px-4 py-3 md:px-4.5 md:py-3.5 bg-sky-500 text-white rounded-br-md shadow-sm"
-            : "assistant-msg-surface px-1 py-1 md:py-1.5 text-slate-900",
+            : "assistant-msg-surface px-1 py-1 md:py-1.5 text-slate-900 dark:text-slate-100",
         ].join(" ")}
       >
         {isUser ? (
           <div className="leading-relaxed">{text}</div>
         ) : (
-          <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 md:leading-[1.78] text-slate-800/95">
+          <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 text-slate-800 md:leading-[1.78] dark:text-slate-100">
             {imageSearchResults.length ? (
               <ImageSearchResults
                 query={imageSearchQuery}
@@ -729,7 +729,7 @@ function Bubble({
             {assistantParagraphs.length ? (
               assistantParagraphs.map((block, idx) => renderAssistantBlock(block, idx))
             ) : streaming ? (
-              <div className="inline-flex items-center gap-1.5 text-slate-400">
+              <div className="inline-flex items-center gap-1.5 text-slate-400 dark:text-slate-300">
                 <span className="typing-dot" />
                 <span className="typing-dot typing-dot-delay-1" />
                 <span className="typing-dot typing-dot-delay-2" />
@@ -751,7 +751,7 @@ function Bubble({
             <button
               type="button"
               onClick={onCopy}
-              className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700"
+              className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
               title="Copy response"
             >
               {isCopied ? <Check size={14} /> : <Copy size={14} />}
@@ -762,8 +762,8 @@ function Bubble({
               className={[
                 "assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md transition",
                 reaction === "like"
-                  ? "bg-sky-50/90 text-sky-700"
-                  : "text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700",
+                  ? "bg-sky-50/90 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200"
+                  : "text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white",
               ].join(" ")}
               title="Like"
             >
@@ -775,8 +775,8 @@ function Bubble({
               className={[
                 "assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md transition",
                 reaction === "dislike"
-                  ? "bg-slate-200/75 text-slate-700"
-                  : "text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700",
+                  ? "bg-slate-200/75 text-slate-700 dark:bg-white/10 dark:text-slate-100"
+                  : "text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white",
               ].join(" ")}
               title="Dislike"
             >
@@ -785,7 +785,7 @@ function Bubble({
             <button
               type="button"
               onClick={onShare}
-              className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700"
+              className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
               title="Share"
             >
               <Share2 size={14} />
@@ -794,20 +794,20 @@ function Bubble({
               <button
                 type="button"
                 onClick={() => setIsMoreOpen((prev) => !prev)}
-                className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700"
+                className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
                 title="More"
               >
                 <Ellipsis size={14} />
               </button>
               {isMoreOpen ? (
-                <div className="absolute left-0 top-full mt-1.5 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg z-10">
+                <div className="absolute left-0 top-full z-10 mt-1.5 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg dark:border-slate-700 dark:bg-slate-900">
                   <button
                     type="button"
                     onClick={() => {
                       setIsMoreOpen(false);
                       onRetryMessage?.();
                     }}
-                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
                   >
                     Retry
                   </button>
@@ -817,7 +817,7 @@ function Bubble({
                       setIsMoreOpen(false);
                       onSimplify?.();
                     }}
-                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
                   >
                     Simplify answer
                   </button>
@@ -827,7 +827,7 @@ function Bubble({
                       setIsMoreOpen(false);
                       onDetailed?.();
                     }}
-                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
                   >
                     Make it more detailed
                   </button>
@@ -837,7 +837,7 @@ function Bubble({
                       setIsMoreOpen(false);
                       onCopy?.();
                     }}
-                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
                   >
                     Copy text
                   </button>
@@ -850,8 +850,8 @@ function Bubble({
               className={[
                 "assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md",
                 isActiveSpeak
-                  ? "bg-sky-50/90 text-sky-700"
-                  : "text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700",
+                  ? "bg-sky-50/90 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200"
+                  : "text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white",
               ].join(" ")}
               title="Play audio"
             >
@@ -861,38 +861,38 @@ function Bubble({
         ) : null}
 
         {!isUser && showStudyTools && !streaming && !isTypingAnim && String(text || "").trim() ? (
-          <div className="mt-2.5 pt-2.5 border-t border-slate-200/70">
+          <div className="mt-2.5 border-t border-slate-200/70 pt-2.5 dark:border-slate-700/80">
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={onSummarizeTool}
-                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Summarize this
               </button>
               <button
                 type="button"
                 onClick={onNotesTool}
-                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Turn into notes
               </button>
               <button
                 type="button"
                 onClick={onFlashcardsTool}
-                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Generate flashcards
               </button>
               <button
                 type="button"
                 onClick={onSimplerTool}
-                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Explain simpler
               </button>
             </div>
-            <div className="mt-2 text-[11px] text-slate-500">
+            <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-300">
               Next step: choose a study action above to continue with this answer.
             </div>
           </div>
@@ -2461,7 +2461,13 @@ export default function NewChatLanding({
   if (active === "settings") {
     return (
       <SettingsPage
-        user={user}
+        user={{
+          ...user,
+          uid: firebaseUser?.uid || null,
+          email: firebaseUser?.email || user?.email || "",
+          displayName: firebaseUser?.displayName || user?.name || "",
+          providerData: firebaseUser?.providerData || [],
+        }}
         onBack={() => syncActiveView("newchat", "push")}
         canShowAdmin={isAdminRole}
         onOpenAdmin={openAdminPanel}
@@ -2538,26 +2544,26 @@ export default function NewChatLanding({
     <div
       className={[
         isAdminShellEmbed
-          ? "h-full min-h-0 bg-slate-100 flex flex-col overflow-hidden"
-          : "min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-hidden md:h-[100dvh] md:overflow-hidden",
+          ? "h-full min-h-0 bg-slate-100 dark:bg-slate-950 flex flex-col overflow-hidden"
+          : "min-h-[100dvh] h-[100dvh] bg-slate-100 dark:bg-slate-950 flex flex-col overflow-hidden md:h-[100dvh] md:overflow-hidden",
       ].join(" ")}
     >
       {!isAdminShellEmbed ? (
       <div className="md:hidden fixed top-0 left-0 right-0 z-50 pointer-events-none">
-        <div className="bg-gradient-to-b from-white/80 via-white/40 to-transparent px-3 py-3 flex items-center justify-between pointer-events-auto">
+        <div className="bg-gradient-to-b from-white/80 via-white/40 to-transparent px-3 py-3 flex items-center justify-between pointer-events-auto dark:from-slate-950/95 dark:via-slate-950/70 dark:to-transparent">
           <div className="flex items-center gap-2 min-w-0">
             <button
-              className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm grid place-items-center text-slate-700"
+              className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm grid place-items-center text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
               onClick={() => setIsMobileDrawerOpen(true)}
               title="Menu"
             >
               <Menu size={16} />
             </button>
             <div className="flex items-center gap-1 min-w-0">
-              <span className="px-3 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm text-sm font-semibold text-slate-900">
+              <span className="px-3 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
                 ElimuLink
               </span>
-              <span className="px-3 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm text-sm font-semibold text-slate-900">
+              <span className="px-3 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
                 University
               </span>
             </div>
@@ -2567,7 +2573,7 @@ export default function NewChatLanding({
               <button
                 ref={notifBtnRef}
                 onClick={openMobileNotifications}
-                className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm grid place-items-center text-slate-700 relative"
+                className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm grid place-items-center text-slate-700 relative dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 title="Notifications"
               >
                 <Bell size={18} />
@@ -2582,7 +2588,7 @@ export default function NewChatLanding({
             <div ref={profileMenuRef} className="relative">
               <button
                 onClick={() => setIsProfileSheetOpen(true)}
-                className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm overflow-hidden grid place-items-center text-slate-700"
+                className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm overflow-hidden grid place-items-center text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 title="Profile"
               >
                 {user.avatarUrl ? (
@@ -2597,8 +2603,8 @@ export default function NewChatLanding({
         </div>
         {import.meta.env.DEV ? (
           <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 md:hidden px-3">
-            <span className="rounded-full border border-slate-200 bg-white/80 px-2 py-0.5">role: {String(userRole || "unknown")}</span>
-            <span className="rounded-full border border-slate-200 bg-white/80 px-2 py-0.5">view: {String(active || "unknown")}</span>
+            <span className="rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200">role: {String(userRole || "unknown")}</span>
+            <span className="rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200">view: {String(active || "unknown")}</span>
           </div>
         ) : null}
       </div>
@@ -2726,7 +2732,7 @@ export default function NewChatLanding({
                       setIsProfileSheetOpen(false);
                       openAdminPanel();
                     }}
-                    className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                    className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2 dark:text-slate-100 dark:hover:bg-slate-800"
                   >
                     <Shield size={16} />
                     Admin
@@ -2734,7 +2740,7 @@ export default function NewChatLanding({
                 ) : null}
                 <button
                   onClick={handleLogout}
-                  className="w-full text-left px-3 py-3 rounded-xl text-sm text-red-700 hover:bg-red-50 flex items-center gap-2"
+                  className="w-full text-left px-3 py-3 rounded-xl text-sm text-red-700 hover:bg-red-50 flex items-center gap-2 dark:text-red-300 dark:hover:bg-red-950/40"
                 >
                   <LogOut size={16} />
                   Logout
@@ -3044,8 +3050,8 @@ export default function NewChatLanding({
       {!isAdminShellEmbed && isMobileDrawerOpen ? (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setIsMobileDrawerOpen(false)} />
-          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl border-r border-slate-200">
-            <div className="px-4 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl border-r border-slate-200 dark:border-slate-800 dark:bg-slate-950">
+            <div className="px-4 py-4 border-b border-slate-200 flex items-center justify-between dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <div className="h-7 w-7 rounded-xl bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_20px_rgba(99,102,241,0.35)]" />
                 <div className="font-semibold text-slate-800">Home</div>
@@ -3515,20 +3521,20 @@ export default function NewChatLanding({
           />
 
           {active === "newchat" ? (
-            <div className="md:hidden h-[100dvh] overflow-hidden flex flex-col">
+            <div className="md:hidden h-[100dvh] overflow-hidden flex flex-col dark:bg-slate-950">
               <div
                 ref={mobileMessagesRef}
                 onScroll={handleChatScroll}
-                className="chat-scroll-surface flex-1 overflow-y-auto overscroll-none touch-pan-y px-4 pt-20 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-4"
+                className="chat-scroll-surface flex-1 overflow-y-auto overscroll-none touch-pan-y px-4 pt-20 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-4 dark:bg-slate-950"
                 style={{ paddingBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom) + ${kbHeight}px + 28px)` }}
               >
                 {messages.length === 0 ? (
-                  <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-4 py-4 shadow-[0_6px_20px_rgba(15,23,42,0.04)]">
-                    <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500">{timeGreeting()}</div>
-                    <div className="text-[28px] leading-[1.2] font-semibold text-slate-900 mt-1.5">
+                  <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-4 py-4 shadow-[0_6px_20px_rgba(15,23,42,0.04)] dark:border-slate-700 dark:bg-slate-900">
+                    <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500 dark:text-slate-300">{timeGreeting()}</div>
+                    <div className="mt-1.5 text-[28px] leading-[1.2] font-semibold text-slate-900 dark:text-white">
                       {modeConfig.title}
                     </div>
-                    <div className="text-sm leading-relaxed text-slate-600 mt-2">
+                    <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                       {modeConfig.subtitle}
                     </div>
                   </div>
@@ -3543,10 +3549,10 @@ export default function NewChatLanding({
                           key={starter.key}
                           onClick={() => applyStarter(starter)}
                           className={[
-                            "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-left text-[13px] font-medium leading-tight bg-white/95 shadow-[0_2px_10px_rgba(15,23,42,0.04)] transition active:scale-[0.99]",
+                            "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-left text-[13px] font-medium leading-tight bg-white/95 shadow-[0_2px_10px_rgba(15,23,42,0.04)] transition active:scale-[0.99] dark:border-slate-700 dark:bg-slate-900",
                             isActive
-                              ? "border-sky-300 bg-sky-50 text-slate-900"
-                              : "border-slate-200/90 text-slate-700 hover:border-slate-300 hover:bg-slate-50",
+                              ? "border-sky-300 bg-sky-50 text-slate-900 dark:border-sky-500/70 dark:bg-sky-500/15 dark:text-white"
+                              : "border-slate-200/90 text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800",
                           ].join(" ")}
                         >
                           <span className="text-[15px] leading-none">{starter.emoji}</span>
@@ -3558,7 +3564,7 @@ export default function NewChatLanding({
                 ) : null}
 
                 {activeContextLabel ? (
-                  <div className="inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-600">
+                  <div className="inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
                     {activeContextLabel}
                   </div>
                 ) : null}
@@ -3568,10 +3574,10 @@ export default function NewChatLanding({
                   <div key={idx} ref={(node) => measureVirtualRow("mobile", idx, node)}>
                     {shouldShowSectionAnchor(idx) ? (
                       <div className="my-2.5 flex items-center gap-2.5">
-                        <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase">
+                        <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase dark:text-slate-500">
                           {sectionLabelForIndex(idx)}
                         </span>
-                        <span className="h-px flex-1 bg-slate-200/70" />
+                        <span className="h-px flex-1 bg-slate-200/70 dark:bg-slate-800" />
                       </div>
                     ) : null}
                     <Bubble
@@ -3616,13 +3622,13 @@ export default function NewChatLanding({
 
               <div
                 ref={mobileComposerRef}
-                className="fixed left-0 right-0 bottom-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:static md:z-auto"
+                className="fixed left-0 right-0 bottom-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:static md:z-auto dark:border-slate-800 dark:bg-slate-950/96"
                 style={{ bottom: `${kbHeight}px` }}
               >
                 <div className="max-w-xl mx-auto space-y-2">
                   {hasStarterSuggestions ? (
-                    <div className="rounded-2xl border border-slate-200/80 bg-white/95 shadow-[0_8px_24px_rgba(15,23,42,0.05)] p-2.5">
-                      <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase">
+                    <div className="rounded-2xl border border-slate-200/80 bg-white/95 shadow-[0_8px_24px_rgba(15,23,42,0.05)] p-2.5 dark:border-slate-700 dark:bg-slate-900">
+                      <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase dark:text-slate-400">
                         Suggested prompts
                       </div>
                       <div className="space-y-1.5">
@@ -3630,7 +3636,7 @@ export default function NewChatLanding({
                           <button
                             key={suggestion}
                             onClick={() => applySuggestion(suggestion)}
-                            className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:border-slate-200/80"
+                            className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:border-slate-200/80 dark:text-slate-100 dark:hover:border-slate-700 dark:hover:bg-slate-800"
                           >
                             {suggestion}
                           </button>
@@ -3639,7 +3645,7 @@ export default function NewChatLanding({
                     </div>
                   ) : null}
 
-                  <div className="surface-elevated rounded-[26px] border border-slate-200/90 bg-white/90 backdrop-blur-md px-2.5 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
+                  <div className="surface-elevated rounded-[26px] border border-slate-200/90 bg-white/90 backdrop-blur-md px-2.5 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.08)] dark:border-slate-700 dark:bg-slate-900/95">
                     <AttachmentChipsTray
                       items={attachments}
                       onPreview={openPreview}
@@ -3650,7 +3656,7 @@ export default function NewChatLanding({
                       <div ref={mobileAttachmentMenuRef} className="relative shrink-0">
                         <button
                           onClick={toggleAttachmentPanel}
-                          className="h-10 w-10 rounded-2xl border border-slate-200/90 bg-white/80 text-slate-700 grid place-items-center shadow-[0_6px_16px_rgba(15,23,42,0.08)] transition hover:bg-slate-50 active:scale-[0.98]"
+                          className="h-10 w-10 rounded-2xl border border-slate-200/90 bg-white/80 text-slate-700 grid place-items-center shadow-[0_6px_16px_rgba(15,23,42,0.08)] transition hover:bg-slate-50 active:scale-[0.98] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                           title="Add attachment"
                         >
                           <Plus size={17} />
@@ -3658,16 +3664,16 @@ export default function NewChatLanding({
 
                         <div
                           className={[
-                            "surface-elevated absolute left-0 bottom-12 z-30 w-[320px] max-w-[calc(100vw-24px)] rounded-2xl border border-white/40 bg-white/75 backdrop-blur-xl shadow-[0_18px_40px_rgba(15,23,42,0.16)] p-2 origin-bottom-left transition duration-150",
+                            "surface-elevated absolute left-0 bottom-12 z-30 w-[320px] max-w-[calc(100vw-24px)] rounded-2xl border border-white/40 bg-white/75 backdrop-blur-xl shadow-[0_18px_40px_rgba(15,23,42,0.16)] p-2 origin-bottom-left transition duration-150 dark:border-slate-700 dark:bg-slate-900/95",
                             isAttachOpen ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-1.5 scale-95 pointer-events-none",
                           ].join(" ")}
                         >
                           <div className="grid grid-cols-4 gap-1.5">
                             <button
                               onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
-                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                             >
-                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100">
                                 <Image size={16} />
                               </span>
                               <span>Photo</span>
@@ -3701,12 +3707,12 @@ export default function NewChatLanding({
                             </button>
                           </div>
 
-                          <div className="mt-2 rounded-xl border border-slate-200/70 bg-white/65 p-1.5">
+                          <div className="mt-2 rounded-xl border border-slate-200/70 bg-white/65 p-1.5 dark:border-slate-700 dark:bg-slate-800/90">
                             <div className="relative overflow-hidden">
                               <div className={`transition-transform duration-200 ${isToolsPanelOpen ? "-translate-x-full" : "translate-x-0"}`}>
                                 <button
                                   onClick={() => setIsToolsPanelOpen(true)}
-                                  className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-[12px] font-medium text-slate-700 hover:bg-white/80"
+                                  className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-[12px] font-medium text-slate-700 hover:bg-white/80 dark:text-slate-100 dark:hover:bg-slate-700"
                                 >
                                   <span className="inline-flex items-center gap-1.5"><Sparkles size={14} /> Tools</span>
                                   <ChevronRight size={14} />
@@ -3718,10 +3724,10 @@ export default function NewChatLanding({
                                   isToolsPanelOpen ? "translate-x-0" : "translate-x-full",
                                 ].join(" ")}
                               >
-                                <div className="rounded-lg bg-white/90 p-1">
+                                <div className="rounded-lg bg-white/90 p-1 dark:bg-slate-900">
                                   <button
                                     onClick={() => setIsToolsPanelOpen(false)}
-                                    className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-slate-500 hover:bg-slate-100"
+                                    className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                                   >
                                     <ChevronDown size={12} />
                                     Back
@@ -3731,7 +3737,7 @@ export default function NewChatLanding({
                                       <button
                                         key={tool.key}
                                         onClick={() => applyToolPreset(tool.prompt)}
-                                        className="rounded-md border border-slate-200/80 bg-white px-2 py-1.5 text-left text-[11px] text-slate-700 hover:bg-slate-50"
+                                        className="rounded-md border border-slate-200/80 bg-white px-2 py-1.5 text-left text-[11px] text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                                       >
                                         {tool.label}
                                       </button>
@@ -3757,7 +3763,7 @@ export default function NewChatLanding({
                         }
                       }}
                       onPaste={handlePaste}
-                      className="min-h-[42px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400"
+                      className="min-h-[42px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-400"
                       placeholder="Type your message..."
                       />
 
@@ -3767,7 +3773,7 @@ export default function NewChatLanding({
                           "relative h-10 w-10 shrink-0 rounded-2xl transition grid place-items-center overflow-hidden",
                           hasText
                             ? "bg-sky-500 text-white shadow-sm hover:bg-sky-600 active:scale-[0.98]"
-                            : "border border-slate-200 bg-white/90 text-slate-700 hover:bg-slate-50",
+                            : "border border-slate-200 bg-white/90 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700",
                         ].join(" ")}
                         title={hasText ? "Send" : "Live AI ready"}
                       >
@@ -3788,7 +3794,7 @@ export default function NewChatLanding({
           ) : null}
 
           {active !== "newchat" ? (
-            <div className="md:hidden flex-1 overflow-y-auto px-4 pt-20 pb-24 bg-slate-50">
+            <div className="md:hidden flex-1 overflow-y-auto bg-slate-50 px-4 pt-20 pb-24 dark:bg-slate-950">
               <PlaceholderPanel
                 title={activePlaceholder?.title || "Coming soon"}
                 bullets={activePlaceholder?.bullets || ["Feature wiring", "Permissions setup", "Backend connection"]}
@@ -3797,7 +3803,7 @@ export default function NewChatLanding({
           ) : null}
 
           {active === "newchat" ? (
-            <div className="surface-elevated relative hidden md:flex flex-1 min-h-0 flex-col rounded-2xl bg-slate-50/70">
+            <div className="surface-elevated relative hidden md:flex flex-1 min-h-0 flex-col rounded-2xl bg-slate-50/70 dark:bg-slate-950/80">
             <div className="px-4 py-2.5 shrink-0">
               <div className="max-w-[1080px] w-full mx-auto">
                 <div className="text-sm font-semibold text-slate-800">{activeChat?.title || untitledChatBase}</div>
@@ -3805,7 +3811,7 @@ export default function NewChatLanding({
                   {isEmbeddedAdminChat ? "Institution Admin Assistant" : "AI Academic Assistant"} • {formatChatStamp(activeChat?.updatedAt)}
                 </div>
                 {activeContextLabel ? (
-                  <div className="mt-1 inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-600">
+                  <div className="mt-1 inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
                     {activeContextLabel}
                   </div>
                 ) : null}
@@ -3833,12 +3839,12 @@ export default function NewChatLanding({
               <div ref={desktopMessagesRef} onScroll={handleChatScroll} className="chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3.5">
                 <div className="max-w-[760px] w-full mx-auto space-y-5 pb-8">
                 {messages.length === 0 ? (
-                  <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-5 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500">{timeGreeting()}</div>
-                    <div className="text-[30px] leading-[1.2] font-semibold text-slate-900 mt-1.5">
+                  <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-5 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] dark:border-slate-700 dark:bg-slate-900">
+                    <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500 dark:text-slate-300">{timeGreeting()}</div>
+                    <div className="mt-1.5 text-[30px] leading-[1.2] font-semibold text-slate-900 dark:text-white">
                       {modeConfig.title}
                     </div>
-                    <div className="text-sm leading-relaxed text-slate-600 mt-2">
+                    <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                       {modeConfig.subtitle}
                     </div>
                   </div>
@@ -3849,10 +3855,10 @@ export default function NewChatLanding({
                   <div key={idx} ref={(node) => measureVirtualRow("desktop", idx, node)}>
                     {shouldShowSectionAnchor(idx) ? (
                       <div className="my-3 flex items-center gap-3">
-                        <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase">
+                        <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase dark:text-slate-500">
                           {sectionLabelForIndex(idx)}
                         </span>
-                        <span className="h-px flex-1 bg-slate-200/70" />
+                        <span className="h-px flex-1 bg-slate-200/70 dark:bg-slate-800" />
                       </div>
                     ) : null}
                     <Bubble
@@ -3905,10 +3911,10 @@ export default function NewChatLanding({
                         key={starter.key}
                         onClick={() => applyStarter(starter)}
                         className={[
-                          "inline-flex items-center gap-2 rounded-2xl border bg-white/95 px-3 py-2 text-left text-[13px] font-medium text-slate-700 shadow-[0_2px_10px_rgba(15,23,42,0.04)] transition active:scale-[0.99]",
+                          "inline-flex items-center gap-2 rounded-2xl border bg-white/95 px-3 py-2 text-left text-[13px] font-medium text-slate-700 shadow-[0_2px_10px_rgba(15,23,42,0.04)] transition active:scale-[0.99] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100",
                           isActive
-                            ? "border-sky-300 bg-sky-50 text-slate-900"
-                            : "border-slate-200/90 hover:border-slate-300 hover:bg-slate-50",
+                            ? "border-sky-300 bg-sky-50 text-slate-900 dark:border-sky-500/70 dark:bg-sky-500/15 dark:text-white"
+                            : "border-slate-200/90 hover:border-slate-300 hover:bg-slate-50 dark:hover:border-slate-600 dark:hover:bg-slate-800",
                         ].join(" ")}
                       >
                         <span className="text-[15px] leading-none">{starter.emoji}</span>
@@ -3920,8 +3926,8 @@ export default function NewChatLanding({
               ) : null}
 
               {hasStarterSuggestions ? (
-                <div className="surface-elevated mt-3 rounded-2xl border border-slate-200/80 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0 max-w-[760px] w-full mx-auto">
-                  <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase">
+                <div className="surface-elevated mt-3 rounded-2xl border border-slate-200/80 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0 max-w-[760px] w-full mx-auto dark:border-slate-700 dark:bg-slate-900">
+                  <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase dark:text-slate-400">
                     Suggested prompts
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -3929,7 +3935,7 @@ export default function NewChatLanding({
                       <button
                         key={suggestion}
                         onClick={() => applySuggestion(suggestion)}
-                        className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:border-slate-200/80"
+                        className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:border-slate-200/80 dark:text-slate-100 dark:hover:border-slate-700 dark:hover:bg-slate-800"
                       >
                         {suggestion}
                       </button>
@@ -3938,8 +3944,8 @@ export default function NewChatLanding({
                 </div>
               ) : null}
 
-              <div ref={desktopAttachmentMenuRef} className="mt-3 shrink-0 relative max-w-[760px] w-full mx-auto border-t border-slate-200/70 pt-4 pb-1">
-                <div className="surface-elevated rounded-[28px] border border-slate-200/85 bg-white/95 backdrop-blur-md px-3 py-2.5 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition focus-within:border-sky-300/70 focus-within:ring-2 focus-within:ring-sky-100/80">
+              <div ref={desktopAttachmentMenuRef} className="mt-3 shrink-0 relative max-w-[760px] w-full mx-auto border-t border-slate-200/70 pt-4 pb-1 dark:border-slate-800">
+                <div className="surface-elevated rounded-[28px] border border-slate-200/85 bg-white/95 backdrop-blur-md px-3 py-2.5 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition focus-within:border-sky-300/70 focus-within:ring-2 focus-within:ring-sky-100/80 dark:border-slate-700 dark:bg-slate-900/95 dark:focus-within:ring-sky-500/20">
                   <AttachmentChipsTray
                     items={attachments}
                     onPreview={openPreview}
@@ -3949,7 +3955,7 @@ export default function NewChatLanding({
                   <div className="flex items-end gap-2">
                     <button
                       onClick={toggleAttachmentPanel}
-                      className="h-10 w-10 shrink-0 rounded-2xl border border-slate-200/90 bg-white/80 hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center shadow-[0_6px_16px_rgba(15,23,42,0.08)] transition active:scale-[0.98]"
+                      className="h-10 w-10 shrink-0 rounded-2xl border border-slate-200/90 bg-white/80 hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center shadow-[0_6px_16px_rgba(15,23,42,0.08)] transition active:scale-[0.98] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                       title="Add attachment"
                     >
                       <Plus size={17} />
@@ -3968,7 +3974,7 @@ export default function NewChatLanding({
                         }
                       }}
                       onPaste={handlePaste}
-                      className="min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400"
+                      className="min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-400"
                       placeholder="Type your message..."
                     />
 
@@ -3978,7 +3984,7 @@ export default function NewChatLanding({
                         "h-9 px-3.5 rounded-xl border text-xs font-semibold transition",
                         isAiModeOn
                           ? "border-slate-900 bg-slate-900 text-white"
-                          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
+                          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700",
                       ].join(" ")}
                       title="AI conversation mode"
                     >
@@ -3991,7 +3997,7 @@ export default function NewChatLanding({
                         "h-9 w-9 rounded-xl border inline-flex items-center justify-center transition",
                         isListening
                           ? "border-red-500 bg-red-500 text-white"
-                          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
+                          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700",
                       ].join(" ")}
                       title={isListening ? "Stop voice input" : "Start voice input"}
                     >
@@ -4014,16 +4020,16 @@ export default function NewChatLanding({
 
                 <div
                   className={[
-                    "surface-elevated absolute left-2 bottom-[calc(100%+10px)] z-20 w-72 rounded-2xl border border-white/45 bg-white/72 backdrop-blur-xl shadow-[0_20px_42px_rgba(15,23,42,0.18)] p-2 origin-bottom-left transition duration-150",
+                    "surface-elevated absolute left-2 bottom-[calc(100%+10px)] z-20 w-72 rounded-2xl border border-white/45 bg-white/72 backdrop-blur-xl shadow-[0_20px_42px_rgba(15,23,42,0.18)] p-2 origin-bottom-left transition duration-150 dark:border-slate-700 dark:bg-slate-900/95",
                     isAttachOpen ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-1.5 scale-95 pointer-events-none",
                   ].join(" ")}
                 >
                   <div className="grid grid-cols-4 gap-1.5">
                     <button
                       onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
-                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     >
-                      <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                      <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100">
                         <Image size={16} />
                       </span>
                       <span>Photo</span>
@@ -4057,12 +4063,12 @@ export default function NewChatLanding({
                     </button>
                   </div>
 
-                  <div className="mt-2 rounded-xl border border-slate-200/70 bg-white/65 p-1.5">
+                  <div className="mt-2 rounded-xl border border-slate-200/70 bg-white/65 p-1.5 dark:border-slate-700 dark:bg-slate-800/90">
                     <div className="relative overflow-hidden">
                       <div className={`transition-transform duration-200 ${isToolsPanelOpen ? "-translate-x-full" : "translate-x-0"}`}>
                         <button
                           onClick={() => setIsToolsPanelOpen(true)}
-                          className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-[12px] font-medium text-slate-700 hover:bg-white/80"
+                          className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-[12px] font-medium text-slate-700 hover:bg-white/80 dark:text-slate-100 dark:hover:bg-slate-700"
                         >
                           <span className="inline-flex items-center gap-1.5"><Sparkles size={14} /> Tools</span>
                           <ChevronRight size={14} />
@@ -4074,10 +4080,10 @@ export default function NewChatLanding({
                           isToolsPanelOpen ? "translate-x-0" : "translate-x-full",
                         ].join(" ")}
                       >
-                        <div className="rounded-lg bg-white/90 p-1">
+                        <div className="rounded-lg bg-white/90 p-1 dark:bg-slate-900">
                           <button
                             onClick={() => setIsToolsPanelOpen(false)}
-                            className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-slate-500 hover:bg-slate-100"
+                            className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                           >
                             <ChevronDown size={12} />
                             Back
@@ -4087,7 +4093,7 @@ export default function NewChatLanding({
                               <button
                                 key={tool.key}
                                 onClick={() => applyToolPreset(tool.prompt)}
-                                className="rounded-md border border-slate-200/80 bg-white px-2 py-1.5 text-left text-[11px] text-slate-700 hover:bg-slate-50"
+                                className="rounded-md border border-slate-200/80 bg-white px-2 py-1.5 text-left text-[11px] text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                               >
                                 {tool.label}
                               </button>

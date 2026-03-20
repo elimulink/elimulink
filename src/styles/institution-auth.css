@@ -698,11 +698,16 @@ body {
   .inst-auth-card-top h2 {
     font-size: 24px;
     line-height: 1.04;
+    color: #0b1730;
+    font-weight: 800;
+    letter-spacing: -0.04em;
   }
 
   .inst-auth-card-top p {
     font-size: 13px;
     line-height: 1.5;
+    color: #42556f;
+    font-weight: 500;
   }
 
   .inst-auth-chip {
@@ -720,6 +725,25 @@ body {
   .inst-auth-links a,
   .inst-auth-secondary-link {
     font-size: 13px;
+  }
+
+  .inst-auth-social-btn {
+    color: #14233a;
+    font-weight: 700;
+    border-color: rgba(15, 23, 42, 0.12);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+  }
+
+  .inst-auth-field span {
+    color: #42556f;
+    font-weight: 700;
+  }
+
+  .inst-auth-link-button,
+  .inst-auth-links a,
+  .inst-auth-secondary-link {
+    color: #4b5e79;
+    font-weight: 600;
   }
 
   .inst-auth-links,
@@ -746,11 +770,13 @@ body {
 
   .inst-auth-card-top h2 {
     font-size: 22px;
+    color: #091427;
   }
 
   .inst-auth-social-btn {
     padding: 0 12px;
     font-size: 14px;
+    color: #122238;
   }
 
   .inst-auth-field input {

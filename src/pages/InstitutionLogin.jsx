@@ -328,7 +328,7 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
                   disabled={pending}
                 >
                   <PhoneIcon />
-                  <span>Continue with phone</span>
+                  <span>Continue with Phone Number</span>
                 </button>
               </div>
 
@@ -374,7 +374,7 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
                   <PhoneIcon />
                 </div>
                 <div>
-                  <div className="inst-auth-phone-title">Continue with phone</div>
+                  <div className="inst-auth-phone-title">Continue with Phone Number</div>
                   <div className="inst-auth-phone-subtitle">Use your number and verification code.</div>
                 </div>
               </div>

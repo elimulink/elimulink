@@ -951,7 +951,18 @@ export default function StudentLanding() {
   }, [active]);
 
   if (active === "settings") {
-    return <SettingsPage user={user} onBack={() => setActive("newchat")} />;
+    return (
+      <SettingsPage
+        user={{
+          ...user,
+          uid: firebaseUser?.uid || null,
+          email: firebaseUser?.email || user?.email || "",
+          displayName: firebaseUser?.displayName || user?.name || "",
+          providerData: firebaseUser?.providerData || [],
+        }}
+        onBack={() => setActive("newchat")}
+      />
+    );
   }
 
   if (active === "notebook") {

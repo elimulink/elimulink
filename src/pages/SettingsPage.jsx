@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getStoredThemeMode, setThemeMode } from "../lib/theme";
 import {
+  clearRegisteredPasskeys,
+  getRegisteredPasskeys,
+  getSecureUnlockCapabilities,
+  registerPasskey,
+} from "../auth/secureLock";
+import {
   getStoredPreferences,
   getStoredProfile,
   saveStoredPreferences,
@@ -211,12 +217,20 @@ export default function SettingsPage({ user, onBack, canShowAdmin = false, onOpe
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
   const [avatarError, setAvatarError] = useState("");
+  const [passkeyEntries, setPasskeyEntries] = useState(() => getRegisteredPasskeys(user?.uid));
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyMessage, setPasskeyMessage] = useState("");
 
   const resolvedTheme = useMemo(() => prefs.theme, [prefs.theme]);
+  const secureCapabilities = useMemo(() => getSecureUnlockCapabilities(user), [user]);
 
   useEffect(() => {
     setThemeMode(resolvedTheme);
   }, [resolvedTheme]);
+
+  useEffect(() => {
+    setPasskeyEntries(getRegisteredPasskeys(user?.uid));
+  }, [user?.uid]);
 
   async function onSave() {
     setSaving(true);
@@ -252,6 +266,32 @@ export default function SettingsPage({ user, onBack, canShowAdmin = false, onOpe
   function removeAvatar() {
     setAvatarError("");
     setForm((prev) => ({ ...prev, avatarUrl: "" }));
+  }
+
+  async function handlePasskeySetup() {
+    if (!user?.uid) {
+      setPasskeyMessage("Sign in again before setting up a passkey.");
+      return;
+    }
+    setPasskeyBusy(true);
+    setPasskeyMessage("");
+    try {
+      const created = await registerPasskey(user, { label: "This device" });
+      const nextEntries = getRegisteredPasskeys(user.uid);
+      setPasskeyEntries(nextEntries);
+      setPasskeyMessage(`Passkey set up for ${created.label}. You can now use passkey or biometrics on this device.`);
+    } catch (error) {
+      setPasskeyMessage(String(error?.message || error || "Passkey setup failed."));
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  function handlePasskeyRemove() {
+    if (!user?.uid) return;
+    clearRegisteredPasskeys(user.uid);
+    setPasskeyEntries([]);
+    setPasskeyMessage("Passkey removed from this device.");
   }
 
   return (
@@ -420,6 +460,73 @@ export default function SettingsPage({ user, onBack, canShowAdmin = false, onOpe
                 label="Keyboard shortcuts"
                 sublabel="Power-user navigation keys."
               />
+            </div>
+          </Section>
+
+          <Section title="Security & Re-entry" description="Control how the secure lock screen can unlock this account on this device.">
+            <div className="space-y-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
+                <div className="text-sm font-medium text-slate-800 dark:text-slate-200">Current unlock methods</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {secureCapabilities.password ? (
+                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
+                      Password
+                    </span>
+                  ) : null}
+                  {secureCapabilities.federatedProvider ? (
+                    <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-200">
+                      {secureCapabilities.federatedLabel} re-auth
+                    </span>
+                  ) : null}
+                  {secureCapabilities.passkey ? (
+                    <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200">
+                      Passkey on this device
+                    </span>
+                  ) : null}
+                  {!secureCapabilities.password && !secureCapabilities.federatedProvider && !secureCapabilities.passkey ? (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                      No secure unlock method available yet
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
+                <div className="text-sm font-medium text-slate-800 dark:text-slate-200">Passkey</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Set up a passkey on this device to unlock the secure lock screen with device verification.
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button type="button" onClick={handlePasskeySetup} disabled={passkeyBusy || !secureCapabilities.passkeySupported}>
+                    {passkeyBusy ? "Setting up..." : secureCapabilities.passkey ? "Add another passkey" : "Set up passkey"}
+                  </Button>
+                  {passkeyEntries.length ? (
+                    <Button type="button" variant="softDanger" onClick={handlePasskeyRemove}>
+                      Remove passkey
+                    </Button>
+                  ) : null}
+                </div>
+                {!secureCapabilities.passkeySupported ? (
+                  <div className="mt-2 text-xs text-amber-600 dark:text-amber-300">
+                    Passkeys are not supported in this browser.
+                  </div>
+                ) : null}
+                {passkeyEntries.length ? (
+                  <div className="mt-3 space-y-2">
+                    {passkeyEntries.map((entry) => (
+                      <div key={entry.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                        <div className="font-medium">{entry.label}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                          Added {new Date(entry.createdAt).toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {passkeyMessage ? (
+                  <div className="mt-3 text-xs text-slate-600 dark:text-slate-300">{passkeyMessage}</div>
+                ) : null}
+              </div>
             </div>
           </Section>
 

@@ -113,6 +113,7 @@ export default function SecureLockScreen({
   onUnlockPassword,
   onUnlockBiometric,
   onUnlockPasskey,
+  onUnlockProvider,
   onForgotPassword,
   onSignOut,
 }) {
@@ -127,6 +128,7 @@ export default function SecureLockScreen({
   const firstName = getFirstName(displayName, email);
   const initials = getInitials(displayName, email);
   const copy = useMemo(() => getReasonCopy(lockReason, firstName), [firstName, lockReason]);
+  const providerLabel = capabilities?.federatedLabel ? `Continue with ${capabilities.federatedLabel}` : "Continue with provider";
 
   async function runAction(kind, action) {
     setPending(kind);
@@ -181,38 +183,44 @@ export default function SecureLockScreen({
               });
             }}
           >
-            <div className="els-field-wrap">
-              <input
-                id="secure-lock-password"
-                className="els-input"
-                type={visible ? "text" : "password"}
-                placeholder="Enter password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
-              />
+            {capabilities?.password ? (
+              <div className="els-field-wrap">
+                  <input
+                    id="secure-lock-password"
+                    className="els-input"
+                    type={visible ? "text" : "password"}
+                    placeholder="Enter password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    className="els-eye-btn"
+                    aria-label={visible ? "Hide password" : "Show password"}
+                    onClick={() => setVisible((value) => !value)}
+                  >
+                    <EyeIcon visible={visible} />
+                  </button>
+              </div>
+            ) : null}
+
+            {capabilities?.forgotPassword ? (
               <button
                 type="button"
-                className="els-eye-btn"
-                aria-label={visible ? "Hide password" : "Show password"}
-                onClick={() => setVisible((value) => !value)}
+                className="els-link-btn"
+                disabled={pending === "forgot"}
+                onClick={() => runAction("forgot", onForgotPassword)}
               >
-                <EyeIcon visible={visible} />
+                {pending === "forgot" ? "Sending reset..." : "Forgot password?"}
               </button>
-            </div>
+            ) : null}
 
-            <button
-              type="button"
-              className="els-link-btn"
-              disabled={pending === "forgot"}
-              onClick={() => runAction("forgot", onForgotPassword)}
-            >
-              {pending === "forgot" ? "Sending reset..." : "Forgot password?"}
-            </button>
-
-            <button type="submit" className="els-primary-btn" disabled={pending === "password"}>
-              {pending === "password" ? "Unlocking..." : "Unlock"}
-            </button>
+            {capabilities?.password ? (
+              <button type="submit" className="els-primary-btn" disabled={pending === "password"}>
+                {pending === "password" ? "Unlocking..." : "Unlock"}
+              </button>
+            ) : null}
 
             {capabilities?.biometrics ? (
               <button
@@ -236,6 +244,21 @@ export default function SecureLockScreen({
                 <PasskeyIcon />
                 <span>{pending === "passkey" ? "Checking..." : "Use passkey"}</span>
               </button>
+            ) : null}
+
+            {capabilities?.federatedProvider ? (
+              <button
+                type="button"
+                className="els-secondary-btn"
+                disabled={pending === "provider"}
+                onClick={() => runAction("provider", onUnlockProvider)}
+              >
+                <span>{pending === "provider" ? "Checking..." : providerLabel}</span>
+              </button>
+            ) : null}
+
+            {!capabilities?.password && !capabilities?.biometrics && !capabilities?.passkey && !capabilities?.federatedProvider ? (
+              <div className="els-notice">This account needs a supported sign-in method before secure re-entry can unlock it on this device.</div>
             ) : null}
 
             <button type="button" className="els-switch-btn" onClick={onSignOut}>
