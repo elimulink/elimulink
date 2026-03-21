@@ -54,6 +54,100 @@ def _create_index_if_missing(
 
 def upgrade() -> None:
     bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS family VARCHAR DEFAULT 'ai'")
+        op.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS app VARCHAR DEFAULT 'institution'")
+        op.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS title VARCHAR DEFAULT 'New conversation'")
+        op.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS owner_uid VARCHAR")
+        op.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        op.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        op.execute("UPDATE conversations SET family = COALESCE(family, 'ai')")
+        op.execute("UPDATE conversations SET app = COALESCE(app, 'institution')")
+        op.execute("UPDATE conversations SET title = COALESCE(title, 'New conversation')")
+        op.execute("UPDATE conversations SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)")
+        op.execute("UPDATE conversations SET updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_conversations_family ON conversations (family)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_conversations_app ON conversations (app)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_conversations_owner_uid ON conversations (owner_uid)")
+
+        op.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id VARCHAR PRIMARY KEY,
+                conversation_id VARCHAR NOT NULL REFERENCES conversations(id),
+                role VARCHAR NOT NULL,
+                content TEXT NOT NULL,
+                citations_json JSON NOT NULL DEFAULT '[]'::json,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        op.execute("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_messages_role ON messages (role)")
+
+        op.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sources (
+                id VARCHAR PRIMARY KEY,
+                title VARCHAR NOT NULL,
+                domain VARCHAR NOT NULL,
+                url VARCHAR,
+                snippet TEXT,
+                provider VARCHAR,
+                type VARCHAR,
+                published_at VARCHAR,
+                favicon_url VARCHAR,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        op.execute("CREATE INDEX IF NOT EXISTS ix_sources_domain ON sources (domain)")
+
+        op.execute(
+            """
+            CREATE TABLE IF NOT EXISTS message_sources (
+                id SERIAL PRIMARY KEY,
+                message_id VARCHAR NOT NULL REFERENCES messages(id),
+                source_id VARCHAR NOT NULL REFERENCES sources(id),
+                citation_id VARCHAR,
+                label VARCHAR,
+                position INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        op.execute("CREATE INDEX IF NOT EXISTS ix_message_sources_message_id ON message_sources (message_id)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_message_sources_source_id ON message_sources (source_id)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_message_sources_citation_id ON message_sources (citation_id)")
+
+        op.execute(
+            """
+            CREATE TABLE IF NOT EXISTS share_links (
+                id VARCHAR PRIMARY KEY,
+                conversation_id VARCHAR NOT NULL REFERENCES conversations(id),
+                visibility VARCHAR NOT NULL DEFAULT 'unlisted',
+                allow_continue_chat BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                revoked_at TIMESTAMP
+            )
+            """
+        )
+        op.execute("CREATE INDEX IF NOT EXISTS ix_share_links_conversation_id ON share_links (conversation_id)")
+
+        op.execute(
+            """
+            CREATE TABLE IF NOT EXISTS share_link_messages (
+                id SERIAL PRIMARY KEY,
+                share_link_id VARCHAR NOT NULL REFERENCES share_links(id),
+                message_id VARCHAR NOT NULL REFERENCES messages(id),
+                position INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        op.execute("CREATE INDEX IF NOT EXISTS ix_share_link_messages_share_link_id ON share_link_messages (share_link_id)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_share_link_messages_message_id ON share_link_messages (message_id)")
+        return
+
     inspector = sa.inspect(bind)
 
     if not _table_exists(inspector, "conversations"):
@@ -70,130 +164,12 @@ def upgrade() -> None:
         )
         inspector = sa.inspect(bind)
     else:
-        _add_column_if_missing(
-            inspector,
-            "conversations",
-            sa.Column("family", sa.String(), nullable=False, server_default="ai"),
-        )
-        _add_column_if_missing(
-            inspector,
-            "conversations",
-            sa.Column("app", sa.String(), nullable=False, server_default="institution"),
-        )
-        _add_column_if_missing(
-            inspector,
-            "conversations",
-            sa.Column("title", sa.String(), nullable=False, server_default="New conversation"),
-        )
-        _add_column_if_missing(
-            inspector,
-            "conversations",
-            sa.Column("owner_uid", sa.String(), nullable=True),
-        )
-        _add_column_if_missing(
-            inspector,
-            "conversations",
-            sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-        )
-        _add_column_if_missing(
-            inspector,
-            "conversations",
-            sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-        )
-        inspector = sa.inspect(bind)
-
-    _create_index_if_missing(inspector, "conversations", "ix_conversations_id", ["id"])
-    _create_index_if_missing(inspector, "conversations", "ix_conversations_family", ["family"])
-    _create_index_if_missing(inspector, "conversations", "ix_conversations_app", ["app"])
-    _create_index_if_missing(inspector, "conversations", "ix_conversations_owner_uid", ["owner_uid"])
-
-    if not _table_exists(inspector, "messages"):
-        op.create_table(
-            "messages",
-            sa.Column("id", sa.String(), nullable=False),
-            sa.Column("conversation_id", sa.String(), nullable=False),
-            sa.Column("role", sa.String(), nullable=False),
-            sa.Column("content", sa.Text(), nullable=False),
-            sa.Column("citations_json", sa.JSON(), nullable=False, server_default="[]"),
-            sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-            sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"]),
-            sa.PrimaryKeyConstraint("id"),
-        )
-        inspector = sa.inspect(bind)
-    _create_index_if_missing(inspector, "messages", "ix_messages_id", ["id"])
-    _create_index_if_missing(inspector, "messages", "ix_messages_conversation_id", ["conversation_id"])
-    _create_index_if_missing(inspector, "messages", "ix_messages_role", ["role"])
-
-    if not _table_exists(inspector, "sources"):
-        op.create_table(
-            "sources",
-            sa.Column("id", sa.String(), nullable=False),
-            sa.Column("title", sa.String(), nullable=False),
-            sa.Column("domain", sa.String(), nullable=False),
-            sa.Column("url", sa.String(), nullable=True),
-            sa.Column("snippet", sa.Text(), nullable=True),
-            sa.Column("provider", sa.String(), nullable=True),
-            sa.Column("type", sa.String(), nullable=True),
-            sa.Column("published_at", sa.String(), nullable=True),
-            sa.Column("favicon_url", sa.String(), nullable=True),
-            sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-            sa.PrimaryKeyConstraint("id"),
-        )
-        inspector = sa.inspect(bind)
-    _create_index_if_missing(inspector, "sources", "ix_sources_id", ["id"])
-    _create_index_if_missing(inspector, "sources", "ix_sources_domain", ["domain"])
-
-    if not _table_exists(inspector, "message_sources"):
-        op.create_table(
-            "message_sources",
-            sa.Column("id", sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column("message_id", sa.String(), nullable=False),
-            sa.Column("source_id", sa.String(), nullable=False),
-            sa.Column("citation_id", sa.String(), nullable=True),
-            sa.Column("label", sa.String(), nullable=True),
-            sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
-            sa.ForeignKeyConstraint(["message_id"], ["messages.id"]),
-            sa.ForeignKeyConstraint(["source_id"], ["sources.id"]),
-            sa.PrimaryKeyConstraint("id"),
-        )
-        inspector = sa.inspect(bind)
-    _create_index_if_missing(inspector, "message_sources", "ix_message_sources_id", ["id"])
-    _create_index_if_missing(inspector, "message_sources", "ix_message_sources_message_id", ["message_id"])
-    _create_index_if_missing(inspector, "message_sources", "ix_message_sources_source_id", ["source_id"])
-    _create_index_if_missing(inspector, "message_sources", "ix_message_sources_citation_id", ["citation_id"])
-
-    if not _table_exists(inspector, "share_links"):
-        op.create_table(
-            "share_links",
-            sa.Column("id", sa.String(), nullable=False),
-            sa.Column("conversation_id", sa.String(), nullable=False),
-            sa.Column("visibility", sa.String(), nullable=False, server_default="unlisted"),
-            sa.Column("allow_continue_chat", sa.Boolean(), nullable=False, server_default=sa.text("true")),
-            sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-            sa.Column("expires_at", sa.DateTime(), nullable=True),
-            sa.Column("revoked_at", sa.DateTime(), nullable=True),
-            sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"]),
-            sa.PrimaryKeyConstraint("id"),
-        )
-        inspector = sa.inspect(bind)
-    _create_index_if_missing(inspector, "share_links", "ix_share_links_id", ["id"])
-    _create_index_if_missing(inspector, "share_links", "ix_share_links_conversation_id", ["conversation_id"])
-
-    if not _table_exists(inspector, "share_link_messages"):
-        op.create_table(
-            "share_link_messages",
-            sa.Column("id", sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column("share_link_id", sa.String(), nullable=False),
-            sa.Column("message_id", sa.String(), nullable=False),
-            sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
-            sa.ForeignKeyConstraint(["share_link_id"], ["share_links.id"]),
-            sa.ForeignKeyConstraint(["message_id"], ["messages.id"]),
-            sa.PrimaryKeyConstraint("id"),
-        )
-        inspector = sa.inspect(bind)
-    _create_index_if_missing(inspector, "share_link_messages", "ix_share_link_messages_id", ["id"])
-    _create_index_if_missing(inspector, "share_link_messages", "ix_share_link_messages_share_link_id", ["share_link_id"])
-    _create_index_if_missing(inspector, "share_link_messages", "ix_share_link_messages_message_id", ["message_id"])
+        _add_column_if_missing(inspector, "conversations", sa.Column("family", sa.String(), nullable=True))
+        _add_column_if_missing(inspector, "conversations", sa.Column("app", sa.String(), nullable=True))
+        _add_column_if_missing(inspector, "conversations", sa.Column("title", sa.String(), nullable=True))
+        _add_column_if_missing(inspector, "conversations", sa.Column("owner_uid", sa.String(), nullable=True))
+        _add_column_if_missing(inspector, "conversations", sa.Column("created_at", sa.DateTime(), nullable=True))
+        _add_column_if_missing(inspector, "conversations", sa.Column("updated_at", sa.DateTime(), nullable=True))
 
 
 def downgrade() -> None:
