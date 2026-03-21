@@ -132,9 +132,7 @@ async def startup_log() -> None:
     except Exception:
       print("[STARTUP] DATABASE_URL host=unknown")
   run_migrations_value = (os.getenv("RUN_MIGRATIONS") or "").strip().lower()
-  should_run_migrations = run_migrations_value == "1" or (
-    run_migrations_value != "0" and env == "production"
-  )
+  should_run_migrations = run_migrations_value != "0"
   if should_run_migrations:
     try:
       from alembic import command
