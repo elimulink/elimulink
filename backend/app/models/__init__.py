@@ -10,6 +10,7 @@ from .finance import StudentFinance
 from .attendance import AttendanceRecord
 from .announcement import Announcement
 from .ai_log import AiRequestLog
+from .research import Conversation, Message, Source, MessageSource, ShareLink, ShareLinkMessage
 
 __all__ = [
     "Base",
@@ -29,4 +30,10 @@ __all__ = [
     "AttendanceRecord",
     "Announcement",
     "AiRequestLog",
+    "Conversation",
+    "Message",
+    "Source",
+    "MessageSource",
+    "ShareLink",
+    "ShareLinkMessage",
 ]

@@ -52,6 +52,8 @@ import "../shared/audio/audio-ui.css";
 import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
 import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
 import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
+import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
+import { normalizeResearchSources } from "../shared/research/researchUtils.js";
 import SettingsPage from "../pages/SettingsPage";
 import NotebookPage from "../pages/NotebookPage";
 import SubgroupRoom from "../pages/SubgroupRoom";
@@ -246,6 +248,10 @@ function Bubble({
   text,
   imageSearchResults = [],
   imageSearchQuery = "",
+  sources = [],
+  chatTitle = "",
+  chatId = "",
+  messageId = "",
   onImagePreview,
   onImageReuse,
   onAssistantSpeak,
@@ -257,6 +263,10 @@ function Bubble({
 }) {
   const isUser = role === "user";
   const isError = !isUser && isErrorText(text);
+  const researchSources = useMemo(
+    () => normalizeResearchSources({ sources, imageSearchResults, text }),
+    [imageSearchResults, sources, text]
+  );
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -292,6 +302,22 @@ function Bubble({
               Speak
             </button>
           </div>
+        ) : null}
+
+        {!isUser && String(text || "").trim() ? (
+          <ResearchActionsContainer
+            family="ai"
+            app="student"
+            conversationId={chatId}
+            messageIds={messageId ? [messageId] : []}
+            sources={researchSources}
+            sharePayload={{
+              app: "student",
+              title: chatTitle || "ElimuLink AI chat",
+              message: text,
+              sources: researchSources,
+            }}
+          />
         ) : null}
 
         {isUser ? (
@@ -781,14 +807,15 @@ export default function StudentLanding() {
         updateActiveChatMessages(
           (messages) => [
             ...messages,
-            {
-              role: "assistant",
-              text: results.length
-                ? `Here are some web image results for "${imageSearchQuery}".`
-                : `I couldn't find image results for "${imageSearchQuery}" right now.`,
-              imageSearchResults: results,
-              imageSearchQuery,
-            },
+              {
+                role: "assistant",
+                text: results.length
+                  ? `Here are some web image results for "${imageSearchQuery}".`
+                  : `I couldn't find image results for "${imageSearchQuery}" right now.`,
+                imageSearchResults: results,
+                imageSearchQuery,
+                sources: normalizeResearchSources({ imageSearchResults: results }),
+              },
           ],
           clean || "Web image search"
         );
@@ -853,7 +880,10 @@ export default function StudentLanding() {
       }
 
       const reply = result?.text || result?.reply || result?.data?.reply || "Response received.";
-      updateActiveChatMessages((m) => [...m, { role: "assistant", text: reply }], clean || "Reply");
+      updateActiveChatMessages(
+        (m) => [...m, { role: "assistant", text: reply, sources: normalizeResearchSources(result) }],
+        clean || "Reply"
+      );
     } catch {
       updateActiveChatMessages(
         (m) => [...m, { role: "assistant", text: "Failed to reach AI service." }],
@@ -1897,6 +1927,10 @@ export default function StudentLanding() {
                   text={m.text}
                   imageSearchResults={m.imageSearchResults || []}
                   imageSearchQuery={m.imageSearchQuery || ""}
+                  sources={m.sources || []}
+                  chatId={activeChat?.conversationId || ""}
+                  messageId={m.id || ""}
+                  chatTitle={activeChat?.title || UNTITLED_CHAT_BASE}
                   onImagePreview={setImageSearchPreview}
                   onImageReuse={(result) => setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`)}
                   onAssistantSpeak={speakAssistantText}
@@ -2047,9 +2081,13 @@ export default function StudentLanding() {
                     key={idx}
                     role={m.role}
                     text={m.text}
-                    imageSearchResults={m.imageSearchResults || []}
-                    imageSearchQuery={m.imageSearchQuery || ""}
-                    onImagePreview={setImageSearchPreview}
+                     imageSearchResults={m.imageSearchResults || []}
+                     imageSearchQuery={m.imageSearchQuery || ""}
+                     sources={m.sources || []}
+                     chatId={activeChat?.conversationId || ""}
+                     messageId={m.id || ""}
+                     chatTitle={activeChat?.title || UNTITLED_CHAT_BASE}
+                     onImagePreview={setImageSearchPreview}
                     onImageReuse={(result) => setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`)}
                     onAssistantSpeak={speakAssistantText}
                     onRetry={() => {

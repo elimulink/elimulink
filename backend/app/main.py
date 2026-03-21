@@ -35,6 +35,7 @@ from .routes.ai import router as ai_router
 from .routes.tts import router as tts_router
 from .routes.workflows import router as workflows_router
 from .routes.rubrics import router as rubrics_router
+from .routes.research_features import router as research_features_router
 from .utils import err_response
 
 
@@ -164,4 +165,5 @@ app.include_router(finance_router)
 app.include_router(audit_router)
 app.include_router(workflows_router)
 app.include_router(rubrics_router)
+app.include_router(research_features_router)
 

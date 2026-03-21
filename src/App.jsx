@@ -52,6 +52,8 @@ import { verifyFamilySession } from './auth/familySession';
 import AudioPlaybackBar from './shared/audio/AudioPlaybackBar.jsx';
 import AudioSettingsPanel from './shared/audio/AudioSettingsPanel.jsx';
 import { useAudioPlayer } from './shared/audio/useAudioPlayer.js';
+import ResearchActionsContainer from './shared/research/ResearchActionsContainer.jsx';
+import { normalizeResearchSources } from './shared/research/researchUtils.js';
 import './shared/audio/audio-ui.css';
 
 const appId = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
@@ -832,6 +834,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
       const data = await res.json();
       const aiText = data?.text || 'Connection error.';
+      const aiSources = normalizeResearchSources(data);
       if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
         logInstitutionCaseMessage({
           institutionId: userProfile.institutionId,
@@ -845,7 +848,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
       // Insert AI reply right after the edited message
       const rebuilt = [...updated];
-      rebuilt.splice(idx + 1, 0, { id: Date.now() + 1, role: 'ai', content: aiText });
+      rebuilt.splice(idx + 1, 0, { id: Date.now() + 1, role: 'ai', content: aiText, sources: aiSources });
       setMessages(rebuilt);
       speakIfInstitutionVoiceEnabled(aiText);
     } catch (err) {
@@ -936,7 +939,8 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
               setShowDeptBanner(true);
             }
             const aiText = data?.text || 'Could not generate image.';
-            setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText }]);
+            const aiSources = normalizeResearchSources(data);
+            setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText, sources: aiSources }]);
             speakIfInstitutionVoiceEnabled(aiText);
             if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
               logInstitutionCaseMessage({
@@ -1033,7 +1037,8 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
           setShowDeptBanner(true);
         }
         const aiText = data?.text || 'Connection error.';
-        setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText }]);
+        const aiSources = normalizeResearchSources(data);
+        setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText, sources: aiSources }]);
         speakIfInstitutionVoiceEnabled(aiText);
         if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
           logInstitutionCaseMessage({
@@ -1732,6 +1737,26 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                           ))}
                         </div>
                       )}
+
+                      {m.role === 'ai' ? (
+                        <ResearchActionsContainer
+                          family="ai"
+                          app={hostMode === 'institution' ? 'institution' : 'public'}
+                          conversationId=""
+                          messageIds={m.id ? [m.id] : []}
+                          sources={normalizeResearchSources({
+                            sources: m.sources,
+                            imageSearchResults: m.imageSearchResults,
+                            text: m.text || m.content,
+                          })}
+                          sharePayload={{
+                            app: hostMode === 'institution' ? 'institution' : 'public',
+                            title: activeChatId || 'ElimuLink AI',
+                            message: m.text || m.content,
+                            sources: m.sources || [],
+                          }}
+                        />
+                      ) : null}
 
                       {/* Action Bar */}
                       <div className={`mt-3 pt-3 border-t border-white/5 flex items-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity`}>

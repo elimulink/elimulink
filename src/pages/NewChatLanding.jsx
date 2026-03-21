@@ -57,6 +57,13 @@ import "../shared/audio/audio-ui.css";
 import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
 import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
 import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
+import {
+  createInstitutionConversation,
+  createInstitutionConversationMessage,
+  fetchInstitutionShareLink,
+} from "../lib/researchApi";
+import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
+import { normalizeResearchSources } from "../shared/research/researchUtils.js";
 import SettingsPage from "./SettingsPage";
 import NotebookPage from "./NotebookPage";
 import SubgroupRoom from "./SubgroupRoom";
@@ -529,6 +536,10 @@ function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "", owner
     id: makeChatId(),
     ownerUid,
     chatScope: "institution",
+    conversationId: "",
+    shareId: "",
+    shareUrl: "",
+    isSharedView: false,
     title,
     updatedAt: Date.now(),
     messages: assistantText
@@ -598,6 +609,13 @@ function Bubble({
   streaming = false,
   imageSearchResults = [],
   imageSearchQuery = "",
+  sources = [],
+  chatTitle = "",
+  chatId = "",
+  messageId = "",
+  shareId = "",
+  shareUrl = "",
+  isSharedView = false,
   onImagePreview,
   onImageReuse,
   onAssistantSpeak,
@@ -625,6 +643,10 @@ function Bubble({
   const isError = !isUser && isErrorText(text);
   const isActiveSpeak = !isUser && isSpeaking && speakingText === text;
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const researchSources = useMemo(
+    () => normalizeResearchSources({ sources, imageSearchResults, text }),
+    [imageSearchResults, sources, text]
+  );
   const [renderedAssistantText, setRenderedAssistantText] = useState(() =>
     isUser ? String(text || "") : ""
   );
@@ -741,8 +763,8 @@ function Bubble({
           </div>
         )}
 
-        {!isUser ? (
-          <div
+          {!isUser ? (
+            <div
             className={[
               "mt-2.5 md:mt-3 flex items-center gap-0.5 md:gap-1 transition-opacity",
               showActionRow ? "opacity-100" : "opacity-100 md:opacity-100",
@@ -857,11 +879,31 @@ function Bubble({
             >
               <Volume2 size={14} />
             </button>
-          </div>
-        ) : null}
+            </div>
+          ) : null}
 
-        {!isUser && showStudyTools && !streaming && !isTypingAnim && String(text || "").trim() ? (
-          <div className="mt-2.5 border-t border-slate-200/70 pt-2.5 dark:border-slate-700/80">
+          {!isUser && !streaming && !isTypingAnim && String(text || "").trim() ? (
+            <ResearchActionsContainer
+              family="ai"
+              app="institution"
+              conversationId={chatId}
+              messageIds={messageId ? [messageId] : []}
+              sources={researchSources}
+              backendMode="institution"
+              sharePayload={{
+                app: "institution",
+                title: chatTitle || "ElimuLink AI chat",
+                message: text,
+                sources: researchSources,
+              }}
+              initialShareId={shareId}
+              initialShareUrl={shareUrl}
+              allowShareDelete={!isSharedView}
+            />
+          ) : null}
+
+          {!isUser && showStudyTools && !streaming && !isTypingAnim && String(text || "").trim() ? (
+            <div className="mt-2.5 border-t border-slate-200/70 pt-2.5 dark:border-slate-700/80">
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
@@ -1277,6 +1319,16 @@ export default function NewChatLanding({
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [active, isEmbeddedAdminChat]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const match = window.location.pathname.match(/\/shared\/([^/]+)/i);
+    const shareId = match?.[1] || "";
+    if (!shareId) return;
+    loadInstitutionSharedConversation(shareId).catch((error) => {
+      console.error("Failed to load shared institution conversation", error);
+    });
+  }, [currentUid]);
 
   useEffect(() => {
     const unsubscribe = auth?.onAuthStateChanged
@@ -1717,6 +1769,131 @@ export default function NewChatLanding({
     );
   }
 
+  function patchActiveChat(patcher) {
+    const currentId = activeChat?.id;
+    if (!currentId) return;
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== currentId) return chat;
+        return { ...chat, ...(typeof patcher === "function" ? patcher(chat) : patcher), updatedAt: Date.now() };
+      })
+    );
+  }
+
+  async function ensureInstitutionConversation(titleHint) {
+    const existingId = String(activeChat?.conversationId || "");
+    if (existingId.startsWith("conv_")) return existingId;
+    const result = await createInstitutionConversation({
+      title: String(titleHint || activeChat?.title || untitledChatBase || "New conversation").slice(0, 80),
+      ownerUid: currentUid || null,
+    });
+    const conversationId = String(result?.conversation?.id || "");
+    if (conversationId) {
+      patchActiveChat({ conversationId });
+    }
+    return conversationId;
+  }
+
+  function applyPersistedExchangeToChat(userContent, persisted) {
+    const userMessage = persisted?.user_message;
+    const assistantMessage = persisted?.assistant_message;
+    const conversation = persisted?.conversation;
+    if (!assistantMessage || !conversation) return;
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== activeChat?.id) return chat;
+        const nextMessages = [...(chat.messages || [])];
+        for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
+          const item = nextMessages[index];
+          if (item?.role === "user" && !item?.id && String(item?.text || "") === String(userContent || "")) {
+            nextMessages[index] = {
+              ...item,
+              id: userMessage?.id || item.id,
+              conversationId: conversation.id,
+            };
+            break;
+          }
+        }
+        const alreadyHasAssistant = nextMessages.some((item) => item?.id === assistantMessage.id);
+        if (!alreadyHasAssistant) {
+          nextMessages.push({
+            id: assistantMessage.id,
+            conversationId: conversation.id,
+            role: "assistant",
+            text: assistantMessage.content,
+            sources: assistantMessage.sources || [],
+            ownerUid: currentUid,
+            createdAt: Date.parse(assistantMessage.created_at || "") || Date.now(),
+          });
+        }
+        return {
+          ...chat,
+          conversationId: conversation.id,
+          messages: nextMessages,
+          updatedAt: Date.now(),
+        };
+      })
+    );
+  }
+
+  async function persistInstitutionExchange({ userContent, assistantContent, sources, titleHint }) {
+    const conversationId = await ensureInstitutionConversation(titleHint);
+    if (!conversationId) {
+      throw new Error("Failed to create institution conversation.");
+    }
+    const citations = (sources || []).map((source, index) => ({
+      id: `cit_${conversationId}_${index}`,
+      source_id: source?.id || null,
+      label: source?.title || source?.domain || `Source ${index + 1}`,
+      position: index,
+    }));
+    const payload = await createInstitutionConversationMessage(conversationId, {
+      content: userContent,
+      assistant_content: assistantContent,
+      citations,
+      sources: sources || [],
+    });
+    applyPersistedExchangeToChat(userContent, payload);
+    return payload;
+  }
+
+  async function loadInstitutionSharedConversation(shareId) {
+    if (!shareId) return;
+    const result = await fetchInstitutionShareLink(shareId);
+    const sharedConversation = result?.conversation;
+    if (!sharedConversation?.id) return;
+    const sharedChatId = `shared-${shareId}`;
+    const sharedMessages = Array.isArray(sharedConversation.messages)
+      ? sharedConversation.messages.map((message) => ({
+          id: message.id,
+          conversationId: sharedConversation.id,
+          role: message.role,
+          text: message.content,
+          sources: message.sources || [],
+          ownerUid: currentUid,
+          createdAt: Date.parse(message.created_at || "") || Date.now(),
+        }))
+      : [];
+    const sharedChat = {
+      id: sharedChatId,
+      ownerUid: currentUid,
+      chatScope: storageScope,
+      conversationId: sharedConversation.id,
+      shareId,
+      shareUrl: `${window.location.origin}/shared/${shareId}`,
+      isSharedView: true,
+      title: sharedConversation.title || "Shared conversation",
+      updatedAt: Date.now(),
+      messages: sharedMessages,
+    };
+    setChats((prev) => {
+      const others = prev.filter((chat) => chat.id !== sharedChatId);
+      return [sharedChat, ...others];
+    });
+    setActiveChatId(sharedChatId);
+    setActive("newchat");
+  }
+
   function openSettingsPanel() {
     setIsProfileMenuOpen(false);
     setIsNotificationsMenuOpen(false);
@@ -2067,16 +2244,24 @@ export default function NewChatLanding({
     }, "Reply");
   }
 
-  function finalizeStreamingAssistant(streamId, text) {
-    updateActiveChatMessages((m) => {
-      const idx = m.findIndex((item) => item?.streamId === streamId);
-      if (idx < 0) return [...m, { role: "assistant", text, ownerUid: currentUid, createdAt: Date.now() }];
-      const next = [...m];
-      const current = next[idx] || {};
-      next[idx] = { role: "assistant", text, ownerUid: currentUid, createdAt: current.createdAt || Date.now() };
-      return next;
-    }, "Reply");
-  }
+  function finalizeStreamingAssistant(streamId, text, meta = {}) {
+      updateActiveChatMessages((m) => {
+        const idx = m.findIndex((item) => item?.streamId === streamId);
+        if (idx < 0) {
+          return [...m, { role: "assistant", text, sources: meta.sources || [], ownerUid: currentUid, createdAt: Date.now() }];
+        }
+        const next = [...m];
+        const current = next[idx] || {};
+        next[idx] = {
+          role: "assistant",
+          text,
+          sources: meta.sources || current.sources || [],
+          ownerUid: currentUid,
+          createdAt: current.createdAt || Date.now(),
+        };
+        return next;
+      }, "Reply");
+    }
 
   function withAcademicContext(messageText, context) {
     const contextBlock = buildAcademicContextBlock(context);
@@ -2124,11 +2309,12 @@ export default function NewChatLanding({
       };
     }
 
-    return {
-      ok: true,
-      text: result?.text || result?.reply || result?.data?.reply || "Response received.",
-    };
-  }
+      return {
+        ok: true,
+        text: result?.text || result?.reply || result?.data?.reply || "Response received.",
+        sources: normalizeResearchSources(result),
+      };
+    }
 
   async function streamAssistantReply({ token, messageText, streamId, academicContext }) {
     const requestUrl = `${apiUrl(AI_PATH)}?stream=1`;
@@ -2262,16 +2448,17 @@ export default function NewChatLanding({
         updateActiveChatMessages(
           (messages) => [
             ...messages,
-            {
-              role: "assistant",
-              text: results.length
-                ? `Here are some web image results for "${imageSearchQuery}". You can preview, open the source, or reuse one in your workspace flow.`
-                : `I couldn't find image results for "${imageSearchQuery}" right now.`,
-              imageSearchResults: results,
-              imageSearchQuery,
-              ownerUid: currentUid,
-              createdAt: Date.now(),
-            },
+              {
+                role: "assistant",
+                text: results.length
+                  ? `Here are some web image results for "${imageSearchQuery}". You can preview, open the source, or reuse one in your workspace flow.`
+                  : `I couldn't find image results for "${imageSearchQuery}" right now.`,
+                imageSearchResults: results,
+                imageSearchQuery,
+                sources: normalizeResearchSources({ imageSearchResults: results }),
+                ownerUid: currentUid,
+                createdAt: Date.now(),
+              },
           ],
           clean || untitledChatBase
         );
@@ -2303,6 +2490,24 @@ export default function NewChatLanding({
         return;
       }
 
+      const shouldUseInstitutionResearchFlow = storageScope === "institution" || storageScope === "institution_admin";
+      if (shouldUseInstitutionResearchFlow) {
+        const fullReply = await fetchAssistantReplyFull({
+          token,
+          messageText,
+          academicContext: mergedContext,
+        });
+        const assistantText = String(fullReply?.text || "Response received.");
+        const assistantSources = Array.isArray(fullReply?.sources) ? fullReply.sources : [];
+        await persistInstitutionExchange({
+          userContent: messageText,
+          assistantContent: assistantText,
+          sources: assistantSources,
+          titleHint: clean || untitledChatBase,
+        });
+        return;
+      }
+
       streamId = `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       appendAssistantPlaceholder(streamId);
       requestAnimationFrame(() => scrollToBottom("auto"));
@@ -2329,7 +2534,7 @@ export default function NewChatLanding({
         messageText,
         academicContext: mergedContext,
       });
-      finalizeStreamingAssistant(streamId, fallback.text);
+        finalizeStreamingAssistant(streamId, fallback.text, { sources: fallback.sources || [] });
     } catch {
       const backendHealthy = await isBackendHealthy();
       const errorText = backendHealthy
@@ -3589,6 +3794,13 @@ export default function NewChatLanding({
                       streaming={Boolean(m.streaming)}
                       imageSearchResults={m.imageSearchResults || []}
                       imageSearchQuery={m.imageSearchQuery || ""}
+                      sources={m.sources || []}
+                      chatId={activeChat?.conversationId || ""}
+                      messageId={m.id || ""}
+                      shareId={activeChat?.shareId || ""}
+                      shareUrl={activeChat?.shareUrl || ""}
+                      isSharedView={Boolean(activeChat?.isSharedView)}
+                      chatTitle={activeChat?.title || untitledChatBase}
                       onImagePreview={setImageSearchPreview}
                       onImageReuse={(result) => {
                         setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`);
@@ -3870,6 +4082,13 @@ export default function NewChatLanding({
                       streaming={Boolean(m.streaming)}
                       imageSearchResults={m.imageSearchResults || []}
                       imageSearchQuery={m.imageSearchQuery || ""}
+                      sources={m.sources || []}
+                      chatId={activeChat?.conversationId || ""}
+                      messageId={m.id || ""}
+                      shareId={activeChat?.shareId || ""}
+                      shareUrl={activeChat?.shareUrl || ""}
+                      isSharedView={Boolean(activeChat?.isSharedView)}
+                      chatTitle={activeChat?.title || untitledChatBase}
                       onImagePreview={setImageSearchPreview}
                       onImageReuse={(result) => {
                         setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`);
