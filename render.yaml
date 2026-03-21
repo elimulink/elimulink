@@ -18,6 +18,8 @@ services:
         secure: true
       - key: VITE_APP_ID
         value: elimulink-pro-v2
+      - key: RUN_MIGRATIONS
+        value: "1"
     autoDeploy: true
     disk: 1024
     regions:
