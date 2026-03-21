@@ -1148,11 +1148,6 @@ export default function NewChatLanding({
     handlePaste,
   } = useCapturedMedia();
 
-  useEffect(() => {
-    setIsSpeaking(audioPlayer.isPlaying);
-    setSpeakingText(audioPlayer.isPlaying ? audioPlayer.activeText : "");
-  }, [audioPlayer.activeText, audioPlayer.isPlaying]);
-
   function clearSessionUiState() {
     setChats([]);
     setActiveChatId(null);
@@ -1467,6 +1462,11 @@ export default function NewChatLanding({
     uid: currentUid,
     appLanguage: settingsPrefs?.language || "en-KE",
   });
+
+  useEffect(() => {
+    setIsSpeaking(audioPlayer.isPlaying);
+    setSpeakingText(audioPlayer.isPlaying ? audioPlayer.activeText : "");
+  }, [audioPlayer.activeText, audioPlayer.isPlaying]);
 
   const user = useMemo(
     () => ({
