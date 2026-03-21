@@ -131,7 +131,11 @@ async def startup_log() -> None:
       print(f"[STARTUP] DATABASE_URL host={safe_host}")
     except Exception:
       print("[STARTUP] DATABASE_URL host=unknown")
-  if os.getenv("RUN_MIGRATIONS") == "1":
+  run_migrations_value = (os.getenv("RUN_MIGRATIONS") or "").strip().lower()
+  should_run_migrations = run_migrations_value == "1" or (
+    run_migrations_value != "0" and env == "production"
+  )
+  if should_run_migrations:
     try:
       from alembic import command
       from alembic.config import Config
