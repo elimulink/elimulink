@@ -32,7 +32,11 @@ from .routes.finance import router as finance_router
 from .routes.audit import router as audit_router
 from .routes.auth_verify import router as auth_verify_router
 from .routes.ai import router as ai_router
+from .routes.ai_live_chat import router as ai_live_chat_router
+from .routes.executive_live_chat import router as executive_live_chat_router
+from .routes.speech_provider import router as speech_provider_router
 from .routes.tts import router as tts_router
+from .routes.vision_assist import router as vision_assist_router
 from .routes.workflows import router as workflows_router
 from .routes.rubrics import router as rubrics_router
 from .routes.research_features import router as research_features_router
@@ -152,7 +156,11 @@ app.include_router(admin_ai_router)
 app.include_router(admin_analytics_router)
 app.include_router(admin_settings_router)
 app.include_router(ai_router)
+app.include_router(executive_live_chat_router)
+app.include_router(ai_live_chat_router)
+app.include_router(speech_provider_router)
 app.include_router(tts_router)
+app.include_router(vision_assist_router)
 app.include_router(image_router)
 app.include_router(groups_router)
 app.include_router(reports_router)

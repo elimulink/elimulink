@@ -1,0 +1,464 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVoiceConversation } from "./useVoiceConversation";
+import { useScreenCaptureAnnotate } from "./useScreenCaptureAnnotate";
+import { useCameraCaptureAnnotate } from "./useCameraCaptureAnnotate";
+
+export default function useLiveVoiceSession({ language = "en-US", onUserTurn, onAskVision, settingsUid = null }) {
+  const screenStreamRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordingChunksRef = useRef([]);
+  const objectUrlsRef = useRef(new Set());
+  const isMountedRef = useRef(true);
+
+  const [open, setOpen] = useState(false);
+  const [recordingScreen, setRecordingScreen] = useState(false);
+  const [recordedBlob, setRecordedBlob] = useState(null);
+  const [recordedUrl, setRecordedUrl] = useState("");
+  const [captures, setCaptures] = useState([]);
+  const [visionPrompt, setVisionPrompt] = useState("");
+
+  const {
+    screenSharing,
+    shareSurface,
+    screenStream,
+    rawCapture,
+    highlightedCapture,
+    captureError,
+    captureLoading,
+    beginScreenShare,
+    endScreenShare,
+    takeScreenshot: takeSharedScreenshot,
+    autoHighlightScreenshot,
+    clearCaptures: clearScreenCaptures,
+  } = useScreenCaptureAnnotate({
+    onAskVision,
+  });
+
+  const {
+    mode,
+    supported,
+    muted,
+    transcript,
+    responseText,
+    error,
+    startVoiceChat,
+    endVoiceChat,
+    retryListen,
+    interruptSpeaking,
+    setMuted,
+  } = useVoiceConversation({
+    language,
+    autoRestartListening: true,
+    onUserTurn,
+    settingsUid,
+    context: {
+      captures,
+      cameraEnabled: false,
+      recordingScreen,
+      screenSharing,
+      shareSurface,
+    },
+  });
+
+  const {
+    cameraEnabled,
+    cameraFacing,
+    torchEnabled,
+    rawPhoto,
+    highlightedPhoto,
+    loading: cameraLoading,
+    error: cameraError,
+    stream: cameraStream,
+    videoTrack,
+    enableCamera,
+    disableCamera,
+    switchCamera: flipCameraFacing,
+    capturePhoto,
+    autoHighlightPhoto,
+    toggleTorch,
+    clearCameraCaptures,
+  } = useCameraCaptureAnnotate({
+    onAskVision,
+  });
+
+  const cameraSupported = useMemo(
+    () =>
+      typeof navigator !== "undefined" &&
+      Boolean(navigator.mediaDevices?.getUserMedia),
+    []
+  );
+
+  const screenCaptureSupported = useMemo(
+    () =>
+      typeof navigator !== "undefined" &&
+      Boolean(navigator.mediaDevices?.getDisplayMedia) &&
+      typeof MediaRecorder !== "undefined",
+    []
+  );
+
+  const registerObjectUrl = useCallback((url) => {
+    if (!url) return;
+    objectUrlsRef.current.add(url);
+  }, []);
+
+  const unregisterObjectUrl = useCallback((url) => {
+    if (!url) return;
+    objectUrlsRef.current.delete(url);
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const clearRecording = useCallback(() => {
+    setRecordedBlob(null);
+    setRecordedUrl((current) => {
+      unregisterObjectUrl(current);
+      return "";
+    });
+  }, [unregisterObjectUrl]);
+
+  const stopScreenRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch {
+        // ignore
+      }
+    } else {
+      const stream = screenStreamRef.current;
+      if (stream) {
+        stream.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch {
+            // ignore
+          }
+        });
+      }
+      screenStreamRef.current = null;
+      setRecordingScreen(false);
+    }
+  }, []);
+
+  const addCapture = useCallback(
+    (item) => {
+      if (item?.previewUrl) registerObjectUrl(item.previewUrl);
+      setCaptures((prev) => [...prev, item]);
+    },
+    [registerObjectUrl]
+  );
+
+  const resetSessionCaptures = useCallback(() => {
+    objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    objectUrlsRef.current.clear();
+    setRecordedBlob(null);
+    setRecordedUrl("");
+    setCaptures([]);
+    clearScreenCaptures();
+    clearCameraCaptures();
+    setVisionPrompt("");
+  }, [clearCameraCaptures, clearScreenCaptures]);
+
+  const openSession = useCallback(() => {
+    resetSessionCaptures();
+    setOpen(true);
+    window.setTimeout(() => startVoiceChat(), 120);
+  }, [resetSessionCaptures, startVoiceChat]);
+
+  const endSession = useCallback(() => {
+    endVoiceChat();
+    disableCamera();
+    stopScreenRecording();
+    endScreenShare();
+    resetSessionCaptures();
+    setOpen(false);
+  }, [disableCamera, endScreenShare, endVoiceChat, resetSessionCaptures, stopScreenRecording]);
+
+  const toggleMute = useCallback(() => {
+    setMuted((value) => {
+      const next = !value;
+      if (value && open) {
+        window.setTimeout(() => startVoiceChat(), 120);
+      }
+      return next;
+    });
+  }, [open, setMuted, startVoiceChat]);
+
+  const toggleCamera = useCallback(async () => {
+    if (cameraEnabled) {
+      disableCamera();
+      return;
+    }
+    await enableCamera();
+  }, [cameraEnabled, disableCamera, enableCamera]);
+
+  const switchCamera = useCallback(async () => {
+    const nextFacing = await flipCameraFacing();
+    if (cameraEnabled) {
+      window.setTimeout(() => enableCamera(), 120);
+    }
+    return nextFacing;
+  }, [cameraEnabled, enableCamera, flipCameraFacing]);
+
+  const toggleScreenShare = useCallback(async () => {
+    if (screenSharing) {
+      endScreenShare();
+      return true;
+    }
+    const stream = await beginScreenShare();
+    return Boolean(stream);
+  }, [beginScreenShare, endScreenShare, screenSharing]);
+
+  const takeScreenshot = useCallback(async () => {
+    if (!screenSharing) {
+      const stream = await beginScreenShare();
+      if (!stream) return null;
+    }
+
+    const capture = await takeSharedScreenshot();
+    if (capture?.previewUrl) {
+      addCapture(capture);
+    }
+    return capture;
+  }, [addCapture, beginScreenShare, screenSharing, takeSharedScreenshot]);
+
+  const takePhoto = useCallback(async () => {
+    if (!cameraEnabled) {
+      const stream = await enableCamera();
+      if (!stream) return null;
+    }
+    const capture = await capturePhoto();
+    if (capture?.previewUrl) {
+      addCapture(capture);
+    }
+    return capture;
+  }, [addCapture, cameraEnabled, capturePhoto, enableCamera]);
+
+  const highlightLatestCapture = useCallback(
+    async (prompt) => {
+      let result = null;
+      if (screenSharing || rawCapture?.rawDataUrl) {
+        result = await autoHighlightScreenshot({
+          prompt:
+            prompt ||
+            visionPrompt ||
+            "Show clearly what the user should tap or focus on next in this screenshot.",
+        });
+      } else if (rawPhoto?.rawDataUrl) {
+        result = await autoHighlightPhoto({
+          prompt:
+            prompt ||
+            visionPrompt ||
+            "Highlight the important object or area in this camera photo.",
+        });
+      }
+      if (result?.previewUrl) {
+        addCapture(result);
+      }
+      return result;
+    },
+    [
+      addCapture,
+      autoHighlightPhoto,
+      autoHighlightScreenshot,
+      rawCapture?.rawDataUrl,
+      rawPhoto?.rawDataUrl,
+      screenSharing,
+      visionPrompt,
+    ]
+  );
+
+  const toggleScreenRecording = useCallback(async () => {
+    if (!screenCaptureSupported) return false;
+
+    if (recordingScreen) {
+      stopScreenRecording();
+      return true;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+      screenStreamRef.current = stream;
+      recordingChunksRef.current = [];
+
+      const recorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+          ? "video/webm;codecs=vp9"
+          : "video/webm",
+      });
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, {
+          type: recorder.mimeType || "video/webm",
+        });
+        const previewUrl = URL.createObjectURL(blob);
+        registerObjectUrl(previewUrl);
+        if (isMountedRef.current) {
+          setRecordedBlob(blob);
+          setRecordedUrl((current) => {
+            if (current && current !== previewUrl) {
+              unregisterObjectUrl(current);
+            }
+            return previewUrl;
+          });
+        }
+        const stream = screenStreamRef.current;
+        if (stream) {
+          stream.getTracks().forEach((track) => {
+            try {
+              track.stop();
+            } catch {
+              // ignore
+            }
+          });
+        }
+        screenStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        recordingChunksRef.current = [];
+        if (isMountedRef.current) {
+          setRecordingScreen(false);
+        }
+      };
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecordingScreen(true);
+      stream.getVideoTracks?.()[0]?.addEventListener("ended", () => {
+        if (mediaRecorderRef.current?.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [recordingScreen, registerObjectUrl, screenCaptureSupported, stopScreenRecording, unregisterObjectUrl]);
+
+  const downloadRecording = useCallback(
+    (filename = `elimulink-live-recording-${Date.now()}.webm`) => {
+      if (!recordedBlob || !recordedUrl) return false;
+      const link = document.createElement("a");
+      link.href = recordedUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return true;
+    },
+    [recordedBlob, recordedUrl]
+  );
+
+  useEffect(() => {
+    if (rawCapture?.id) {
+      setCaptures((prev) => {
+        if (prev.some((item) => item.id === rawCapture.id)) return prev;
+        if (rawCapture.previewUrl) registerObjectUrl(rawCapture.previewUrl);
+        return [...prev, rawCapture];
+      });
+    }
+  }, [rawCapture, registerObjectUrl]);
+
+  useEffect(() => {
+    if (rawPhoto?.id) {
+      setCaptures((prev) => {
+        if (prev.some((item) => item.id === rawPhoto.id)) return prev;
+        if (rawPhoto.previewUrl) registerObjectUrl(rawPhoto.previewUrl);
+        return [...prev, rawPhoto];
+      });
+    }
+  }, [rawPhoto, registerObjectUrl]);
+
+  useEffect(() => {
+    if (highlightedCapture?.id) {
+      setCaptures((prev) => {
+        const filtered = prev.filter((item) => item.id !== highlightedCapture.id);
+        if (highlightedCapture.previewUrl) registerObjectUrl(highlightedCapture.previewUrl);
+        return [...filtered, highlightedCapture];
+      });
+    }
+  }, [highlightedCapture, registerObjectUrl]);
+
+  useEffect(() => {
+    if (highlightedPhoto?.id) {
+      setCaptures((prev) => {
+        const filtered = prev.filter((item) => item.id !== highlightedPhoto.id);
+        if (highlightedPhoto.previewUrl) registerObjectUrl(highlightedPhoto.previewUrl);
+        return [...filtered, highlightedPhoto];
+      });
+    }
+  }, [highlightedPhoto, registerObjectUrl]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      endVoiceChat();
+      disableCamera();
+      stopScreenRecording();
+      endScreenShare();
+      objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      objectUrlsRef.current.clear();
+    };
+  }, [disableCamera, endScreenShare, endVoiceChat, stopScreenRecording]);
+
+  return {
+    open,
+    mode,
+    transcript,
+    responseText,
+    cameraEnabled,
+    cameraStream,
+    captures,
+    muted,
+    recordingScreen,
+    recordedBlob,
+    recordedUrl,
+    screenSharing,
+    shareSurface,
+    screenShareStream: screenStream,
+    torchSupported: Boolean(videoTrack?.getCapabilities?.()?.torch && cameraFacing === "environment"),
+    torchEnabled,
+    recognitionSupported: supported.speechRecognition,
+    speechSynthesisSupported: supported.speechSynthesis,
+    cameraSupported,
+    screenCaptureSupported,
+    cameraFacingMode: cameraFacing,
+    rawCapture: rawCapture || rawPhoto,
+    highlightedCapture: highlightedCapture || highlightedPhoto,
+    highlightLoading: captureLoading || cameraLoading,
+    visionPrompt,
+    setVisionPrompt,
+    lastError: captureError || cameraError || error,
+    dualCameraMode: "single-camera-fallback",
+    openSession,
+    endSession,
+    startVoice: startVoiceChat,
+    toggleMute,
+    toggleCamera,
+    switchCamera,
+    toggleTorch,
+    startScreenShare: beginScreenShare,
+    stopScreenShare: endScreenShare,
+    toggleScreenShare,
+    takePhoto,
+    takeScreenshot,
+    highlightLatestCapture,
+    toggleScreenRecording,
+    downloadRecording,
+    clearRecording,
+    interrupt: interruptSpeaking,
+    retryListen,
+  };
+}

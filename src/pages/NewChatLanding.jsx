@@ -21,6 +21,7 @@ import {
   RefreshCcw,
   NotebookPen,
   Pencil,
+  PhoneCall,
   Plus,
   Volume2,
   ScanLine,
@@ -47,16 +48,21 @@ import { apiUrl } from "../lib/apiUrl";
 import { readScopedJson, writeScopedJson } from "../lib/userScopedStorage";
 import { getStoredPreferences, getStoredProfile } from "../lib/userSettings";
 import AttachmentChipsTray from "../shared/chat-media/AttachmentChipsTray.jsx";
+import ImageAnnotationEditor from "../shared/chat-media/ImageAnnotationEditor.jsx";
+import AIImageEditModal from "../shared/chat-media/AIImageEditModal.jsx";
 import ChatMediaPreviewModal from "../shared/chat-media/ImagePreviewModal.jsx";
 import ScreenshotPreviewToast from "../shared/chat-media/ScreenshotPreviewToast.jsx";
 import useCapturedMedia from "../shared/chat-media/useCapturedMedia.js";
 import AudioPlaybackBar from "../shared/audio/AudioPlaybackBar.jsx";
 import AudioSettingsPanel from "../shared/audio/AudioSettingsPanel.jsx";
 import { useAudioPlayer } from "../shared/audio/useAudioPlayer.js";
+import { askInstitutionLiveChat } from "../lib/liveChatApi.js";
 import "../shared/audio/audio-ui.css";
+import LiveMultimodalSessionContainerV2 from "../shared/live/LiveMultimodalSessionContainerV2.jsx";
 import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
 import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
 import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
+import { isImageGenerationPrompt } from "../shared/image-generation/imageGenerationIntent.js";
 import {
   createInstitutionConversation,
   createInstitutionConversationMessage,
@@ -64,6 +70,7 @@ import {
 } from "../lib/researchApi";
 import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
+import imageAPI from "../services/imageAPI.js";
 import SettingsPage from "./SettingsPage";
 import NotebookPage from "./NotebookPage";
 import SubgroupRoom from "./SubgroupRoom";
@@ -606,6 +613,7 @@ function isErrorText(text) {
 function Bubble({
   role,
   text,
+  imageUrl = "",
   streaming = false,
   imageSearchResults = [],
   imageSearchQuery = "",
@@ -617,6 +625,7 @@ function Bubble({
   shareUrl = "",
   isSharedView = false,
   onImagePreview,
+  onGeneratedImagePreview,
   onImageReuse,
   onAssistantSpeak,
   onRetry,
@@ -730,7 +739,7 @@ function Bubble({
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
         <div
         className={[
-          "max-w-[92%] md:max-w-[80%] text-[15px]",
+          "max-w-[96%] md:max-w-[88%] text-[15px]",
           isUser
             ? "user-msg-bubble rounded-2xl px-4 py-3 md:px-4.5 md:py-3.5 bg-sky-500 text-white rounded-br-md shadow-sm"
             : "assistant-msg-surface px-1 py-1 md:py-1.5 text-slate-900 dark:text-slate-100",
@@ -740,6 +749,37 @@ function Bubble({
           <div className="leading-relaxed">{text}</div>
         ) : (
           <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 text-slate-800 md:leading-[1.78] dark:text-slate-100">
+            {imageUrl ? (
+              <div className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/90 p-2 shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
+                <button
+                  type="button"
+                  onClick={() => onGeneratedImagePreview?.(imageUrl)}
+                  className="block w-full overflow-hidden rounded-[18px]"
+                >
+                  <img
+                    src={imageUrl}
+                    alt={text || "Generated image"}
+                    className="max-h-[360px] w-full rounded-[18px] object-cover"
+                  />
+                </button>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onGeneratedImagePreview?.(imageUrl)}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:hover:bg-white/[0.08]"
+                  >
+                    Preview
+                  </button>
+                  <a
+                    href={imageUrl}
+                    download="elimulink-generated-image.png"
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:hover:bg-white/[0.08]"
+                  >
+                    Download
+                  </a>
+                </div>
+              </div>
+            ) : null}
             {imageSearchResults.length ? (
               <ImageSearchResults
                 query={imageSearchQuery}
@@ -1091,6 +1131,7 @@ export default function NewChatLanding({
   const [composerHeight, setComposerHeight] = useState(108);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingText, setSpeakingText] = useState("");
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [lastPrompt, setLastPrompt] = useState("");
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
   const [feedbackByMessage, setFeedbackByMessage] = useState({});
@@ -1138,15 +1179,20 @@ export default function NewChatLanding({
   const {
     mediaItems: attachments,
     previewItem,
+    editorItem,
     toastItem,
     addFiles: addCapturedFiles,
     removeMedia,
+    applyEditedMedia,
     clearMedia,
     openPreview,
+    openEditor,
     closePreview,
+    closeEditor,
     dismissToast,
     handlePaste,
   } = useCapturedMedia();
+  const [aiEditItem, setAiEditItem] = useState(null);
 
   function clearSessionUiState() {
     setChats([]);
@@ -2051,6 +2097,35 @@ export default function NewChatLanding({
     removeMedia(id);
   }
 
+  function openAttachmentItem(item) {
+    if (!item) return;
+    openPreview(item);
+  }
+
+  async function handleAiEditApply({ imageUrl, file, text, previousItem }) {
+    if (previousItem?.id && attachments.some((entry) => entry.id === previousItem.id) && file) {
+      await applyEditedMedia(previousItem.id, file);
+      return;
+    }
+
+    if (previousItem?.source === "ai-generated") {
+      updateActiveChatMessages(
+        (messages) => [
+          ...messages,
+          {
+            role: "assistant",
+            text: text || "Here is the edited image.",
+            imageUrl,
+            type: "image",
+            ownerUid: currentUid,
+            createdAt: Date.now(),
+          },
+        ],
+        "Edited image"
+      );
+    }
+  }
+
   function toggleAttachmentPanel() {
     setIsAttachOpen((prev) => {
       const next = !prev;
@@ -2417,7 +2492,12 @@ export default function NewChatLanding({
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
-    const imageSearchQuery = pendingAttachments.length === 0 ? getImageSearchQuery(clean) : "";
+    const shouldGenerateImage =
+      pendingAttachments.length === 0 && isImageGenerationPrompt(clean);
+    const imageSearchQuery =
+      !shouldGenerateImage && pendingAttachments.length === 0
+        ? getImageSearchQuery(clean)
+        : "";
 
     const attachSummary =
       pendingAttachments.length > 0
@@ -2441,6 +2521,40 @@ export default function NewChatLanding({
     setSelectedStarter(null);
     setStarterSuggestions([]);
     requestAnimationFrame(() => scrollToBottom("smooth"));
+
+    if (shouldGenerateImage) {
+      try {
+        const imageUrl = await imageAPI.generateImage(clean);
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: "Here is the generated image.",
+              imageUrl,
+              type: "image",
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || untitledChatBase
+        );
+      } catch (error) {
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: String(error?.message || "Image generation is unavailable right now."),
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || untitledChatBase
+        );
+      }
+      return;
+    }
 
     if (imageSearchQuery) {
       try {
@@ -2548,6 +2662,86 @@ export default function NewChatLanding({
           clean || "Request failed"
         );
       }
+    }
+  }
+
+  async function requestLiveVoiceReply(spokenText, liveContext = null) {
+    const clean = String(spokenText || "").trim();
+    if (!clean) return "";
+
+    const currentContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
+    const detectedContext = detectAcademicContext(clean, currentContext);
+    const mergedContext = mergeAcademicContext(currentContext, detectedContext, clean);
+    if (activeChat?.id) {
+      setContextByChat((prev) => ({ ...prev, [activeChat.id]: mergedContext }));
+    }
+
+    const shouldUseInstitutionResearchFlow =
+      storageScope === "institution" || storageScope === "institution_admin";
+
+    if (!shouldUseInstitutionResearchFlow) {
+      updateActiveChatMessages(
+        (messages) => [
+          ...messages,
+          { role: "user", text: clean, ownerUid: currentUid, createdAt: Date.now() },
+        ],
+        clean || untitledChatBase
+      );
+    }
+    if (clean) setLastPrompt(clean);
+    requestAnimationFrame(() => scrollToBottom("smooth"));
+
+    try {
+      const fullReply = await askInstitutionLiveChat({
+        text: clean,
+        context: {
+          ...liveContext,
+          academicContext: mergedContext,
+          storageScope,
+          activeChatId: activeChat?.id || "",
+        },
+      });
+      const assistantText = String(fullReply?.text || "Response received.").trim() || "Response received.";
+      const assistantSources = Array.isArray(fullReply?.sources) ? fullReply.sources : [];
+
+      if (shouldUseInstitutionResearchFlow) {
+        await persistInstitutionExchange({
+          userContent: clean,
+          assistantContent: assistantText,
+          sources: assistantSources,
+          titleHint: clean || untitledChatBase,
+        });
+      } else {
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: assistantText,
+              sources: assistantSources,
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || untitledChatBase
+        );
+      }
+
+      requestAnimationFrame(() => scrollToBottom("smooth"));
+      return assistantText;
+    } catch {
+      const backendHealthy = await isBackendHealthy();
+      const errorText = backendHealthy
+        ? "Failed to reach AI service."
+        : "Backend is unavailable (health check failed). Please try again later.";
+      updateActiveChatMessages(
+        (messages) => [
+          ...messages,
+          { role: "assistant", text: errorText, ownerUid: currentUid, createdAt: Date.now() },
+        ],
+        clean || "Request failed"
+      );
+      return errorText;
     }
   }
 
@@ -3791,6 +3985,7 @@ export default function NewChatLanding({
                     <Bubble
                       role={m.role}
                       text={m.text}
+                      imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
                       streaming={Boolean(m.streaming)}
                       imageSearchResults={m.imageSearchResults || []}
                       imageSearchQuery={m.imageSearchQuery || ""}
@@ -3802,6 +3997,15 @@ export default function NewChatLanding({
                       isSharedView={Boolean(activeChat?.isSharedView)}
                       chatTitle={activeChat?.title || untitledChatBase}
                       onImagePreview={setImageSearchPreview}
+                      onGeneratedImagePreview={(imageUrl) =>
+                        openPreview({
+                          id: `generated-mobile-${idx}`,
+                          name: "Generated image",
+                          url: imageUrl,
+                          isImage: true,
+                          source: "ai-generated",
+                        })
+                      }
                       onImageReuse={(result) => {
                         setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`);
                         requestAnimationFrame(() => focusPromptInput());
@@ -3860,10 +4064,10 @@ export default function NewChatLanding({
                     </div>
                   ) : null}
 
-                  <div className="surface-elevated rounded-[26px] border border-slate-200/90 bg-white/90 backdrop-blur-md px-2.5 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.08)] dark:border-slate-700 dark:bg-slate-900/95">
+                  <div className="surface-elevated rounded-[26px] border border-slate-200/55 bg-white/76 backdrop-blur-xl px-2.5 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.08)] dark:border-white/8 dark:bg-slate-900/72">
                     <AttachmentChipsTray
                       items={attachments}
-                      onPreview={openPreview}
+                      onPreview={openAttachmentItem}
                       onRemove={removeAttachment}
                     />
 
@@ -3871,7 +4075,7 @@ export default function NewChatLanding({
                       <div ref={mobileAttachmentMenuRef} className="relative shrink-0">
                         <button
                           onClick={toggleAttachmentPanel}
-                          className="h-10 w-10 rounded-2xl border border-slate-200/90 bg-white/80 text-slate-700 grid place-items-center shadow-[0_6px_16px_rgba(15,23,42,0.08)] transition hover:bg-slate-50 active:scale-[0.98] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                          className="h-10 w-10 rounded-2xl border border-transparent bg-slate-100/70 text-slate-700 grid place-items-center transition hover:bg-slate-100 active:scale-[0.98] dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
                           title="Add attachment"
                         >
                           <Plus size={17} />
@@ -3983,6 +4187,17 @@ export default function NewChatLanding({
                       />
 
                       <button
+                        onClick={() => {
+                          audioPlayer.closePlayer();
+                          setVoiceOpen(true);
+                        }}
+                        className="h-10 w-10 shrink-0 rounded-2xl border border-transparent bg-slate-100/75 text-slate-700 grid place-items-center transition hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
+                        title="Open live voice chat"
+                      >
+                        <PhoneCall size={16} />
+                      </button>
+
+                      <button
                         onClick={() => (hasText ? sendMessage(input) : toggleMic())}
                         className={[
                           "relative h-10 w-10 shrink-0 rounded-2xl transition grid place-items-center overflow-hidden",
@@ -4018,9 +4233,9 @@ export default function NewChatLanding({
           ) : null}
 
           {active === "newchat" ? (
-            <div className="surface-elevated relative hidden md:flex flex-1 min-h-0 flex-col rounded-2xl bg-slate-50/70 dark:bg-slate-950/80">
+            <div className="relative hidden md:flex flex-1 min-h-0 flex-col bg-transparent dark:bg-transparent">
             <div className="px-4 py-2.5 shrink-0">
-              <div className="max-w-[1080px] w-full mx-auto">
+              <div className="max-w-[1180px] w-full mx-auto">
                 <div className="text-sm font-semibold text-slate-800">{activeChat?.title || untitledChatBase}</div>
                 <div className="text-xs text-slate-500">
                   {isEmbeddedAdminChat ? "Institution Admin Assistant" : "AI Academic Assistant"} • {formatChatStamp(activeChat?.updatedAt)}
@@ -4034,7 +4249,7 @@ export default function NewChatLanding({
             </div>
 
             <div className={[hasConversation ? "px-4 pt-1 pb-2" : "px-4 pt-1 pb-2", "flex-1 min-h-0 flex flex-col"].join(" ")}>
-              <div className="max-w-[1080px] w-full mx-auto flex-1 min-h-0 flex flex-col">
+              <div className="max-w-[1180px] w-full mx-auto flex-1 min-h-0 flex flex-col">
               {messages.length === 0 && !isEmbeddedAdminChat ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3">
                   <StatCard title="Next Class" value={user.nextClass} subtitle="From your timetable" />
@@ -4051,8 +4266,8 @@ export default function NewChatLanding({
                 </div>
               ) : null}
 
-              <div ref={desktopMessagesRef} onScroll={handleChatScroll} className="chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3.5">
-                <div className="max-w-[760px] w-full mx-auto space-y-5 pb-8">
+              <div ref={desktopMessagesRef} onScroll={handleChatScroll} className="chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain px-1 py-3.5">
+                <div className="max-w-[920px] w-full mx-auto space-y-5 pb-8">
                 {messages.length === 0 ? (
                   <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-5 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] dark:border-slate-700 dark:bg-slate-900">
                     <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500 dark:text-slate-300">{timeGreeting()}</div>
@@ -4079,6 +4294,7 @@ export default function NewChatLanding({
                     <Bubble
                       role={m.role}
                       text={m.text}
+                      imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
                       streaming={Boolean(m.streaming)}
                       imageSearchResults={m.imageSearchResults || []}
                       imageSearchQuery={m.imageSearchQuery || ""}
@@ -4090,6 +4306,15 @@ export default function NewChatLanding({
                       isSharedView={Boolean(activeChat?.isSharedView)}
                       chatTitle={activeChat?.title || untitledChatBase}
                       onImagePreview={setImageSearchPreview}
+                      onGeneratedImagePreview={(imageUrl) =>
+                        openPreview({
+                          id: `generated-desktop-${idx}`,
+                          name: "Generated image",
+                          url: imageUrl,
+                          isImage: true,
+                          source: "ai-generated",
+                        })
+                      }
                       onImageReuse={(result) => {
                         setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`);
                         requestAnimationFrame(() => focusPromptInput());
@@ -4125,7 +4350,7 @@ export default function NewChatLanding({
               </div>
 
               {messages.length === 0 ? (
-                <div className="mt-3 flex flex-wrap items-start gap-1.5 shrink-0 max-w-[760px] w-full mx-auto">
+                <div className="mt-3 flex flex-wrap items-start gap-1.5 shrink-0 max-w-[920px] w-full mx-auto">
                   {starterSet.map((starter) => {
                     const isActive = selectedStarter === starter.key;
                     return (
@@ -4148,7 +4373,7 @@ export default function NewChatLanding({
               ) : null}
 
               {hasStarterSuggestions ? (
-                <div className="surface-elevated mt-3 rounded-2xl border border-slate-200/80 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0 max-w-[760px] w-full mx-auto dark:border-slate-700 dark:bg-slate-900">
+                <div className="surface-elevated mt-3 rounded-2xl border border-slate-200/80 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0 max-w-[920px] w-full mx-auto dark:border-slate-700 dark:bg-slate-900">
                   <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase dark:text-slate-400">
                     Suggested prompts
                   </div>
@@ -4166,18 +4391,18 @@ export default function NewChatLanding({
                 </div>
               ) : null}
 
-              <div ref={desktopAttachmentMenuRef} className="mt-3 shrink-0 relative max-w-[760px] w-full mx-auto border-t border-slate-200/70 pt-4 pb-1 dark:border-slate-800">
-                <div className="surface-elevated rounded-[28px] border border-slate-200/85 bg-white/95 backdrop-blur-md px-3 py-2.5 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition focus-within:border-sky-300/70 focus-within:ring-2 focus-within:ring-sky-100/80 dark:border-slate-700 dark:bg-slate-900/95 dark:focus-within:ring-sky-500/20">
+              <div ref={desktopAttachmentMenuRef} className="mt-3 shrink-0 relative max-w-[920px] w-full mx-auto pt-4 pb-1">
+                <div className="surface-elevated rounded-[28px] border border-slate-200/55 bg-white/78 backdrop-blur-xl px-3 py-2.5 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition focus-within:border-sky-300/45 dark:border-white/8 dark:bg-slate-900/72">
                   <AttachmentChipsTray
                     items={attachments}
-                    onPreview={openPreview}
+                    onPreview={openAttachmentItem}
                     onRemove={removeAttachment}
                   />
 
                   <div className="flex items-end gap-2">
                     <button
                       onClick={toggleAttachmentPanel}
-                      className="h-10 w-10 shrink-0 rounded-2xl border border-slate-200/90 bg-white/80 hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center shadow-[0_6px_16px_rgba(15,23,42,0.08)] transition active:scale-[0.98] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                      className="h-10 w-10 shrink-0 rounded-2xl border border-transparent bg-slate-100/70 hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center transition active:scale-[0.98] dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
                       title="Add attachment"
                     >
                       <Plus size={17} />
@@ -4203,10 +4428,10 @@ export default function NewChatLanding({
                     <button
                       onClick={() => setIsAiModeOn((v) => !v)}
                       className={[
-                        "h-9 px-3.5 rounded-xl border text-xs font-semibold transition",
+                        "h-9 px-3.5 rounded-xl border border-transparent text-xs font-semibold transition",
                         isAiModeOn
                           ? "border-slate-900 bg-slate-900 text-white"
-                          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700",
+                          : "bg-slate-100/75 text-slate-700 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]",
                       ].join(" ")}
                       title="AI conversation mode"
                     >
@@ -4216,14 +4441,25 @@ export default function NewChatLanding({
                     <button
                       onClick={toggleMic}
                       className={[
-                        "h-9 w-9 rounded-xl border inline-flex items-center justify-center transition",
+                        "h-9 w-9 rounded-xl border border-transparent inline-flex items-center justify-center transition",
                         isListening
                           ? "border-red-500 bg-red-500 text-white"
-                          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700",
+                          : "bg-slate-100/75 text-slate-700 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]",
                       ].join(" ")}
                       title={isListening ? "Stop voice input" : "Start voice input"}
                     >
                       {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        audioPlayer.closePlayer();
+                        setVoiceOpen(true);
+                      }}
+                      className="h-9 w-9 rounded-xl border border-transparent bg-slate-100/75 text-slate-700 inline-flex items-center justify-center transition hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
+                      title="Open live voice chat"
+                    >
+                      <PhoneCall size={16} />
                     </button>
 
                     <button
@@ -4349,7 +4585,7 @@ export default function NewChatLanding({
         </main>
       </div>
       </div>
-      {audioPlayer.isOpen ? (
+      {audioPlayer.isOpen && !voiceOpen ? (
         <div className="elu-audio-shell">
           <AudioPlaybackBar
             isPlaying={audioPlayer.isPlaying}
@@ -4374,14 +4610,34 @@ export default function NewChatLanding({
               languages={audioPlayer.languages}
               isSupported={audioPlayer.isSupported}
               followAppLanguage={audioPlayer.followAppLanguage}
+              setFollowAppLanguage={audioPlayer.setFollowAppLanguage}
+              captionsEnabled={audioPlayer.captionsEnabled}
+              setCaptionsEnabled={audioPlayer.setCaptionsEnabled}
+              autoPlayReplies={audioPlayer.autoPlayReplies}
+              setAutoPlayReplies={audioPlayer.setAutoPlayReplies}
               isPreviewingVoice={audioPlayer.isPreviewingVoice}
               previewVoiceId={audioPlayer.previewVoiceId}
+              previewError={audioPlayer.previewError}
               onPreviewVoice={audioPlayer.previewVoice}
               onDone={() => audioPlayer.setIsSettingsOpen(false)}
             />
           ) : null}
         </div>
       ) : null}
+      <LiveMultimodalSessionContainerV2
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        family="ai"
+        app="institution"
+        settingsUid={currentUid}
+        title="Institution Live"
+        subtitle="Talk naturally with AI for coursework, research, and institution support."
+        language={preferredSpeechLanguage}
+        onAskAI={async ({ text, context }) => {
+          const reply = await requestLiveVoiceReply(text, context);
+          return { text: reply };
+        }}
+      />
       {feedbackToast.open ? (
         <div className="fixed left-1/2 -translate-x-1/2 z-[90] bottom-[calc(82px+env(safe-area-inset-bottom))] md:bottom-5">
           <div className="rounded-xl border border-slate-200 bg-slate-900 text-white/95 px-4 py-2 text-sm shadow-lg">
@@ -4414,7 +4670,34 @@ export default function NewChatLanding({
           />
         </div>
       </div>
-      <ChatMediaPreviewModal item={previewItem} onClose={closePreview} />
+      <ChatMediaPreviewModal
+        item={previewItem}
+        onClose={closePreview}
+        onAnnotate={(item) => {
+          closePreview();
+          openEditor(item);
+        }}
+        onEditImage={(item) => {
+          closePreview();
+          setAiEditItem(item);
+        }}
+      />
+      <ImageAnnotationEditor
+        open={Boolean(editorItem)}
+        item={editorItem}
+        onClose={closeEditor}
+        onApply={async (file) => {
+          if (!editorItem) return;
+          await applyEditedMedia(editorItem.id, file);
+          closeEditor();
+        }}
+      />
+      <AIImageEditModal
+        open={Boolean(aiEditItem)}
+        item={aiEditItem}
+        onClose={() => setAiEditItem(null)}
+        onApply={handleAiEditApply}
+      />
       <ImageSearchPreviewModal result={imageSearchPreview} onClose={() => setImageSearchPreview(null)} />
     </div>
   );

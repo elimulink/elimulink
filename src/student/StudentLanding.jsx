@@ -21,6 +21,7 @@ import {
   RefreshCcw,
   NotebookPen,
   Pencil,
+  PhoneCall,
   Plus,
   Volume2,
   ScanLine,
@@ -42,18 +43,24 @@ import { logoutFamilySession } from "../auth/familySession";
 import { apiUrl } from "../lib/apiUrl";
 import { getStoredPreferences, getStoredProfile } from "../lib/userSettings";
 import AttachmentChipsTray from "../shared/chat-media/AttachmentChipsTray.jsx";
+import ImageAnnotationEditor from "../shared/chat-media/ImageAnnotationEditor.jsx";
+import AIImageEditModal from "../shared/chat-media/AIImageEditModal.jsx";
 import ChatMediaPreviewModal from "../shared/chat-media/ImagePreviewModal.jsx";
 import ScreenshotPreviewToast from "../shared/chat-media/ScreenshotPreviewToast.jsx";
 import useCapturedMedia from "../shared/chat-media/useCapturedMedia.js";
 import AudioPlaybackBar from "../shared/audio/AudioPlaybackBar.jsx";
 import AudioSettingsPanel from "../shared/audio/AudioSettingsPanel.jsx";
 import { useAudioPlayer } from "../shared/audio/useAudioPlayer.js";
+import { askStudentLiveChat } from "../lib/liveChatApi.js";
 import "../shared/audio/audio-ui.css";
+import LiveMultimodalSessionContainerV2 from "../shared/live/LiveMultimodalSessionContainerV2.jsx";
 import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
 import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
 import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
+import { isImageGenerationPrompt } from "../shared/image-generation/imageGenerationIntent.js";
 import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
+import imageAPI from "../services/imageAPI.js";
 import SettingsPage from "../pages/SettingsPage";
 import NotebookPage from "../pages/NotebookPage";
 import SubgroupRoom from "../pages/SubgroupRoom";
@@ -246,6 +253,7 @@ function isErrorText(text) {
 function Bubble({
   role,
   text,
+  imageUrl = "",
   imageSearchResults = [],
   imageSearchQuery = "",
   sources = [],
@@ -253,6 +261,7 @@ function Bubble({
   chatId = "",
   messageId = "",
   onImagePreview,
+  onGeneratedImagePreview,
   onImageReuse,
   onAssistantSpeak,
   onRetry,
@@ -271,12 +280,43 @@ function Bubble({
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={[
-          "max-w-[88%] rounded-2xl px-4 py-3 text-base leading-relaxed shadow-sm",
+          "max-w-[96%] md:max-w-[90%] rounded-2xl px-4 py-3 text-base leading-relaxed shadow-sm",
           isUser
             ? "bg-sky-500 text-white rounded-br-md"
-            : "bg-white text-slate-900 border border-slate-200 rounded-bl-md",
+            : "bg-white/92 text-slate-900 rounded-bl-md dark:bg-slate-900/72 dark:text-slate-100",
         ].join(" ")}
       >
+        {!isUser && imageUrl ? (
+          <div className="mb-3 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/90 p-2 shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
+            <button
+              type="button"
+              onClick={() => onGeneratedImagePreview?.(imageUrl)}
+              className="block w-full overflow-hidden rounded-[16px]"
+            >
+              <img
+                src={imageUrl}
+                alt={text || "Generated image"}
+                className="max-h-[320px] w-full rounded-[16px] object-cover"
+              />
+            </button>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onGeneratedImagePreview?.(imageUrl)}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:hover:bg-white/[0.08]"
+              >
+                Preview
+              </button>
+              <a
+                href={imageUrl}
+                download="elimulink-generated-image.png"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:hover:bg-white/[0.08]"
+              >
+                Download
+              </a>
+            </div>
+          </div>
+        ) : null}
         {!isUser && imageSearchResults.length ? (
           <div className="mb-3">
             <ImageSearchResults
@@ -448,6 +488,7 @@ export default function StudentLanding() {
   const [isListening, setIsListening] = useState(false);
   const [lastPrompt, setLastPrompt] = useState("");
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const recognitionRef = useRef(null);
   const attachmentMenuRef = useRef(null);
   const newChatMenuRef = useRef(null);
@@ -466,15 +507,20 @@ export default function StudentLanding() {
   const {
     mediaItems: attachments,
     previewItem,
+    editorItem,
     toastItem,
     addFiles: addCapturedFiles,
     removeMedia,
+    applyEditedMedia,
     clearMedia,
     openPreview,
+    openEditor,
     closePreview,
+    closeEditor,
     dismissToast,
     handlePaste,
   } = useCapturedMedia();
+  const [aiEditItem, setAiEditItem] = useState(null);
 
   useEffect(() => {
     try {
@@ -741,6 +787,33 @@ export default function StudentLanding() {
     removeMedia(id);
   }
 
+  function openAttachmentItem(item) {
+    if (!item) return;
+    openPreview(item);
+  }
+
+  async function handleAiEditApply({ imageUrl, file, text, previousItem }) {
+    if (previousItem?.id && attachments.some((entry) => entry.id === previousItem.id) && file) {
+      await applyEditedMedia(previousItem.id, file);
+      return;
+    }
+
+    if (previousItem?.source === "ai-generated") {
+      updateActiveChatMessages(
+        (messages) => [
+          ...messages,
+          {
+            role: "assistant",
+            text: text || "Here is the edited image.",
+            imageUrl,
+            type: "image",
+          },
+        ],
+        "Edited image"
+      );
+    }
+  }
+
   function toggleMic() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -786,7 +859,12 @@ export default function StudentLanding() {
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
-    const imageSearchQuery = pendingAttachments.length === 0 ? getImageSearchQuery(clean) : "";
+    const shouldGenerateImage =
+      pendingAttachments.length === 0 && isImageGenerationPrompt(clean);
+    const imageSearchQuery =
+      !shouldGenerateImage && pendingAttachments.length === 0
+        ? getImageSearchQuery(clean)
+        : "";
 
     const attachSummary =
       pendingAttachments.length > 0
@@ -800,6 +878,36 @@ export default function StudentLanding() {
     if (clean) setLastPrompt(clean);
     setInput("");
     clearMedia();
+
+    if (shouldGenerateImage) {
+      try {
+        const imageUrl = await imageAPI.generateImage(clean);
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: "Here is the generated image.",
+              imageUrl,
+              type: "image",
+            },
+          ],
+          clean || "Image generation"
+        );
+      } catch (error) {
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: String(error?.message || "Image generation is unavailable right now."),
+            },
+          ],
+          clean || "Image generation"
+        );
+      }
+      return;
+    }
 
     if (imageSearchQuery) {
       try {
@@ -889,6 +997,43 @@ export default function StudentLanding() {
         (m) => [...m, { role: "assistant", text: "Failed to reach AI service." }],
         clean || "Request failed"
       );
+    }
+  }
+
+  async function requestLiveVoiceReply(spokenText, liveContext = null) {
+    const clean = String(spokenText || "").trim();
+    if (!clean) return "";
+
+    updateActiveChatMessages(
+      (messages) => [...messages, { role: "user", text: clean }],
+      clean || "Live voice"
+    );
+    if (clean) setLastPrompt(clean);
+
+    try {
+      const result = await askStudentLiveChat({
+        text: clean,
+        context: {
+          ...liveContext,
+          preferredLanguage: String(settingsPrefs?.language || "en"),
+        },
+      });
+      const reply = String(result?.text || result?.reply || result?.data?.reply || "Response received.").trim() || "Response received.";
+      updateActiveChatMessages(
+        (messages) => [
+          ...messages,
+          { role: "assistant", text: reply, sources: normalizeResearchSources(result) },
+        ],
+        clean || "Reply"
+      );
+      return reply;
+    } catch {
+      const errorText = "Failed to reach AI service.";
+      updateActiveChatMessages(
+        (messages) => [...messages, { role: "assistant", text: errorText }],
+        "Request failed"
+      );
+      return errorText;
     }
   }
 
@@ -1925,6 +2070,7 @@ export default function StudentLanding() {
                   key={idx}
                   role={m.role}
                   text={m.text}
+                  imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
                   imageSearchResults={m.imageSearchResults || []}
                   imageSearchQuery={m.imageSearchQuery || ""}
                   sources={m.sources || []}
@@ -1932,6 +2078,15 @@ export default function StudentLanding() {
                   messageId={m.id || ""}
                   chatTitle={activeChat?.title || UNTITLED_CHAT_BASE}
                   onImagePreview={setImageSearchPreview}
+                  onGeneratedImagePreview={(imageUrl) =>
+                    openPreview({
+                      id: `generated-mobile-${idx}`,
+                      name: "Generated image",
+                      url: imageUrl,
+                      isImage: true,
+                      source: "ai-generated",
+                    })
+                  }
                   onImageReuse={(result) => setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`)}
                   onAssistantSpeak={speakAssistantText}
                   onRetry={() => {
@@ -1950,14 +2105,14 @@ export default function StudentLanding() {
               <div className="max-w-xl mx-auto">
                 <AttachmentChipsTray
                   items={attachments}
-                  onPreview={openPreview}
+                  onPreview={openAttachmentItem}
                   onRemove={removeAttachment}
                 />
                 <div className="flex items-end gap-2">
                 <div ref={attachmentMenuRef} className="relative">
                   <button
                     onClick={() => setIsAttachmentMenuOpen((v) => !v)}
-                    className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-700 grid place-items-center"
+                    className="h-11 w-11 rounded-xl border border-transparent bg-slate-100/75 text-slate-700 grid place-items-center dark:bg-white/[0.05] dark:text-slate-100"
                     title="Add attachment"
                   >
                     <Plus size={18} />
@@ -2009,7 +2164,7 @@ export default function StudentLanding() {
                   ) : null}
                 </div>
 
-                <div className="flex-1 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                <div className="flex-1 rounded-2xl border border-transparent bg-white/72 px-3 py-2 backdrop-blur dark:bg-white/[0.05]">
                   <textarea
                     ref={promptInputRef}
                     rows={1}
@@ -2045,7 +2200,7 @@ export default function StudentLanding() {
           ) : null}
 
           {!isMobile ? (
-          <div className="rounded-xl bg-slate-50 border border-slate-200 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
+          <div className="bg-transparent overflow-hidden flex-1 min-h-0 flex flex-col">
             <div className="px-5 py-3 border-b border-slate-200 bg-white/80 shrink-0">
               <div className="text-sm font-semibold text-slate-800">{activeChat?.title || UNTITLED_CHAT_BASE}</div>
               <div className="text-xs text-slate-500">
@@ -2053,7 +2208,7 @@ export default function StudentLanding() {
               </div>
             </div>
 
-            <div className={[hasConversation ? "px-4 pt-2 pb-4" : "p-4", "flex-1 min-h-0 flex flex-col bg-slate-100/60"].join(" ")}>
+            <div className={[hasConversation ? "px-4 pt-2 pb-4" : "p-4", "flex-1 min-h-0 flex flex-col bg-transparent"].join(" ")}>
               {messages.length === 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3">
                   <StatCard title="Next Class" value={user.nextClass} subtitle="From your timetable" />
@@ -2063,7 +2218,7 @@ export default function StudentLanding() {
                 </div>
               ) : null}
 
-              <div className="flex-1 min-h-0 overflow-y-auto smart-scrollbar rounded-2xl bg-slate-100/80 border border-slate-300/70 px-5 py-4 space-y-3">
+              <div className="flex-1 min-h-0 overflow-y-auto smart-scrollbar px-3 py-4 space-y-3">
                 {messages.length === 0 ? (
                   <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
                     <div className="text-sm text-slate-500">{timeGreeting()}</div>
@@ -2081,6 +2236,7 @@ export default function StudentLanding() {
                     key={idx}
                     role={m.role}
                     text={m.text}
+                     imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
                      imageSearchResults={m.imageSearchResults || []}
                      imageSearchQuery={m.imageSearchQuery || ""}
                      sources={m.sources || []}
@@ -2088,6 +2244,15 @@ export default function StudentLanding() {
                      messageId={m.id || ""}
                      chatTitle={activeChat?.title || UNTITLED_CHAT_BASE}
                      onImagePreview={setImageSearchPreview}
+                    onGeneratedImagePreview={(imageUrl) =>
+                      openPreview({
+                        id: `generated-desktop-${idx}`,
+                        name: "Generated image",
+                        url: imageUrl,
+                        isImage: true,
+                        source: "ai-generated",
+                      })
+                    }
                     onImageReuse={(result) => setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`)}
                     onAssistantSpeak={speakAssistantText}
                     onRetry={() => {
@@ -2119,14 +2284,14 @@ export default function StudentLanding() {
 
               <AttachmentChipsTray
                 items={attachments}
-                onPreview={openPreview}
+                onPreview={openAttachmentItem}
                 onRemove={removeAttachment}
               />
 
               <div ref={attachmentMenuRef} className="mt-3 flex items-end gap-2 shrink-0 relative">
                 <button
                   onClick={() => setIsAttachmentMenuOpen((v) => !v)}
-                  className="h-11 w-11 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center shadow-sm transition"
+                  className="h-11 w-11 rounded-xl border border-transparent bg-white/78 hover:bg-white text-slate-700 inline-flex items-center justify-center transition dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
                   title="Add attachment"
                 >
                   <Plus size={17} />
@@ -2177,7 +2342,7 @@ export default function StudentLanding() {
                   </div>
                 ) : null}
 
-                <div className="flex-1 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition focus-within:border-sky-300 focus-within:ring-2 focus-within:ring-sky-100">
+                <div className="flex-1 flex items-center gap-2 rounded-2xl border border-transparent bg-white/74 px-3 py-2.5 backdrop-blur transition dark:bg-white/[0.05]">
                   <input
                     ref={promptInputRef}
                     value={input}
@@ -2196,7 +2361,7 @@ export default function StudentLanding() {
                       "h-9 px-3.5 rounded-xl border text-xs font-semibold transition",
                       isAiModeOn
                         ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
+                        : "border-transparent bg-slate-100/75 text-slate-700 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]",
                     ].join(" ")}
                     title="AI conversation mode"
                   >
@@ -2209,11 +2374,22 @@ export default function StudentLanding() {
                       "h-9 w-9 rounded-xl border inline-flex items-center justify-center transition",
                       isListening
                         ? "border-red-500 bg-red-500 text-white"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
+                        : "border-transparent bg-slate-100/75 text-slate-700 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]",
                     ].join(" ")}
                     title={isListening ? "Stop voice input" : "Start voice input"}
                   >
                     {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      audioPlayer.closePlayer();
+                      setVoiceOpen(true);
+                    }}
+                    className="h-9 w-9 rounded-xl border border-transparent bg-slate-100/75 text-slate-700 inline-flex items-center justify-center transition hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
+                    title="Open live voice chat"
+                  >
+                    <PhoneCall size={16} />
                   </button>
 
                   <button
@@ -2238,7 +2414,7 @@ export default function StudentLanding() {
           ) : null}
         </main>
       </div>
-      {audioPlayer.isOpen ? (
+      {audioPlayer.isOpen && !voiceOpen ? (
         <div className="elu-audio-shell">
           <AudioPlaybackBar
             isPlaying={audioPlayer.isPlaying}
@@ -2262,14 +2438,34 @@ export default function StudentLanding() {
               languages={audioPlayer.languages}
               isSupported={audioPlayer.isSupported}
               followAppLanguage={audioPlayer.followAppLanguage}
+              setFollowAppLanguage={audioPlayer.setFollowAppLanguage}
+              captionsEnabled={audioPlayer.captionsEnabled}
+              setCaptionsEnabled={audioPlayer.setCaptionsEnabled}
+              autoPlayReplies={audioPlayer.autoPlayReplies}
+              setAutoPlayReplies={audioPlayer.setAutoPlayReplies}
               isPreviewingVoice={audioPlayer.isPreviewingVoice}
               previewVoiceId={audioPlayer.previewVoiceId}
+              previewError={audioPlayer.previewError}
               onPreviewVoice={audioPlayer.previewVoice}
               onDone={() => audioPlayer.setIsSettingsOpen(false)}
             />
           ) : null}
         </div>
       ) : null}
+      <LiveMultimodalSessionContainerV2
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        family="ai"
+        app="student"
+        settingsUid={firebaseUser?.uid || null}
+        title="Study Live"
+        subtitle="Talk through revision, assignments, and notes with AI."
+        language={resolveSpeechLanguage(settingsPrefs?.language)}
+        onAskAI={async ({ text, context }) => {
+          const reply = await requestLiveVoiceReply(text, context);
+          return { text: reply };
+        }}
+      />
       {toastItem ? (
         <div className="fixed left-1/2 -translate-x-1/2 z-[95] bottom-[calc(120px+env(safe-area-inset-bottom))] md:bottom-6">
           <ScreenshotPreviewToast
@@ -2279,7 +2475,34 @@ export default function StudentLanding() {
           />
         </div>
       ) : null}
-      <ChatMediaPreviewModal item={previewItem} onClose={closePreview} />
+      <ChatMediaPreviewModal
+        item={previewItem}
+        onClose={closePreview}
+        onAnnotate={(item) => {
+          closePreview();
+          openEditor(item);
+        }}
+        onEditImage={(item) => {
+          closePreview();
+          setAiEditItem(item);
+        }}
+      />
+      <ImageAnnotationEditor
+        open={Boolean(editorItem)}
+        item={editorItem}
+        onClose={closeEditor}
+        onApply={async (file) => {
+          if (!editorItem) return;
+          await applyEditedMedia(editorItem.id, file);
+          closeEditor();
+        }}
+      />
+      <AIImageEditModal
+        open={Boolean(aiEditItem)}
+        item={aiEditItem}
+        onClose={() => setAiEditItem(null)}
+        onApply={handleAiEditApply}
+      />
       <ImageSearchPreviewModal result={imageSearchPreview} onClose={() => setImageSearchPreview(null)} />
     </div>
   );

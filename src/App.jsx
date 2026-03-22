@@ -23,6 +23,7 @@ import {
   LogOut,
   Menu, 
   Send, 
+  PhoneCall,
   Volume2, 
   VolumeX,
   Mic,
@@ -52,9 +53,19 @@ import { verifyFamilySession } from './auth/familySession';
 import AudioPlaybackBar from './shared/audio/AudioPlaybackBar.jsx';
 import AudioSettingsPanel from './shared/audio/AudioSettingsPanel.jsx';
 import { useAudioPlayer } from './shared/audio/useAudioPlayer.js';
+import { askInstitutionLiveChat, askPublicLiveChat } from "./lib/liveChatApi.js";
 import ResearchActionsContainer from './shared/research/ResearchActionsContainer.jsx';
 import { normalizeResearchSources } from './shared/research/researchUtils.js';
+import AttachmentChipsTray from './shared/chat-media/AttachmentChipsTray.jsx';
+import ChatMediaPreviewModal from './shared/chat-media/ImagePreviewModal.jsx';
+import ImageAnnotationEditor from './shared/chat-media/ImageAnnotationEditor.jsx';
+import AIImageEditModal from './shared/chat-media/AIImageEditModal.jsx';
+import ScreenshotPreviewToast from './shared/chat-media/ScreenshotPreviewToast.jsx';
+import useCapturedMedia from './shared/chat-media/useCapturedMedia.js';
+import LiveMultimodalSessionContainerV2 from './shared/live/LiveMultimodalSessionContainerV2.jsx';
+import { isImageGenerationPrompt } from './shared/image-generation/imageGenerationIntent.js';
 import './shared/audio/audio-ui.css';
+import './shared/chat-media/chat-media.css';
 
 const appId = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const INSTITUTION_EMAIL_DOMAIN = String(import.meta.env.VITE_INSTITUTION_EMAIL_DOMAIN || 'elimulink.co.ke').toLowerCase();
@@ -214,7 +225,6 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
   const [savedImages, setSavedImages] = useState([]);
   const [showMyStuff, setShowMyStuff] = useState(false);
   const [showServicesHub, setShowServicesHub] = useState(false);
-  const [uploads, setUploads] = useState([]);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
@@ -237,6 +247,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
     const saved = localStorage.getItem('voiceEnabled');
     return saved == null ? true : saved === 'true';
   });
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [audioLanguage, setAudioLanguage] = useState(() => getStoredLanguage('en-US'));
   const [onboardEmail, setOnboardEmail] = useState('');
   const [onboardRegNo, setOnboardRegNo] = useState('');
@@ -251,6 +262,22 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
     uid: user?.uid || null,
     appLanguage: audioLanguage,
   });
+  const {
+    mediaItems: uploads,
+    previewItem,
+    editorItem,
+    toastItem,
+    addFiles: addCapturedFiles,
+    removeMedia: removeUpload,
+    clearMedia: clearUploads,
+    applyEditedMedia,
+    openPreview,
+    openEditor,
+    closePreview,
+    closeEditor,
+    dismissToast,
+  } = useCapturedMedia();
+  const [aiEditItem, setAiEditItem] = useState(null);
 
   // Time-aware greeting helper (keeps inside component scope)
   const getGreeting = () => {
@@ -524,7 +551,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
   };
 
   const speakIfInstitutionVoiceEnabled = (text) => {
-    if (!isInstitutionHost || !voiceEnabled) return;
+    if (!isInstitutionHost || !voiceEnabled || !audioPlayer.autoPlayReplies) return;
     audioPlayer.playText(text);
   };
 
@@ -768,10 +795,11 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
   const handleFileUpload = () => fileInputRef.current?.click();
 
   const onFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const file = files[0];
 
-    setUploads(prev => [...prev, { name: file.name, size: file.size, type: file.type }]);
+    addCapturedFiles(files, 'file');
 
     // show a lightweight chat message about the upload
     const msg = { id: Date.now(), role: 'user', text: `📎 Uploaded: ${file.name}`, isFile: true };
@@ -779,6 +807,31 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
     // clear input so same file can be re-uploaded if needed
     e.target.value = '';
+  };
+
+  const openAttachmentItem = (item) => {
+    if (!item) return;
+    openPreview(item);
+  };
+
+  const handleAiEditApply = async ({ imageUrl, file, text, previousItem }) => {
+    if (previousItem?.id && uploads.some((entry) => entry.id === previousItem.id) && file) {
+      await applyEditedMedia(previousItem.id, file);
+      return;
+    }
+
+    if (previousItem?.source === 'ai-generated') {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          role: 'ai',
+          type: 'image',
+          content: imageUrl,
+          text: text || 'Here is the edited image.',
+        },
+      ]);
+    }
   };
 
   const startEdit = (msg) => {
@@ -894,18 +947,12 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
       const rulePrefix = `RULE: Always answer on the home chat. Do not tell user to navigate to modules. Use institution info when relevant; otherwise use global info. QUESTION:`;
       const isLibraryQuery = /\b(book|library|isbn|borrow|available|catalog)\b/i.test(text);
 
-      const isImageReq = /(generate|create|show|draw|make|image|picture|photo|illustration|flag|logo|poster|banner|in image form|as an image)/i.test(text);
+      const isImageReq = isImageGenerationPrompt(text);
       if (isImageReq) {
         try {
           const examStyle = "Make it clean, high-contrast, exam-ready, well-labeled if diagram, minimal clutter.";
           const imgPrompt = `${text}\n\n${examStyle}`;
-
-          let imgDataUrl = null;
-          try { imgDataUrl = await studentGenerateImage(imgPrompt); } catch (e) { imgDataUrl = null; }
-          if (!imgDataUrl && adminToken) {
-            try { imgDataUrl = await serverGenerateImage(imgPrompt); } catch(e) { imgDataUrl = null; }
-          }
-          if (!imgDataUrl) imgDataUrl = await imageAPI.generateImage(imgPrompt);
+          const imgDataUrl = await imageAPI.generateImage(imgPrompt);
           setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', type: 'image', content: imgDataUrl, text: 'Here is the generated image.' }]);
         } catch (imgErr) {
           // fallback to textual description via backend student AI
@@ -1059,6 +1106,65 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
       setIsThinking(false);
     }
   };
+
+  async function requestLiveVoiceReply(spokenText, liveContext = null) {
+    const text = String(spokenText || '').trim();
+    if (!text) return '';
+
+    if (!activeChatId) setActiveChatId(crypto.randomUUID());
+
+    const userMsg = { id: Date.now(), role: 'user', text };
+    setMessages(prev => [...prev, userMsg]);
+    setIsThinking(true);
+
+    if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
+      logInstitutionCaseMessage({
+        institutionId: userProfile.institutionId,
+        studentUid: user.uid,
+        departmentId: activeDepartmentId || 'general',
+        from: 'student',
+        text,
+        visibility: 'student',
+      });
+    }
+
+    try {
+      const requestContext = {
+        ...liveContext,
+        region,
+        userName: settings.userName,
+        aiTone: settings.aiTone,
+        useGoogleSearch: settings.useGoogleSearch,
+        departmentId: activeDepartmentId || "general",
+        departmentName: activeDepartmentName || "General",
+        hostMode: isInstitutionHost ? "institution" : "public",
+        institutionId: isInstitutionHost ? (userProfile?.institutionId || null) : null,
+      };
+      const data = isInstitutionHost
+        ? await askInstitutionLiveChat({ text, context: requestContext })
+        : await askPublicLiveChat({ text, context: requestContext });
+      const aiText = String(data?.text || 'Connection error.').trim() || 'Connection error.';
+      const aiSources = normalizeResearchSources(data);
+      setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText, sources: aiSources }]);
+      if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
+        logInstitutionCaseMessage({
+          institutionId: userProfile.institutionId,
+          studentUid: user.uid,
+          departmentId: activeDepartmentId || 'general',
+          from: 'ai',
+          text: aiText,
+          visibility: 'student',
+        });
+      }
+      return aiText;
+    } catch (err) {
+      const errorText = 'Error: ' + (err?.message || 'Failed to reach AI service.');
+      setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: errorText }]);
+      return errorText;
+    } finally {
+      setIsThinking(false);
+    }
+  }
 
   // Log activity to institution-scoped Firestore collection
   const logInstitutionActivity = async ({ departmentId, studentUid, chatId, role, content }) => {
@@ -1531,7 +1637,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
         {/* Chat Feed */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-6">
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-4xl mx-auto">
             {messages.length === 0 && (
               <div className="py-20 text-center space-y-6">
                 <div className="w-20 h-20 bg-sky-500/20 rounded-3xl mx-auto flex items-center justify-center">
@@ -1719,9 +1825,21 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                   ) : (
                     <>
                       {m.type === 'image' && m.content && (
-                        <div className="mb-3 rounded-lg overflow-hidden border border-white/10">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openPreview({
+                              id: `chat-image-${m.id}`,
+                              name: 'Generated image',
+                              url: m.content,
+                              isImage: true,
+                              source: 'ai-generated',
+                            })
+                          }
+                          className="mb-3 block w-full overflow-hidden rounded-lg border border-white/10"
+                        >
                           <img src={m.content} alt="AI Generated" className="w-full h-auto object-cover" />
-                        </div>
+                        </button>
                       )}
                       <p className="text-sm leading-relaxed whitespace-pre-wrap">{m.text || m.content}</p>
                       {m.role === 'ai' && (
@@ -1798,7 +1916,12 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
         {/* Input Dock */}
         <div className={`p-4 bg-slate-950 ${isMobile ? 'fixed bottom-0 left-0 w-full z-20' : ''}`} style={isMobile ? {boxShadow:'0 -2px 16px 0 rgba(0,0,0,0.2)'} : {}}>
           <div className={`${isMobile ? 'max-w-full' : 'max-w-3xl mx-auto'}`}>
-            {uploads.length > 0 && (
+            <AttachmentChipsTray
+              items={uploads}
+              onPreview={openAttachmentItem}
+              onRemove={removeUpload}
+            />
+            {false && uploads.length > 0 && (
               <div className="flex flex-wrap gap-2 px-3 pb-2">
                 {uploads.map((f, i) => (
                   <div key={i} className="text-[10px] px-3 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300 flex items-center gap-2">
@@ -1808,7 +1931,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                 ))}
               </div>
             )}
-            <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl focus-within:border-sky-500/50 transition-all p-2">
+            <div className="bg-slate-900/78 border border-white/8 rounded-2xl shadow-2xl transition-all backdrop-blur-xl p-2">
               <form onSubmit={handleSubmit} className="flex flex-col">
                 <input 
                   value={input}
@@ -1818,11 +1941,22 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                 />
                 <div className="flex items-center justify-between px-2 pb-1">
                   <div className="flex items-center gap-1">
-                    <button type="button" onClick={handleFileUpload} className="p-2 hover:bg-white/5 rounded-lg text-slate-400 transition-colors" title="Upload for research">
+                    <button type="button" onClick={handleFileUpload} className="p-2 hover:bg-white/[0.07] rounded-lg text-slate-400 transition-colors" title="Upload for research">
                       <Paperclip size={18} />
                     </button>
-                    <button type="button" onClick={() => setInput(p => p + " Generate an image of ")} className="p-2 hover:bg-white/5 rounded-lg text-slate-400 transition-colors" title="Generate Image">
+                    <button type="button" onClick={() => setInput(p => p + " Generate an image of ")} className="p-2 hover:bg-white/[0.07] rounded-lg text-slate-400 transition-colors" title="Generate Image">
                       <ImageIcon size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        audioPlayer.closePlayer();
+                        setVoiceOpen(true);
+                      }}
+                      className="p-2 hover:bg-white/[0.07] rounded-lg text-slate-400 transition-colors"
+                      title="Open live voice chat"
+                    >
+                      <PhoneCall size={18} />
                     </button>
                     {isInstitutionHost && (
                       <>
@@ -1835,7 +1969,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                             speechSupported
                               ? isListening
                                 ? 'bg-red-600/30 text-red-300 hover:bg-red-600/40'
-                                : 'hover:bg-white/5 text-slate-400'
+                                : 'hover:bg-white/[0.07] text-slate-400'
                               : 'text-slate-600 cursor-not-allowed'
                           }`}
                         >
@@ -1851,7 +1985,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                               });
                             }}
                           title={voiceEnabled ? 'Voice playback on' : 'Voice playback off'}
-                          className={`p-2 rounded-lg transition-colors ${voiceEnabled ? 'text-sky-300 hover:bg-white/5' : 'text-slate-500 hover:bg-white/5'}`}
+                          className={`p-2 rounded-lg transition-colors ${voiceEnabled ? 'text-sky-300 hover:bg-white/[0.07]' : 'text-slate-500 hover:bg-white/[0.07]'}`}
                         >
                           {voiceEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
                         </button>
@@ -1867,7 +2001,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                   </button>
                 </div>
               </form>
-              <input type="file" ref={fileInputRef} className="hidden" onChange={onFileChange} />
+              <input type="file" ref={fileInputRef} className="hidden" multiple onChange={onFileChange} />
             </div>
             <p className="text-[10px] text-center text-slate-600 mt-2 uppercase tracking-widest">
               Unified Platform • Global Access
@@ -1876,7 +2010,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
         </div>
       </main>
 
-      {audioPlayer.isOpen && (
+      {audioPlayer.isOpen && !voiceOpen && (
         <div className="elu-audio-shell">
           <AudioPlaybackBar
             isPlaying={audioPlayer.isPlaying}
@@ -1900,14 +2034,38 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
               voices={audioPlayer.voiceOptions}
               isSupported={audioPlayer.isSupported}
               followAppLanguage={audioPlayer.followAppLanguage}
+              setFollowAppLanguage={audioPlayer.setFollowAppLanguage}
+              captionsEnabled={audioPlayer.captionsEnabled}
+              setCaptionsEnabled={audioPlayer.setCaptionsEnabled}
+              autoPlayReplies={audioPlayer.autoPlayReplies}
+              setAutoPlayReplies={audioPlayer.setAutoPlayReplies}
               isPreviewingVoice={audioPlayer.isPreviewingVoice}
               previewVoiceId={audioPlayer.previewVoiceId}
+              previewError={audioPlayer.previewError}
               onPreviewVoice={audioPlayer.previewVoice}
               onDone={() => audioPlayer.setIsSettingsOpen(false)}
             />
           ) : null}
         </div>
       )}
+      <LiveMultimodalSessionContainerV2
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        family="ai"
+        app={hostMode === 'institution' ? 'institution' : 'public'}
+        settingsUid={user?.uid || null}
+        title={hostMode === "institution" ? "Institution Live" : "Live AI"}
+        subtitle={
+          hostMode === "institution"
+            ? "Talk through study support and institution tasks with AI."
+            : "Talk naturally with AI in a calm live session."
+        }
+        language={getStoredLanguage('en-US', user?.uid || null)}
+        onAskAI={async ({ text, context }) => {
+          const reply = await requestLiveVoiceReply(text, context);
+          return { text: reply };
+        }}
+      />
 
       {/* Settings Modal */}
       {/* Institution Staff Code Modal */}
@@ -2089,6 +2247,43 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
       {/* My Stuff Modal - shows saved images */}
       {/* This can be triggered from sidebar "My Stuff" item */}
+      {hostMode === 'public' && toastItem ? (
+        <div className="fixed left-1/2 -translate-x-1/2 z-[95] bottom-[calc(120px+env(safe-area-inset-bottom))] md:bottom-6">
+          <ScreenshotPreviewToast
+            item={toastItem}
+            onPreview={openPreview}
+            onDismiss={dismissToast}
+          />
+        </div>
+      ) : null}
+      <ChatMediaPreviewModal
+        item={previewItem}
+        onClose={closePreview}
+        onAnnotate={(item) => {
+          closePreview();
+          openEditor(item);
+        }}
+        onEditImage={(item) => {
+          closePreview();
+          setAiEditItem(item);
+        }}
+      />
+      <ImageAnnotationEditor
+        open={Boolean(editorItem)}
+        item={editorItem}
+        onClose={closeEditor}
+        onApply={async (file) => {
+          if (!editorItem) return;
+          await applyEditedMedia(editorItem.id, file);
+          closeEditor();
+        }}
+      />
+      <AIImageEditModal
+        open={Boolean(aiEditItem)}
+        item={aiEditItem}
+        onClose={() => setAiEditItem(null)}
+        onApply={handleAiEditApply}
+      />
     </div>
   );
 }
