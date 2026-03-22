@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Eye, Share2, X } from "lucide-react";
+import { Eye, MessageSquareText, Pencil, Share2, X } from "lucide-react";
 import MediaActionButton from "./MediaActionButton.jsx";
 import { shareMediaItem } from "./shareMediaItem.js";
 import "./chat-media.css";
@@ -7,6 +7,8 @@ import "./chat-media.css";
 export default function ScreenshotPreviewToast({
   item,
   onPreview,
+  onAnnotate,
+  onAskAI,
   onDismiss,
 }) {
   const [shareStatus, setShareStatus] = useState("");
@@ -38,10 +40,10 @@ export default function ScreenshotPreviewToast({
       </div>
       <div className="chat-media-toast-copy">
         <div className="chat-media-toast-title">
-          {item.isScreenshot ? "Screenshot detected" : sourceLabel}
+          {item.isScreenshot ? "Detected this screenshot" : sourceLabel}
         </div>
         <div className="chat-media-toast-subtitle">
-          {item.isScreenshot ? "Preview or share this screenshot." : item.name}
+          {item.isScreenshot ? "Preview, share, annotate, or ask AI about it." : item.name}
         </div>
         {item.isScreenshot ? (
           <div className="mt-1 text-[11px] text-slate-400">{item.name}</div>
@@ -57,6 +59,16 @@ export default function ScreenshotPreviewToast({
         <MediaActionButton onClick={handleShare} aria-label="Share screenshot">
           <Share2 size={14} />
         </MediaActionButton>
+        {onAnnotate ? (
+          <MediaActionButton onClick={() => onAnnotate?.(item)} aria-label="Annotate screenshot">
+            <Pencil size={14} />
+          </MediaActionButton>
+        ) : null}
+        {onAskAI ? (
+          <MediaActionButton onClick={() => onAskAI?.(item)} aria-label="Ask AI about screenshot">
+            <MessageSquareText size={14} />
+          </MediaActionButton>
+        ) : null}
         <MediaActionButton onClick={onDismiss} aria-label="Dismiss preview">
           <X size={14} />
         </MediaActionButton>

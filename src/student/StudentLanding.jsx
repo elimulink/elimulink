@@ -1560,14 +1560,14 @@ export default function StudentLanding() {
       {isMobileDrawerOpen ? (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setIsMobileDrawerOpen(false)} />
-          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl border-r border-slate-200">
-            <div className="px-4 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="absolute left-0 top-0 h-full w-72 bg-white/94 shadow-[0_20px_48px_rgba(15,23,42,0.22)] backdrop-blur-2xl">
+            <div className="px-4 py-4 border-b border-slate-200/60 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="h-7 w-7 rounded-xl bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_20px_rgba(99,102,241,0.35)]" />
                 <div className="font-semibold text-slate-800">Home</div>
               </div>
               <button
-                className="h-9 w-9 rounded-lg border border-slate-200 hover:bg-slate-50"
+                className="h-9 w-9 rounded-2xl bg-slate-100/70 text-slate-700 transition hover:bg-slate-100"
                 onClick={() => setIsMobileDrawerOpen(false)}
               >
                 <X size={16} className="mx-auto" />
@@ -2101,7 +2101,7 @@ export default function StudentLanding() {
               <div ref={messagesEndRef} />
             </div>
 
-            <div className="fixed left-0 right-0 bottom-0 bg-white/95 backdrop-blur border-t border-slate-200 px-3 py-3">
+            <div className="fixed left-0 right-0 bottom-0 bg-white/92 backdrop-blur-2xl border-t border-slate-200/45 px-3 py-3">
               <div className="max-w-xl mx-auto">
                 <AttachmentChipsTray
                   items={attachments}
@@ -2112,7 +2112,7 @@ export default function StudentLanding() {
                 <div ref={attachmentMenuRef} className="relative">
                   <button
                     onClick={() => setIsAttachmentMenuOpen((v) => !v)}
-                    className="h-11 w-11 rounded-xl border border-transparent bg-slate-100/75 text-slate-700 grid place-items-center dark:bg-white/[0.05] dark:text-slate-100"
+                    className="h-11 w-11 rounded-2xl bg-slate-100/55 text-slate-700 grid place-items-center dark:bg-white/[0.04] dark:text-slate-100"
                     title="Add attachment"
                   >
                     <Plus size={18} />
@@ -2164,7 +2164,7 @@ export default function StudentLanding() {
                   ) : null}
                 </div>
 
-                <div className="flex-1 rounded-2xl border border-transparent bg-white/72 px-3 py-2 backdrop-blur dark:bg-white/[0.05]">
+                <div className="flex-1 rounded-2xl bg-white/42 px-3 py-2 backdrop-blur dark:bg-white/[0.03]">
                   <textarea
                     ref={promptInputRef}
                     rows={1}
@@ -2177,7 +2177,7 @@ export default function StudentLanding() {
                         sendMessage(input);
                       }
                     }}
-                    className="w-full resize-none outline-none text-sm text-slate-800 placeholder:text-slate-400"
+                    className="w-full resize-none border-none bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"
                     placeholder="Type your message..."
                   />
                 </div>
@@ -2471,6 +2471,15 @@ export default function StudentLanding() {
           <ScreenshotPreviewToast
             item={toastItem}
             onPreview={openPreview}
+            onAnnotate={(item) => {
+              dismissToast();
+              openEditor(item);
+            }}
+            onAskAI={(item) => {
+              setInput(`Help me understand this screenshot and tell me what to focus on: ${item.name || "Screenshot"}`);
+              dismissToast();
+              setTimeout(() => promptInputRef.current?.focus(), 0);
+            }}
             onDismiss={dismissToast}
           />
         </div>

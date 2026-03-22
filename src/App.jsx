@@ -1460,12 +1460,12 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
       <aside
         className={
           isMobile
-            ? `fixed top-0 left-0 z-40 h-full w-full max-w-xs bg-slate-900 border-r border-white/5 flex flex-col min-w-0 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
+            ? `fixed top-0 left-0 z-40 h-full w-full max-w-xs bg-slate-950/88 backdrop-blur-2xl flex flex-col min-w-0 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
             : `w-[260px] bg-slate-900 border-r border-white/5 flex flex-col shrink-0 min-w-0`
         }
         style={isMobile ? { boxShadow: isSidebarOpen ? '0 0 0 9999px rgba(0,0,0,0.5)' : undefined } : {}}
       >
-        <div className="p-4 border-b border-white/5 flex flex-col gap-2">
+        <div className="p-4 border-b border-white/[0.04] flex flex-col gap-2">
           <div
             className={`flex items-center gap-2 font-bold text-sky-400 ${isInstitutionHost ? 'cursor-pointer' : ''}`}
             onClick={() => {
@@ -1914,7 +1914,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
         </div>
 
         {/* Input Dock */}
-        <div className={`p-4 bg-slate-950 ${isMobile ? 'fixed bottom-0 left-0 w-full z-20' : ''}`} style={isMobile ? {boxShadow:'0 -2px 16px 0 rgba(0,0,0,0.2)'} : {}}>
+        <div className={`p-4 bg-slate-950/88 backdrop-blur-2xl ${isMobile ? 'fixed bottom-0 left-0 w-full z-20' : ''}`} style={isMobile ? {boxShadow:'0 -8px 28px 0 rgba(0,0,0,0.18)'} : {}}>
           <div className={`${isMobile ? 'max-w-full' : 'max-w-3xl mx-auto'}`}>
             <AttachmentChipsTray
               items={uploads}
@@ -1931,20 +1931,20 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                 ))}
               </div>
             )}
-            <div className="bg-slate-900/78 border border-white/8 rounded-2xl shadow-2xl transition-all backdrop-blur-xl p-2">
+            <div className="bg-slate-900/60 border border-white/[0.04] rounded-2xl shadow-[0_18px_40px_rgba(0,0,0,0.22)] transition-all backdrop-blur-2xl p-2.5">
               <form onSubmit={handleSubmit} className="flex flex-col">
                 <input 
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Ask about geography, research, books, or generate an image..."
-                  className="w-full bg-transparent border-none py-3 px-4 focus:outline-none text-sm placeholder:text-slate-600"
+                  className="w-full bg-transparent border-none py-3 px-4 focus:outline-none text-sm placeholder:text-slate-500"
                 />
                 <div className="flex items-center justify-between px-2 pb-1">
                   <div className="flex items-center gap-1">
-                    <button type="button" onClick={handleFileUpload} className="p-2 hover:bg-white/[0.07] rounded-lg text-slate-400 transition-colors" title="Upload for research">
+                    <button type="button" onClick={handleFileUpload} className="p-2 hover:bg-white/[0.06] rounded-xl text-slate-400 transition-colors" title="Upload for research">
                       <Paperclip size={18} />
                     </button>
-                    <button type="button" onClick={() => setInput(p => p + " Generate an image of ")} className="p-2 hover:bg-white/[0.07] rounded-lg text-slate-400 transition-colors" title="Generate Image">
+                    <button type="button" onClick={() => setInput(p => p + " Generate an image of ")} className="p-2 hover:bg-white/[0.06] rounded-xl text-slate-400 transition-colors" title="Generate Image">
                       <ImageIcon size={18} />
                     </button>
                     <button
@@ -1953,7 +1953,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                         audioPlayer.closePlayer();
                         setVoiceOpen(true);
                       }}
-                      className="p-2 hover:bg-white/[0.07] rounded-lg text-slate-400 transition-colors"
+                      className="p-2 hover:bg-white/[0.06] rounded-xl text-slate-400 transition-colors"
                       title="Open live voice chat"
                     >
                       <PhoneCall size={18} />
@@ -2247,11 +2247,19 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
       {/* My Stuff Modal - shows saved images */}
       {/* This can be triggered from sidebar "My Stuff" item */}
-      {hostMode === 'public' && toastItem ? (
+      {toastItem ? (
         <div className="fixed left-1/2 -translate-x-1/2 z-[95] bottom-[calc(120px+env(safe-area-inset-bottom))] md:bottom-6">
           <ScreenshotPreviewToast
             item={toastItem}
             onPreview={openPreview}
+            onAnnotate={(item) => {
+              dismissToast();
+              openEditor(item);
+            }}
+            onAskAI={(item) => {
+              setInput(`Help me understand this screenshot and tell me what to focus on: ${item.name || "Screenshot"}`);
+              dismissToast();
+            }}
             onDismiss={dismissToast}
           />
         </div>

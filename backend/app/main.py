@@ -52,13 +52,18 @@ Base.metadata.create_all(bind=engine)
 
 default_origins = [
     "https://elimulink-app-ai.web.app",
+    "https://elimulink-app-ai.firebaseapp.com",
     "https://elimulink-student.web.app",
+    "https://elimulink-student.firebaseapp.com",
     "https://elimulink-institution.web.app",
+    "https://elimulink-institution.firebaseapp.com",
     "https://app.elimulink.co.ke",
     "https://student.elimulink.co.ke",
     "https://institution.elimulink.co.ke",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
 ]
 cors_from_env = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 # Always keep safe defaults, then append any explicit env origins.
@@ -67,9 +72,9 @@ allowed_origins = list(dict.fromkeys(default_origins + cors_from_env))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
     expose_headers=["X-Request-Id"],
 )
 

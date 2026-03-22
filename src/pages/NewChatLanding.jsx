@@ -3452,14 +3452,14 @@ export default function NewChatLanding({
       {!isAdminShellEmbed && isMobileDrawerOpen ? (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setIsMobileDrawerOpen(false)} />
-          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl border-r border-slate-200 dark:border-slate-800 dark:bg-slate-950">
-            <div className="px-4 py-4 border-b border-slate-200 flex items-center justify-between dark:border-slate-800">
+          <div className="absolute left-0 top-0 h-full w-72 bg-white/94 shadow-[0_20px_48px_rgba(15,23,42,0.22)] backdrop-blur-2xl dark:bg-slate-950/88">
+            <div className="px-4 py-4 flex items-center justify-between border-b border-slate-200/60 dark:border-white/[0.04]">
               <div className="flex items-center gap-2">
                 <div className="h-7 w-7 rounded-xl bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_20px_rgba(99,102,241,0.35)]" />
                 <div className="font-semibold text-slate-800">Home</div>
               </div>
               <button
-                className="h-9 w-9 rounded-lg border border-slate-200 hover:bg-slate-50"
+                className="h-9 w-9 rounded-2xl bg-slate-100/70 text-slate-700 transition hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.08]"
                 onClick={() => setIsMobileDrawerOpen(false)}
               >
                 <X size={16} className="mx-auto" />
@@ -4041,7 +4041,7 @@ export default function NewChatLanding({
 
               <div
                 ref={mobileComposerRef}
-                className="fixed left-0 right-0 bottom-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:static md:z-auto dark:border-slate-800 dark:bg-slate-950/96"
+                className="fixed left-0 right-0 bottom-0 z-50 bg-white/92 backdrop-blur-2xl border-t border-slate-200/45 px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:static md:z-auto dark:border-white/[0.04] dark:bg-slate-950/90"
                 style={{ bottom: `${kbHeight}px` }}
               >
                 <div className="max-w-xl mx-auto space-y-2">
@@ -4064,7 +4064,7 @@ export default function NewChatLanding({
                     </div>
                   ) : null}
 
-                  <div className="surface-elevated rounded-[26px] border border-slate-200/55 bg-white/76 backdrop-blur-xl px-2.5 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.08)] dark:border-white/8 dark:bg-slate-900/72">
+                  <div className="surface-elevated rounded-[26px] border border-slate-200/35 bg-white/72 backdrop-blur-2xl px-2.5 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.06)] dark:border-white/[0.04] dark:bg-slate-900/58">
                     <AttachmentChipsTray
                       items={attachments}
                       onPreview={openAttachmentItem}
@@ -4075,7 +4075,7 @@ export default function NewChatLanding({
                       <div ref={mobileAttachmentMenuRef} className="relative shrink-0">
                         <button
                           onClick={toggleAttachmentPanel}
-                          className="h-10 w-10 rounded-2xl border border-transparent bg-slate-100/70 text-slate-700 grid place-items-center transition hover:bg-slate-100 active:scale-[0.98] dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
+                          className="h-10 w-10 rounded-2xl bg-slate-100/55 text-slate-700 grid place-items-center transition hover:bg-slate-100/75 active:scale-[0.98] dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.07]"
                           title="Add attachment"
                         >
                           <Plus size={17} />
@@ -4191,7 +4191,7 @@ export default function NewChatLanding({
                           audioPlayer.closePlayer();
                           setVoiceOpen(true);
                         }}
-                        className="h-10 w-10 shrink-0 rounded-2xl border border-transparent bg-slate-100/75 text-slate-700 grid place-items-center transition hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
+                        className="h-10 w-10 shrink-0 rounded-2xl bg-slate-100/58 text-slate-700 grid place-items-center transition hover:bg-slate-100/78 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.07]"
                         title="Open live voice chat"
                       >
                         <PhoneCall size={16} />
@@ -4203,13 +4203,13 @@ export default function NewChatLanding({
                           "relative h-10 w-10 shrink-0 rounded-2xl transition grid place-items-center overflow-hidden",
                           hasText
                             ? "bg-sky-500 text-white shadow-sm hover:bg-sky-600 active:scale-[0.98]"
-                            : "border border-slate-200 bg-white/90 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700",
+                            : "bg-white/82 text-slate-700 hover:bg-white dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.08]",
                         ].join(" ")}
                         title={hasText ? "Send" : "Live AI ready"}
                       >
-                        {!hasText ? (
-                          <>
-                            <span className="absolute inset-0 rounded-2xl border border-sky-400/35" />
+                      {!hasText ? (
+                        <>
+                            <span className="absolute inset-0 rounded-2xl border border-sky-400/18" />
                             <Mic size={16} className="relative z-10" />
                           </>
                         ) : (
@@ -4650,6 +4650,15 @@ export default function NewChatLanding({
           <ScreenshotPreviewToast
             item={toastItem}
             onPreview={openPreview}
+            onAnnotate={(item) => {
+              dismissToast();
+              openEditor(item);
+            }}
+            onAskAI={(item) => {
+              setInput(`Help me understand this screenshot and tell me what to focus on: ${item.name || "Screenshot"}`);
+              dismissToast();
+              requestAnimationFrame(() => focusPromptInput());
+            }}
             onDismiss={dismissToast}
           />
         </div>
