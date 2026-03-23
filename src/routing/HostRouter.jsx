@@ -14,6 +14,9 @@ import { watchFirebaseAuth } from '../auth/firebaseAuth';
 import {
   canAccessApp,
   clearFamilySession,
+  getBackgroundVerifyTimeoutMs,
+  getStartupVerifyTimeoutMs,
+  isStartupSessionReusable,
   loadFamilySession,
   logoutFamilySession,
   verifyFamilySession,
@@ -302,6 +305,9 @@ export default function HostRouter() {
   const [flashMessage, setFlashMessage] = useState('');
   const [bootstrapError, setBootstrapError] = useState(null);
   const [bootstrapNonce, setBootstrapNonce] = useState(0);
+  const [usedCachedStartupSession, setUsedCachedStartupSession] = useState(false);
+  const [backgroundVerifyState, setBackgroundVerifyState] = useState('idle');
+  const [backgroundVerifyMessage, setBackgroundVerifyMessage] = useState('');
   const [temporaryBannerVisible, setTemporaryBannerVisible] = useState(false);
   const [temporaryBannerClosing, setTemporaryBannerClosing] = useState(false);
   const bootAttemptRef = useRef(0);
@@ -309,6 +315,7 @@ export default function HostRouter() {
   const authStateLogged = useRef(false);
   const hostRouteLogged = useRef(false);
   const temporaryBannerTimersRef = useRef([]);
+  const backgroundVerifyAttemptRef = useRef(0);
 
   const hostMode = useMemo(
     () => getResolvedHostMode(window.location.hostname),
@@ -438,6 +445,7 @@ export default function HostRouter() {
         setProfile(null);
         setAccessAllowed(true);
         setBootstrapError(null);
+        setUsedCachedStartupSession(false);
         setBootState('guest');
         setProfileReady(true);
         return;
@@ -445,20 +453,46 @@ export default function HostRouter() {
 
       setBootState('loading');
       setBootstrapError(null);
+      setUsedCachedStartupSession(false);
+      setBackgroundVerifyState('idle');
+      setBackgroundVerifyMessage('');
       const cachedSession = loadFamilySession(user.uid);
       hostDebug('bootstrap:cache', {
         attempt,
         hasCachedSession: Boolean(cachedSession),
         hasCachedProfile: Boolean(cachedSession?.profile),
       });
+      const canReuseCachedSession = isStartupSessionReusable(cachedSession, {
+        firebaseUser: user,
+        appName: hostMode,
+      });
+
       if (cachedSession?.profile) {
         setProfile(cachedSession.profile);
         setAccessAllowed(canAccessApp(cachedSession, hostMode));
       }
 
+      if (canReuseCachedSession) {
+        hostDebug('bootstrap:cache_reused', {
+          attempt,
+          uid: user.uid,
+          verifiedAt: cachedSession?.verifiedAt || null,
+          accessMode: cachedSession?.access_mode || null,
+        });
+        setProfile(cachedSession.profile);
+        setAccessAllowed(true);
+        setBootstrapError(null);
+        setUsedCachedStartupSession(true);
+        setBootState('ready');
+        setProfileReady(true);
+        return;
+      }
+
       try {
         hostDebug('bootstrap:verify_begin', { attempt, uid: user.uid, hostMode });
-        const familySession = await verifyFamilySession(user, hostMode);
+        const familySession = await verifyFamilySession(user, hostMode, {
+          timeoutMs: getStartupVerifyTimeoutMs(),
+        });
         if (cancelled || attempt !== bootAttemptRef.current) {
           hostDebug('bootstrap:stale_success_ignored', { attempt, uid: user.uid });
           return;
@@ -474,6 +508,7 @@ export default function HostRouter() {
         const allowed = canAccessApp(familySession, hostMode);
         setAccessAllowed(allowed);
         setBootstrapError(null);
+        setUsedCachedStartupSession(false);
         setBootState(allowed ? 'ready' : 'denied');
       } catch (err) {
         if (cancelled || attempt !== bootAttemptRef.current) {
@@ -493,7 +528,12 @@ export default function HostRouter() {
           verifyUrl: err?.verifyUrl || null,
         });
         const fallbackSession = loadFamilySession(user.uid);
-        if (fallbackSession?.profile) {
+        if (
+          isStartupSessionReusable(fallbackSession, {
+            firebaseUser: user,
+            appName: hostMode,
+          })
+        ) {
           hostDebug('bootstrap:fallback_session', {
             attempt,
             uid: user.uid,
@@ -503,6 +543,7 @@ export default function HostRouter() {
           const allowed = canAccessApp(fallbackSession, hostMode);
           setAccessAllowed(allowed);
           setBootstrapError(null);
+          setUsedCachedStartupSession(true);
           setBootState(allowed ? 'ready' : 'denied');
         } else {
           hostDebug('bootstrap:error_no_fallback', { attempt, uid: user.uid });
@@ -528,6 +569,86 @@ export default function HostRouter() {
       cancelled = true;
     };
   }, [authReady, user, hostMode, bootstrapNonce]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshVerificationInBackground() {
+      if (!authReady || !profileReady || bootState !== 'ready' || !user || user.isAnonymous) return;
+
+      const cachedSession = loadFamilySession(user.uid);
+      const shouldRefreshInBackground =
+        usedCachedStartupSession &&
+        isStartupSessionReusable(cachedSession, {
+          firebaseUser: user,
+          appName: hostMode,
+        });
+
+      if (!shouldRefreshInBackground) return;
+
+      const attempt = backgroundVerifyAttemptRef.current + 1;
+      backgroundVerifyAttemptRef.current = attempt;
+      setBackgroundVerifyState('refreshing');
+      setBackgroundVerifyMessage('');
+      hostDebug('background_verify:start', {
+        attempt,
+        uid: user.uid,
+        hostMode,
+      });
+
+      try {
+        const familySession = await verifyFamilySession(user, hostMode, {
+          timeoutMs: getBackgroundVerifyTimeoutMs(),
+          forceRefreshToken: false,
+        });
+        if (cancelled || attempt !== backgroundVerifyAttemptRef.current) return;
+
+        const allowed = canAccessApp(familySession, hostMode);
+        setProfile({ ...(familySession?.profile || {}) });
+        setAccessAllowed(allowed);
+        setBootstrapError(null);
+        setBackgroundVerifyState('success');
+        setBackgroundVerifyMessage('');
+        setUsedCachedStartupSession(false);
+        setBootState(allowed ? 'ready' : 'denied');
+        hostDebug('background_verify:success', {
+          attempt,
+          uid: user.uid,
+          allowed,
+        });
+      } catch (err) {
+        if (cancelled || attempt !== backgroundVerifyAttemptRef.current) return;
+
+        const status = err?.status ?? 0;
+        const nextMessage =
+          status === 401 || status === 403
+            ? 'Your session expired. Please sign in again.'
+            : 'Reconnecting to verify your workspace access.';
+
+        setBackgroundVerifyState('error');
+        setBackgroundVerifyMessage(nextMessage);
+        hostDebug('background_verify:failed', {
+          attempt,
+          uid: user.uid,
+          status,
+          message: String(err?.message || err || 'background verify failed'),
+        });
+
+        if (status === 401 || status === 403) {
+          clearFamilySession();
+          setProfile(null);
+          setAccessAllowed(false);
+          setBootstrapError(err || new Error(nextMessage));
+          setBootState('error');
+        }
+      }
+    }
+
+    refreshVerificationInBackground();
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, profileReady, bootState, user, hostMode, bootstrapNonce, usedCachedStartupSession]);
 
   useEffect(() => {
     if (!authReady || profileReady || bootState !== 'loading') return undefined;
@@ -750,6 +871,18 @@ export default function HostRouter() {
       {flashMessage ? (
         <div className="fixed top-3 left-1/2 z-50 -translate-x-1/2 rounded border border-amber-500/40 bg-amber-900/60 px-4 py-2 text-xs text-amber-100">
           {flashMessage}
+        </div>
+      ) : null}
+      {backgroundVerifyState === 'error' && backgroundVerifyMessage ? (
+        <div className="fixed top-3 left-1/2 z-50 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/86 px-4 py-2.5 text-xs text-white shadow-[0_16px_34px_rgba(2,8,23,0.32)] backdrop-blur-xl">
+          <span>{backgroundVerifyMessage}</span>
+          <button
+            type="button"
+            onClick={() => setBootstrapNonce((value) => value + 1)}
+            className="rounded-full bg-white/10 px-3 py-1 font-semibold text-white transition hover:bg-white/15"
+          >
+            Retry
+          </button>
         </div>
       ) : null}
       {hostMode === 'institution' ? <AppEntry userRole={profile?.role} /> : <AppEntry modeUrls={modeUrls} />}

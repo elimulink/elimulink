@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import LiveVoiceOverlayV2 from "./LiveVoiceOverlayV2.jsx";
 import ScreenShareIndicator from "./ScreenShareIndicator.jsx";
 import RecordingPreviewCard from "./RecordingPreviewCard.jsx";
@@ -40,6 +40,7 @@ export default function LiveMultimodalSessionContainerV2({
   }, [app, subtitle, title]);
 
   const voiceSettings = useMemo(() => loadVoiceSettings(settingsUid), [settingsUid]);
+  const [toastMessage, setToastMessage] = useState("");
 
   const liveVoice = useLiveVoiceSession({
     language,
@@ -62,6 +63,29 @@ export default function LiveMultimodalSessionContainerV2({
       liveVoice.endSession();
     }
   }, [liveVoice.endSession, liveVoice.open, liveVoice.openSession, open]);
+
+  useEffect(() => {
+    if (!liveVoice.lastError) return undefined;
+
+    const nextMessage = normalizeLiveMessage(liveVoice.lastError, {
+      screenShareSupported: liveVoice.screenShareSupported,
+      screenRecordingSupported: liveVoice.screenRecordingSupported,
+      mobileBrowserRuntime: liveVoice.mobileBrowserRuntime,
+    });
+
+    setToastMessage(nextMessage);
+
+    const timeoutId = window.setTimeout(() => {
+      setToastMessage("");
+    }, 3600);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    liveVoice.lastError,
+    liveVoice.mobileBrowserRuntime,
+    liveVoice.screenRecordingSupported,
+    liveVoice.screenShareSupported,
+  ]);
 
   const handleClose = () => {
     liveVoice.endSession();
@@ -87,9 +111,9 @@ export default function LiveMultimodalSessionContainerV2({
         shareSurface={liveVoice.shareSurface}
         onStop={liveVoice.stopScreenShare}
       />
-      {liveVoice.lastError ? (
-        <div className="fixed left-4 right-4 top-20 z-[120] mx-auto max-w-xl rounded-2xl border border-red-300/40 bg-red-500/95 px-4 py-3 text-sm text-white shadow-lg">
-          {liveVoice.lastError}
+      {toastMessage ? (
+        <div className="fixed left-4 right-4 top-20 z-[120] mx-auto max-w-sm rounded-2xl border border-white/10 bg-[#131c30]/88 px-4 py-3 text-sm text-white/90 shadow-[0_18px_40px_rgba(2,6,23,0.38)] backdrop-blur-xl">
+          {toastMessage}
         </div>
       ) : null}
       {liveVoice.recordedUrl ? (
@@ -118,14 +142,18 @@ export default function LiveMultimodalSessionContainerV2({
         recordingScreen={liveVoice.recordingScreen}
         isSharing={liveVoice.screenSharing}
         shareSurface={liveVoice.shareSurface}
+        screenShareSupported={liveVoice.screenShareSupported}
+        screenRecordingSupported={liveVoice.screenRecordingSupported}
         onStartScreenShare={liveVoice.startScreenShare}
         onStopScreenShare={liveVoice.stopScreenShare}
         onToggleMute={liveVoice.toggleMute}
+        onPrimaryMic={liveVoice.togglePrimaryTalk}
         onToggleCamera={liveVoice.toggleCamera}
         onSwitchCamera={liveVoice.switchCamera}
         onTakePhoto={handleTakePhoto}
         onTakeScreenshot={handleTakeScreenshot}
         onToggleScreenRecording={liveVoice.toggleScreenRecording}
+        onSubmitTextMessage={liveVoice.submitTextMessage}
         onInterrupt={liveVoice.interrupt}
         onRetryListen={liveVoice.retryListen}
         onStartVoice={liveVoice.startVoice}
@@ -133,4 +161,28 @@ export default function LiveMultimodalSessionContainerV2({
       />
     </>
   );
+}
+
+function normalizeLiveMessage(message, support) {
+  const raw = `${message || ""}`.trim();
+
+  if (
+    raw === "Screen capture is not supported on this device/browser." ||
+    raw === "Screen capture is not supported on this device/browser"
+  ) {
+    if (support.mobileBrowserRuntime && !support.screenShareSupported) {
+      return "Screen share isn't available in this mobile browser.";
+    }
+    return "This browser doesn't support screen sharing.";
+  }
+
+  if (raw.includes("No active shared screen")) {
+    return "Start sharing your screen first.";
+  }
+
+  if (raw.includes("Speech recognition is not supported")) {
+    return "Voice input isn't available in this browser.";
+  }
+
+  return raw;
 }

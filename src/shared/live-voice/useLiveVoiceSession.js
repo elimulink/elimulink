@@ -16,6 +16,7 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
   const [recordedUrl, setRecordedUrl] = useState("");
   const [captures, setCaptures] = useState([]);
   const [visionPrompt, setVisionPrompt] = useState("");
+  const [sessionError, setSessionError] = useState("");
 
   const {
     screenSharing,
@@ -45,6 +46,8 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
     endVoiceChat,
     retryListen,
     interruptSpeaking,
+    stopListening,
+    submitTextTurn,
     setMuted,
   } = useVoiceConversation({
     language,
@@ -88,11 +91,25 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
     []
   );
 
-  const screenCaptureSupported = useMemo(
+  const screenShareSupported = useMemo(
+    () =>
+      typeof navigator !== "undefined" &&
+      Boolean(navigator.mediaDevices?.getDisplayMedia),
+    []
+  );
+
+  const screenRecordingSupported = useMemo(
     () =>
       typeof navigator !== "undefined" &&
       Boolean(navigator.mediaDevices?.getDisplayMedia) &&
       typeof MediaRecorder !== "undefined",
+    []
+  );
+
+  const mobileBrowserRuntime = useMemo(
+    () =>
+      typeof navigator !== "undefined" &&
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || ""),
     []
   );
 
@@ -164,6 +181,7 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
 
   const openSession = useCallback(() => {
     resetSessionCaptures();
+    setSessionError("");
     setOpen(true);
     window.setTimeout(() => startVoiceChat(), 120);
   }, [resetSessionCaptures, startVoiceChat]);
@@ -174,6 +192,7 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
     stopScreenRecording();
     endScreenShare();
     resetSessionCaptures();
+    setSessionError("");
     setOpen(false);
   }, [disableCamera, endScreenShare, endVoiceChat, resetSessionCaptures, stopScreenRecording]);
 
@@ -204,13 +223,27 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
   }, [cameraEnabled, enableCamera, flipCameraFacing]);
 
   const toggleScreenShare = useCallback(async () => {
+    if (!screenShareSupported) {
+      setSessionError("Screen share isn't available in this browser.");
+      return false;
+    }
     if (screenSharing) {
       endScreenShare();
       return true;
     }
     const stream = await beginScreenShare();
     return Boolean(stream);
-  }, [beginScreenShare, endScreenShare, screenSharing]);
+  }, [beginScreenShare, endScreenShare, screenShareSupported, screenSharing]);
+
+  const startScreenShare = useCallback(async () => {
+    if (!screenShareSupported) {
+      setSessionError("Screen share isn't available in this browser.");
+      return null;
+    }
+
+    setSessionError("");
+    return beginScreenShare();
+  }, [beginScreenShare, screenShareSupported]);
 
   const takeScreenshot = useCallback(async () => {
     if (!screenSharing) {
@@ -272,7 +305,10 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
   );
 
   const toggleScreenRecording = useCallback(async () => {
-    if (!screenCaptureSupported) return false;
+    if (!screenRecordingSupported) {
+      setSessionError("Screen recording isn't available in this browser.");
+      return false;
+    }
 
     if (recordingScreen) {
       stopScreenRecording();
@@ -342,9 +378,38 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
       });
       return true;
     } catch {
+      setSessionError("Couldn't start screen recording.");
       return false;
     }
-  }, [recordingScreen, registerObjectUrl, screenCaptureSupported, stopScreenRecording, unregisterObjectUrl]);
+  }, [recordingScreen, registerObjectUrl, screenRecordingSupported, stopScreenRecording, unregisterObjectUrl]);
+
+  const togglePrimaryTalk = useCallback(async () => {
+    if (mode === "listening") {
+      stopListening();
+      return true;
+    }
+
+    if (mode === "speaking") {
+      interruptSpeaking();
+      return true;
+    }
+
+    if (mode === "thinking") {
+      return false;
+    }
+
+    startVoiceChat();
+    return true;
+  }, [interruptSpeaking, mode, startVoiceChat, stopListening]);
+
+  const submitTextMessage = useCallback(
+    async (text) => {
+      const normalized = `${text || ""}`.trim();
+      if (!normalized) return false;
+      return submitTextTurn(normalized);
+    },
+    [submitTextTurn]
+  );
 
   const downloadRecording = useCallback(
     (filename = `elimulink-live-recording-${Date.now()}.webm`) => {
@@ -433,23 +498,27 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
     recognitionSupported: supported.speechRecognition,
     speechSynthesisSupported: supported.speechSynthesis,
     cameraSupported,
-    screenCaptureSupported,
+    screenShareSupported,
+    screenRecordingSupported,
+    mobileBrowserRuntime,
     cameraFacingMode: cameraFacing,
     rawCapture: rawCapture || rawPhoto,
     highlightedCapture: highlightedCapture || highlightedPhoto,
     highlightLoading: captureLoading || cameraLoading,
     visionPrompt,
     setVisionPrompt,
-    lastError: captureError || cameraError || error,
+    lastError: sessionError || captureError || cameraError || error,
     dualCameraMode: "single-camera-fallback",
     openSession,
     endSession,
     startVoice: startVoiceChat,
+    togglePrimaryTalk,
+    submitTextMessage,
     toggleMute,
     toggleCamera,
     switchCamera,
     toggleTorch,
-    startScreenShare: beginScreenShare,
+    startScreenShare,
     stopScreenShare: endScreenShare,
     toggleScreenShare,
     takePhoto,

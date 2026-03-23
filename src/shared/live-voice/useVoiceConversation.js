@@ -325,6 +325,45 @@ export function useVoiceConversation({
     startRecognition();
   }, [startRecognition]);
 
+  const stopListening = useCallback(
+    (options = {}) => {
+      const shouldSubmitInterim = options.submitInterim !== false;
+      const pendingTranscript = transcript.trim();
+
+      stoppedManuallyRef.current = true;
+      stopRecognition();
+
+      if (
+        shouldSubmitInterim &&
+        pendingTranscript &&
+        !awaitingAIRef.current &&
+        mode === "listening"
+      ) {
+        setTranscript("");
+        setFinalTranscript(pendingTranscript);
+        handleUserTurn(pendingTranscript);
+      } else if (!awaitingAIRef.current && !speakingRef.current) {
+        setMode("idle");
+      }
+    },
+    [handleUserTurn, mode, stopRecognition, transcript]
+  );
+
+  const submitTextTurn = useCallback(
+    async (text) => {
+      const normalized = `${text || ""}`.trim();
+      if (!normalized) return false;
+
+      setTranscript("");
+      setFinalTranscript(normalized);
+      setError("");
+      stoppedManuallyRef.current = false;
+      await handleUserTurn(normalized);
+      return true;
+    },
+    [handleUserTurn]
+  );
+
   const endVoiceChat = useCallback(() => {
     stoppedManuallyRef.current = true;
     awaitingAIRef.current = false;
@@ -373,6 +412,8 @@ export function useVoiceConversation({
     endVoiceChat,
     retryListen,
     interruptSpeaking,
+    stopListening,
+    submitTextTurn,
     setMuted,
     setTranscript,
     setFinalTranscript,

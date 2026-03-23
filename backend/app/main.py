@@ -68,10 +68,17 @@ default_origins = [
 cors_from_env = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 # Always keep safe defaults, then append any explicit env origins.
 allowed_origins = list(dict.fromkeys(default_origins + cors_from_env))
+allowed_origin_regex = (
+    r"^https:\/\/("
+    r"elimulink-(app-ai|student|institution)\.(web\.app|firebaseapp\.com)"
+    r"|((app|student|institution)\.)?elimulink\.co\.ke"
+    r")$"
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

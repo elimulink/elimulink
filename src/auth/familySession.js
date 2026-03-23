@@ -4,6 +4,9 @@ import { clearAppSession, loadAppSession, saveAppSession } from "./appSession";
 import { getFirebaseIdToken, logoutFirebase } from "./firebaseAuth";
 
 const VERIFY_SESSION_TIMEOUT_MS = 15000;
+const STARTUP_VERIFY_TIMEOUT_MS = 6000;
+const BACKGROUND_VERIFY_TIMEOUT_MS = 30000;
+const SESSION_BOOTSTRAP_MAX_AGE_MS = 1000 * 60 * 60 * 12;
 
 function normalizeRole(role) {
   const value = String(role || "").trim().toLowerCase();
@@ -99,20 +102,36 @@ export function canAccessApp(session, appName) {
   return session?.allowed === true && access.includes(normalizedApp) && accessMode !== "denied";
 }
 
-export async function verifyFamilySession(firebaseUser, appName) {
+export function isStartupSessionReusable(session, { firebaseUser, appName } = {}) {
+  if (!session || !firebaseUser?.uid) return false;
+  if (session.uid !== firebaseUser.uid) return false;
+  if (!canAccessApp(session, appName)) return false;
+
+  const verifiedAt = Number(session.verifiedAt || 0);
+  if (!verifiedAt) return false;
+
+  const ageMs = Date.now() - verifiedAt;
+  return ageMs >= 0 && ageMs <= SESSION_BOOTSTRAP_MAX_AGE_MS;
+}
+
+export async function verifyFamilySession(firebaseUser, appName, options = {}) {
   if (!firebaseUser) return null;
   const normalizedApp = resolveAppName(appName);
+  const timeoutMs = Number(options.timeoutMs || VERIFY_SESSION_TIMEOUT_MS);
+  const forceRefreshToken = options.forceRefreshToken !== false;
   console.info("[FAMILY_SESSION] verify:start", {
     uid: firebaseUser.uid,
     email: firebaseUser.email || null,
     app: normalizedApp,
+    timeoutMs,
+    forceRefreshToken,
   });
-  const token = await getFirebaseIdToken(true);
+  const token = await getFirebaseIdToken(forceRefreshToken);
   if (!token) throw new Error("Missing Firebase ID token");
   const verifyUrl = apiUrl("/api/auth/verify-app-access");
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timeoutId = controller
-    ? window.setTimeout(() => controller.abort(new Error("Verify session timed out")), VERIFY_SESSION_TIMEOUT_MS)
+    ? window.setTimeout(() => controller.abort(new Error("Verify session timed out")), timeoutMs)
     : null;
 
   let response;
@@ -130,7 +149,7 @@ export async function verifyFamilySession(firebaseUser, appName) {
     if (timeoutId) window.clearTimeout(timeoutId);
     const err = new Error(
       error?.name === "AbortError"
-        ? `Workspace verification timed out after ${Math.round(VERIFY_SESSION_TIMEOUT_MS / 1000)}s`
+        ? `Workspace verification timed out after ${Math.round(timeoutMs / 1000)}s`
         : String(error?.message || error || "Workspace verification failed")
     );
     err.status = 0;
@@ -205,6 +224,14 @@ export async function verifyFamilySession(firebaseUser, appName) {
     access: session.app_access,
   });
   return session;
+}
+
+export function getStartupVerifyTimeoutMs() {
+  return STARTUP_VERIFY_TIMEOUT_MS;
+}
+
+export function getBackgroundVerifyTimeoutMs() {
+  return BACKGROUND_VERIFY_TIMEOUT_MS;
 }
 
 export function loadFamilySession(uid = null) {
