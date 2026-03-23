@@ -29,7 +29,7 @@ function isScreenshotLike(file, source) {
   const normalizedName = name.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   const type = String(file?.type || "").toLowerCase();
   if (!type.startsWith("image/")) return false;
-  if (source === "camera" || source === "photo" || source === "scan") return false;
+  if (source === "camera" || source === "scan") return false;
 
   let score = 0;
 

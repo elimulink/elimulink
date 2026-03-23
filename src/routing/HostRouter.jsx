@@ -141,32 +141,32 @@ function BootstrapErrorScreen({ hostMode, error, onRetry }) {
   const endpoint = String(error?.verifyUrl || '').trim();
 
   return (
-    <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef6ff_100%)] px-2 py-4 text-slate-900 sm:px-4 sm:py-6">
+    <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.08),transparent_26%),radial-gradient(circle_at_bottom_right,rgba(125,211,252,0.08),transparent_22%),linear-gradient(180deg,#f9fcff_0%,#f3f8ff_100%)] px-2 py-4 text-slate-900 sm:px-4 sm:py-6">
       <div className="mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-[34rem] items-center justify-center sm:min-h-[calc(100dvh-3rem)]">
-        <div className="w-full rounded-[24px] border border-white/70 bg-white/84 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:rounded-[28px] sm:p-8">
+        <div className="w-full rounded-[28px] bg-white/58 p-5 shadow-[0_22px_60px_rgba(15,23,42,0.08)] ring-1 ring-white/55 backdrop-blur-[22px] sm:rounded-[32px] sm:p-8">
           <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-700/80 sm:text-[11px]">Session Check</div>
           <h1 className="mt-3 text-[clamp(1.45rem,5vw,2rem)] font-semibold tracking-tight text-slate-950">We couldn&apos;t verify this {hostMode} session yet</h1>
           <p className="mt-3 text-sm leading-6 text-slate-600">
             Firebase sign-in succeeded, but the backend verification route did not complete. This usually means the deployed API is missing the current AI-family verify endpoint.
           </p>
-          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="mt-5 rounded-2xl bg-amber-50/72 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200/65 backdrop-blur-sm">
             {details}
           </div>
           {endpoint ? (
-            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 break-all">
+            <div className="mt-3 rounded-2xl bg-white/54 px-4 py-3 text-xs leading-5 text-slate-600 break-all ring-1 ring-slate-200/55 backdrop-blur-sm">
               {endpoint}
             </div>
           ) : null}
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <button
-              className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-500"
+              className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_10px_26px_rgba(2,132,199,0.24)] transition hover:bg-sky-500"
               type="button"
               onClick={onRetry}
             >
               Retry verification
             </button>
             <button
-              className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              className="inline-flex min-h-11 flex-1 items-center justify-center rounded-2xl bg-white/66 px-4 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200/60 transition hover:bg-white/82"
               type="button"
               onClick={async () => {
                 await logoutFamilySession({
@@ -302,10 +302,13 @@ export default function HostRouter() {
   const [flashMessage, setFlashMessage] = useState('');
   const [bootstrapError, setBootstrapError] = useState(null);
   const [bootstrapNonce, setBootstrapNonce] = useState(0);
+  const [temporaryBannerVisible, setTemporaryBannerVisible] = useState(false);
+  const [temporaryBannerClosing, setTemporaryBannerClosing] = useState(false);
   const bootAttemptRef = useRef(0);
   const handledInitialRedirect = useRef(false);
   const authStateLogged = useRef(false);
   const hostRouteLogged = useRef(false);
+  const temporaryBannerTimersRef = useRef([]);
 
   const hostMode = useMemo(
     () => getResolvedHostMode(window.location.hostname),
@@ -662,6 +665,52 @@ export default function HostRouter() {
     handledInitialRedirect.current = false;
   }, [pathname, hostMode, user, profileReady]);
 
+  useEffect(() => {
+    temporaryBannerTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    temporaryBannerTimersRef.current = [];
+
+    const shouldShowTemporaryBanner =
+      hostMode === 'institution' && profile?.access_mode === 'temporary';
+
+    if (!shouldShowTemporaryBanner) {
+      setTemporaryBannerVisible(false);
+      setTemporaryBannerClosing(false);
+      return undefined;
+    }
+
+    setTemporaryBannerVisible(true);
+    setTemporaryBannerClosing(false);
+
+    const closeBanner = () => {
+      setTemporaryBannerClosing(true);
+      const removeTimer = window.setTimeout(() => {
+        setTemporaryBannerVisible(false);
+        setTemporaryBannerClosing(false);
+      }, 320);
+      temporaryBannerTimersRef.current.push(removeTimer);
+    };
+
+    const autoDismissTimer = window.setTimeout(closeBanner, 5000);
+    temporaryBannerTimersRef.current.push(autoDismissTimer);
+
+    return () => {
+      temporaryBannerTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      temporaryBannerTimersRef.current = [];
+    };
+  }, [hostMode, profile?.access_mode]);
+
+  const dismissTemporaryBanner = () => {
+    if (!temporaryBannerVisible || temporaryBannerClosing) return;
+    temporaryBannerTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    temporaryBannerTimersRef.current = [];
+    setTemporaryBannerClosing(true);
+    const removeTimer = window.setTimeout(() => {
+      setTemporaryBannerVisible(false);
+      setTemporaryBannerClosing(false);
+    }, 320);
+    temporaryBannerTimersRef.current.push(removeTimer);
+  };
+
   const AppEntry =
     hostMode === 'student'
       ? StudentApp
@@ -671,9 +720,26 @@ export default function HostRouter() {
 
   const appElement = (
     <>
-      {hostMode === 'institution' && profile?.access_mode === 'temporary' ? (
-        <div className="fixed top-3 left-1/2 z-50 w-[calc(100vw-1rem)] max-w-xl -translate-x-1/2 rounded-2xl border border-amber-200/80 bg-amber-50/95 px-4 py-3 text-xs font-medium text-amber-900 shadow-[0_16px_40px_rgba(120,53,15,0.12)] backdrop-blur md:text-sm">
-          Temporary institution access enabled for testing. Detailed institution permission mapping is still being finalized.
+      {temporaryBannerVisible ? (
+        <div
+          className={[
+            'fixed top-2 left-1/2 z-50 flex w-[calc(100vw-1rem)] max-w-xl -translate-x-1/2 items-start gap-2 rounded-2xl border border-amber-200/80 bg-amber-50/92 px-3 py-2.5 text-[11px] font-medium text-amber-900 shadow-[0_14px_30px_rgba(120,53,15,0.10)] backdrop-blur transition-all duration-300 ease-out md:top-3 md:gap-3 md:px-4 md:py-3 md:text-sm',
+            temporaryBannerClosing
+              ? 'pointer-events-none -translate-y-3 opacity-0'
+              : 'translate-y-0 opacity-100',
+          ].join(' ')}
+        >
+          <div className="min-w-0 flex-1 pr-1 leading-5 md:leading-6">
+            Temporary institution access enabled for testing. Detailed institution permission mapping is still being finalized.
+          </div>
+          <button
+            type="button"
+            onClick={dismissTemporaryBanner}
+            className="shrink-0 rounded-full border border-amber-300/80 bg-white/60 px-2 py-1 text-[10px] font-semibold text-amber-900 transition hover:bg-white/90 md:px-2.5 md:text-[11px]"
+            aria-label="Dismiss temporary access notice"
+          >
+            Close
+          </button>
         </div>
       ) : null}
       {user && !user.emailVerified ? (
