@@ -40,6 +40,7 @@ from .routes.vision_assist import router as vision_assist_router
 from .routes.workflows import router as workflows_router
 from .routes.rubrics import router as rubrics_router
 from .routes.research_features import router as research_features_router
+from .services.research_schema import ensure_institution_research_schema
 from .utils import err_response
 
 
@@ -160,6 +161,11 @@ async def startup_log() -> None:
       print("[STARTUP] Alembic migrations applied")
     except Exception as exc:  # noqa: BLE001
       print(f"[STARTUP] Alembic migration failed: {exc}")
+  try:
+    ensure_institution_research_schema(engine)
+    print("[STARTUP] Institution research schema verified")
+  except Exception as exc:  # noqa: BLE001
+    print(f"[STARTUP] Institution research schema repair failed: {exc}")
   print(f"[STARTUP] API running | gemini_key_present={gemini_present} | APP_ID={app_id}")
 app.include_router(health_router)
 app.include_router(auth_verify_router)
