@@ -4,9 +4,10 @@ import { clearAppSession, loadAppSession, saveAppSession } from "./appSession";
 import { getFirebaseIdToken, logoutFirebase } from "./firebaseAuth";
 
 const VERIFY_SESSION_TIMEOUT_MS = 15000;
-const STARTUP_VERIFY_TIMEOUT_MS = 6000;
+const STARTUP_VERIFY_TIMEOUT_MS = 10000;
 const BACKGROUND_VERIFY_TIMEOUT_MS = 30000;
 const SESSION_BOOTSTRAP_MAX_AGE_MS = 1000 * 60 * 60 * 12;
+const SESSION_DEFERRED_REUSE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
 
 function normalizeRole(role) {
   const value = String(role || "").trim().toLowerCase();
@@ -112,6 +113,18 @@ export function isStartupSessionReusable(session, { firebaseUser, appName } = {}
 
   const ageMs = Date.now() - verifiedAt;
   return ageMs >= 0 && ageMs <= SESSION_BOOTSTRAP_MAX_AGE_MS;
+}
+
+export function isDeferredSessionReusable(session, { firebaseUser, appName } = {}) {
+  if (!session || !firebaseUser?.uid) return false;
+  if (session.uid !== firebaseUser.uid) return false;
+  if (!canAccessApp(session, appName)) return false;
+
+  const verifiedAt = Number(session.verifiedAt || 0);
+  if (!verifiedAt) return false;
+
+  const ageMs = Date.now() - verifiedAt;
+  return ageMs >= 0 && ageMs <= SESSION_DEFERRED_REUSE_MAX_AGE_MS;
 }
 
 export async function verifyFamilySession(firebaseUser, appName, options = {}) {

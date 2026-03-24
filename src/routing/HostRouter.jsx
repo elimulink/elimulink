@@ -16,6 +16,7 @@ import {
   clearFamilySession,
   getBackgroundVerifyTimeoutMs,
   getStartupVerifyTimeoutMs,
+  isDeferredSessionReusable,
   isStartupSessionReusable,
   loadFamilySession,
   logoutFamilySession,
@@ -316,6 +317,7 @@ export default function HostRouter() {
   const hostRouteLogged = useRef(false);
   const temporaryBannerTimersRef = useRef([]);
   const backgroundVerifyAttemptRef = useRef(0);
+  const backgroundRetryTimerRef = useRef(null);
 
   const hostMode = useMemo(
     () => getResolvedHostMode(window.location.hostname),
@@ -456,6 +458,10 @@ export default function HostRouter() {
       setUsedCachedStartupSession(false);
       setBackgroundVerifyState('idle');
       setBackgroundVerifyMessage('');
+      if (backgroundRetryTimerRef.current) {
+        window.clearTimeout(backgroundRetryTimerRef.current);
+        backgroundRetryTimerRef.current = null;
+      }
       const cachedSession = loadFamilySession(user.uid);
       hostDebug('bootstrap:cache', {
         attempt,
@@ -463,6 +469,10 @@ export default function HostRouter() {
         hasCachedProfile: Boolean(cachedSession?.profile),
       });
       const canReuseCachedSession = isStartupSessionReusable(cachedSession, {
+        firebaseUser: user,
+        appName: hostMode,
+      });
+      const canDeferVerifyWithCachedSession = isDeferredSessionReusable(cachedSession, {
         firebaseUser: user,
         appName: hostMode,
       });
@@ -483,6 +493,24 @@ export default function HostRouter() {
         setAccessAllowed(true);
         setBootstrapError(null);
         setUsedCachedStartupSession(true);
+        setBootState('ready');
+        setProfileReady(true);
+        return;
+      }
+
+      if (canDeferVerifyWithCachedSession) {
+        hostDebug('bootstrap:cache_deferred_reuse', {
+          attempt,
+          uid: user.uid,
+          verifiedAt: cachedSession?.verifiedAt || null,
+          accessMode: cachedSession?.access_mode || null,
+        });
+        setProfile(cachedSession.profile);
+        setAccessAllowed(true);
+        setBootstrapError(null);
+        setUsedCachedStartupSession(true);
+        setBackgroundVerifyState('refreshing');
+        setBackgroundVerifyMessage('Reconnecting to verify your workspace access.');
         setBootState('ready');
         setProfileReady(true);
         return;
@@ -529,7 +557,7 @@ export default function HostRouter() {
         });
         const fallbackSession = loadFamilySession(user.uid);
         if (
-          isStartupSessionReusable(fallbackSession, {
+          isDeferredSessionReusable(fallbackSession, {
             firebaseUser: user,
             appName: hostMode,
           })
@@ -544,6 +572,8 @@ export default function HostRouter() {
           setAccessAllowed(allowed);
           setBootstrapError(null);
           setUsedCachedStartupSession(true);
+          setBackgroundVerifyState('refreshing');
+          setBackgroundVerifyMessage('Reconnecting to verify your workspace access.');
           setBootState(allowed ? 'ready' : 'denied');
         } else {
           hostDebug('bootstrap:error_no_fallback', { attempt, uid: user.uid });
@@ -579,7 +609,7 @@ export default function HostRouter() {
       const cachedSession = loadFamilySession(user.uid);
       const shouldRefreshInBackground =
         usedCachedStartupSession &&
-        isStartupSessionReusable(cachedSession, {
+        isDeferredSessionReusable(cachedSession, {
           firebaseUser: user,
           appName: hostMode,
         });
@@ -640,6 +670,14 @@ export default function HostRouter() {
           setAccessAllowed(false);
           setBootstrapError(err || new Error(nextMessage));
           setBootState('error');
+          return;
+        }
+
+        if (!backgroundRetryTimerRef.current) {
+          backgroundRetryTimerRef.current = window.setTimeout(() => {
+            backgroundRetryTimerRef.current = null;
+            setBootstrapNonce((value) => value + 1);
+          }, 12000);
         }
       }
     }
@@ -647,6 +685,10 @@ export default function HostRouter() {
     refreshVerificationInBackground();
     return () => {
       cancelled = true;
+      if (backgroundRetryTimerRef.current) {
+        window.clearTimeout(backgroundRetryTimerRef.current);
+        backgroundRetryTimerRef.current = null;
+      }
     };
   }, [authReady, profileReady, bootState, user, hostMode, bootstrapNonce, usedCachedStartupSession]);
 
