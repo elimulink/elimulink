@@ -1,12 +1,14 @@
 import asyncio
 import os
+import time
 from typing import Any, Dict
 
 from fastapi import HTTPException
 
 from app.db.supabase_client import get_supabase_client
 
-AI_ACCESS_TIMEOUT_SECONDS = 8
+AI_ACCESS_TIMEOUT_SECONDS = 20
+AI_ACCESS_CACHE_TTL_SECONDS = 20
 TEMP_INSTITUTION_ACCESS_ENABLED = str(os.getenv("TEMP_INSTITUTION_ACCESS_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
 PUBLIC_EMAIL_DOMAINS = {
     "gmail.com",
@@ -20,6 +22,7 @@ PUBLIC_EMAIL_DOMAINS = {
     "gmx.com",
     "mail.com",
 }
+_ACCESS_CACHE: dict[str, tuple[float, Dict[str, Any]]] = {}
 
 
 def _normalize_role(role: str | None, app_name: str) -> str:
@@ -81,11 +84,42 @@ def _temporary_institution_access(uid: str, email: str, reason: str) -> Dict[str
     }
 
 
+def _cache_key(uid: str, app_name: str) -> str:
+    return f"{uid}:{app_name}"
+
+
+def _get_cached_access(uid: str, app_name: str) -> Dict[str, Any] | None:
+    cached = _ACCESS_CACHE.get(_cache_key(uid, app_name))
+    if not cached:
+        return None
+    expires_at, payload = cached
+    if expires_at <= time.monotonic():
+        _ACCESS_CACHE.pop(_cache_key(uid, app_name), None)
+        return None
+    return dict(payload)
+
+
+def _store_cached_access(uid: str, app_name: str, payload: Dict[str, Any]) -> None:
+    if payload.get("allowed") is not True:
+        return
+    _ACCESS_CACHE[_cache_key(uid, app_name)] = (
+        time.monotonic() + AI_ACCESS_CACHE_TTL_SECONDS,
+        dict(payload),
+    )
+
+
 async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[str, Any]:
+    cached_payload = _get_cached_access(uid, app_name)
+    if cached_payload is not None:
+        print(f"[AI_ACCESS] resolve:cache_hit uid={uid} app={app_name}")
+        return cached_payload
+
     supabase = get_supabase_client()
     if supabase is None:
         if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _is_work_email(email):
-            return _temporary_institution_access(uid, email, "supabase_unavailable")
+            payload = _temporary_institution_access(uid, email, "supabase_unavailable")
+            _store_cached_access(uid, app_name, payload)
+            return payload
         raise HTTPException(
             status_code=500,
             detail="Supabase client not configured",
@@ -117,7 +151,7 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
     if not rows:
         if app_name == "public":
             print(f"[AI_ACCESS] resolve:fallback_public uid={uid}")
-            return {
+            payload = {
                 "allowed": True,
                 "uid": uid,
                 "email": email,
@@ -127,8 +161,12 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
                 "default_app": "public",
                 "access_mode": "verified",
             }
+            _store_cached_access(uid, app_name, payload)
+            return payload
         if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _is_work_email(email):
-            return _temporary_institution_access(uid, email, "missing_profile")
+            payload = _temporary_institution_access(uid, email, "missing_profile")
+            _store_cached_access(uid, app_name, payload)
+            return payload
         return _deny()
 
     user = rows[0]
@@ -141,7 +179,7 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
 
     if app_name == "public" and ("public" in app_access or len(app_access) > 0):
         print(f"[AI_ACCESS] resolve:allow_public uid={uid} access={app_access}")
-        return {
+        payload = {
             "allowed": True,
             "uid": user.get("uid"),
             "email": user.get("email") or email,
@@ -151,15 +189,19 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
             "default_app": user.get("default_app") or "public",
             "access_mode": "verified",
         }
+        _store_cached_access(uid, app_name, payload)
+        return payload
 
     if app_name not in app_access:
         if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _is_work_email(user.get("email") or email):
-            return _temporary_institution_access(uid, user.get("email") or email, "missing_institution_mapping")
+            payload = _temporary_institution_access(uid, user.get("email") or email, "missing_institution_mapping")
+            _store_cached_access(uid, app_name, payload)
+            return payload
         print(f"[AI_ACCESS] resolve:deny_missing_app uid={uid} app={app_name} access={app_access}")
         return _deny()
 
     print(f"[AI_ACCESS] resolve:allow uid={uid} app={app_name} access={app_access}")
-    return {
+    payload = {
         "allowed": True,
         "uid": user.get("uid"),
         "email": user.get("email") or email,
@@ -169,3 +211,5 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
         "default_app": user.get("default_app") or app_name,
         "access_mode": "verified",
     }
+    _store_cached_access(uid, app_name, payload)
+    return payload

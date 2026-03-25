@@ -16,6 +16,7 @@ import {
   clearFamilySession,
   getBackgroundVerifyTimeoutMs,
   getStartupVerifyTimeoutMs,
+  isTemporaryVerifyFailure,
   isDeferredSessionReusable,
   isStartupSessionReusable,
   loadFamilySession,
@@ -33,7 +34,9 @@ import { getResolvedHostMode } from './hostMode';
 
 const APP_ID = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const DEBUG_HOST_ROUTER = import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_HOST_ROUTER || '').trim() === '1';
-const BOOTSTRAP_TIMEOUT_MS = 20000;
+const BOOTSTRAP_TIMEOUT_MS = Math.max(getStartupVerifyTimeoutMs() + 15000, 60000);
+const BOOTSTRAP_RETRY_DELAY_MS = 4000;
+const BOOTSTRAP_MAX_TEMP_FAILURES = 3;
 
 function hostLog(...args) {
   if (DEBUG_HOST_ROUTER) console.log(...args);
@@ -121,7 +124,7 @@ function sanitizeReturnTo(returnToRaw, { mode, isAuthenticated = false } = {}) {
   return value;
 }
 
-function LoadingScreen() {
+function LoadingScreen({ message = 'Verifying your workspace access and preparing the app.', retrying = false }) {
   return (
     <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef6ff_100%)] px-2 py-4 text-slate-900 sm:px-4 sm:py-6">
       <div className="mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-[30rem] items-center justify-center sm:min-h-[calc(100dvh-3rem)]">
@@ -132,8 +135,13 @@ function LoadingScreen() {
           <div className="mt-4 text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-700/80 sm:mt-5 sm:text-[11px]">ElimuLink</div>
           <div className="mt-3 text-[clamp(1.45rem,5vw,1.9rem)] font-semibold tracking-tight text-slate-950 [text-shadow:0_8px_28px_rgba(255,255,255,0.72)] sm:text-xl">Restoring your session</div>
           <div className="mx-auto mt-2 max-w-[26rem] text-sm leading-6 text-slate-500 [text-shadow:0_6px_20px_rgba(255,255,255,0.6)]">
-            Verifying your workspace access and preparing the app.
+            {message}
           </div>
+          {retrying ? (
+            <div className="mx-auto mt-4 inline-flex items-center rounded-full border border-sky-200/80 bg-white/72 px-3 py-1.5 text-[11px] font-semibold text-sky-700 shadow-[0_10px_24px_rgba(14,116,144,0.08)]">
+              Retrying connection to institution services
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -151,7 +159,7 @@ function BootstrapErrorScreen({ hostMode, error, onRetry }) {
           <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-700/80 sm:text-[11px]">Session Check</div>
           <h1 className="mt-3 text-[clamp(1.45rem,5vw,2rem)] font-semibold tracking-tight text-slate-950">We couldn&apos;t verify this {hostMode} session yet</h1>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            Firebase sign-in succeeded, but the backend verification route did not complete. This usually means the deployed API is missing the current AI-family verify endpoint.
+            Firebase sign-in succeeded, but the workspace verification request did not complete. This is usually a temporary backend or network availability problem.
           </p>
           <div className="mt-5 rounded-2xl bg-amber-50/72 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200/65 backdrop-blur-sm">
             {details}
@@ -306,6 +314,7 @@ export default function HostRouter() {
   const [flashMessage, setFlashMessage] = useState('');
   const [bootstrapError, setBootstrapError] = useState(null);
   const [bootstrapNonce, setBootstrapNonce] = useState(0);
+  const [bootstrapStatusMessage, setBootstrapStatusMessage] = useState('');
   const [usedCachedStartupSession, setUsedCachedStartupSession] = useState(false);
   const [backgroundVerifyState, setBackgroundVerifyState] = useState('idle');
   const [backgroundVerifyMessage, setBackgroundVerifyMessage] = useState('');
@@ -318,6 +327,8 @@ export default function HostRouter() {
   const temporaryBannerTimersRef = useRef([]);
   const backgroundVerifyAttemptRef = useRef(0);
   const backgroundRetryTimerRef = useRef(null);
+  const bootstrapRetryTimerRef = useRef(null);
+  const temporaryBootstrapFailureRef = useRef(0);
 
   const hostMode = useMemo(
     () => getResolvedHostMode(window.location.hostname),
@@ -455,12 +466,17 @@ export default function HostRouter() {
 
       setBootState('loading');
       setBootstrapError(null);
+      setBootstrapStatusMessage('');
       setUsedCachedStartupSession(false);
       setBackgroundVerifyState('idle');
       setBackgroundVerifyMessage('');
       if (backgroundRetryTimerRef.current) {
         window.clearTimeout(backgroundRetryTimerRef.current);
         backgroundRetryTimerRef.current = null;
+      }
+      if (bootstrapRetryTimerRef.current) {
+        window.clearTimeout(bootstrapRetryTimerRef.current);
+        bootstrapRetryTimerRef.current = null;
       }
       const cachedSession = loadFamilySession(user.uid);
       hostDebug('bootstrap:cache', {
@@ -492,7 +508,9 @@ export default function HostRouter() {
         setProfile(cachedSession.profile);
         setAccessAllowed(true);
         setBootstrapError(null);
+        setBootstrapStatusMessage('');
         setUsedCachedStartupSession(true);
+        temporaryBootstrapFailureRef.current = 0;
         setBootState('ready');
         setProfileReady(true);
         return;
@@ -508,9 +526,11 @@ export default function HostRouter() {
         setProfile(cachedSession.profile);
         setAccessAllowed(true);
         setBootstrapError(null);
+        setBootstrapStatusMessage('');
         setUsedCachedStartupSession(true);
         setBackgroundVerifyState('refreshing');
         setBackgroundVerifyMessage('Reconnecting to verify your workspace access.');
+        temporaryBootstrapFailureRef.current = 0;
         setBootState('ready');
         setProfileReady(true);
         return;
@@ -536,7 +556,9 @@ export default function HostRouter() {
         const allowed = canAccessApp(familySession, hostMode);
         setAccessAllowed(allowed);
         setBootstrapError(null);
+        setBootstrapStatusMessage('');
         setUsedCachedStartupSession(false);
+        temporaryBootstrapFailureRef.current = 0;
         setBootState(allowed ? 'ready' : 'denied');
       } catch (err) {
         if (cancelled || attempt !== bootAttemptRef.current) {
@@ -556,6 +578,7 @@ export default function HostRouter() {
           verifyUrl: err?.verifyUrl || null,
         });
         const fallbackSession = loadFamilySession(user.uid);
+        const temporaryFailure = isTemporaryVerifyFailure(err);
         if (
           isDeferredSessionReusable(fallbackSession, {
             firebaseUser: user,
@@ -571,15 +594,32 @@ export default function HostRouter() {
           const allowed = canAccessApp(fallbackSession, hostMode);
           setAccessAllowed(allowed);
           setBootstrapError(null);
+          setBootstrapStatusMessage('');
           setUsedCachedStartupSession(true);
           setBackgroundVerifyState('refreshing');
           setBackgroundVerifyMessage('Reconnecting to verify your workspace access.');
+          temporaryBootstrapFailureRef.current = 0;
           setBootState(allowed ? 'ready' : 'denied');
+        } else if (temporaryFailure && temporaryBootstrapFailureRef.current < BOOTSTRAP_MAX_TEMP_FAILURES) {
+          temporaryBootstrapFailureRef.current += 1;
+          setProfile(null);
+          setAccessAllowed(true);
+          setBootstrapError(null);
+          setBootstrapStatusMessage('Institution services are waking up. Retrying workspace verification...');
+          setBootState('loading');
+          if (!bootstrapRetryTimerRef.current) {
+            bootstrapRetryTimerRef.current = window.setTimeout(() => {
+              bootstrapRetryTimerRef.current = null;
+              setBootstrapNonce((value) => value + 1);
+            }, BOOTSTRAP_RETRY_DELAY_MS * temporaryBootstrapFailureRef.current);
+          }
         } else {
           hostDebug('bootstrap:error_no_fallback', { attempt, uid: user.uid });
           setProfile(null);
           setAccessAllowed(true);
           setBootstrapError(err || new Error('Session bootstrap failed'));
+          setBootstrapStatusMessage('');
+          temporaryBootstrapFailureRef.current = 0;
           setBootState('error');
         }
       } finally {
@@ -597,6 +637,10 @@ export default function HostRouter() {
     loadProfile();
     return () => {
       cancelled = true;
+      if (bootstrapRetryTimerRef.current) {
+        window.clearTimeout(bootstrapRetryTimerRef.current);
+        bootstrapRetryTimerRef.current = null;
+      }
     };
   }, [authReady, user, hostMode, bootstrapNonce]);
 
@@ -708,7 +752,7 @@ export default function HostRouter() {
       setProfileReady(true);
     }, BOOTSTRAP_TIMEOUT_MS);
     return () => window.clearTimeout(timeoutId);
-  }, [authReady, profileReady, bootState, user?.uid, hostMode, pathname]);
+  }, [authReady, profileReady, bootState, user?.uid, hostMode, pathname, bootstrapNonce]);
 
   useEffect(() => {
     if (!authReady || !profileReady || handledInitialRedirect.current) return;
@@ -935,24 +979,75 @@ export default function HostRouter() {
     const activeUser = user || auth?.currentUser || null;
     if (!activeUser) throw new Error('Your session is no longer available. Please sign in again.');
     await unlockAction(activeUser);
-    const refreshedSession = await verifyFamilySession(activeUser, hostMode);
-    const allowed = canAccessApp(refreshedSession, hostMode);
-    if (!allowed) {
-      setAccessAllowed(false);
-      setBootState('denied');
-      throw new Error('Your current account no longer has access to this workspace.');
+    try {
+      const refreshedSession = await verifyFamilySession(activeUser, hostMode);
+      const allowed = canAccessApp(refreshedSession, hostMode);
+      if (!allowed) {
+        setAccessAllowed(false);
+        setBootState('denied');
+        throw new Error('Your current account no longer has access to this workspace.');
+      }
+      setProfile({ ...(profile || {}), ...(refreshedSession?.profile || {}) });
+      setAccessAllowed(true);
+      setBootState('ready');
+      setBackgroundVerifyState('idle');
+      setBackgroundVerifyMessage('');
+      setUsedCachedStartupSession(false);
+      clearLock();
+      return;
+    } catch (err) {
+      const status = err?.status ?? 0;
+      const fallbackSession = loadFamilySession(activeUser.uid);
+      const canReuseFallback =
+        status !== 401 &&
+        status !== 403 &&
+        isDeferredSessionReusable(fallbackSession, {
+          firebaseUser: activeUser,
+          appName: hostMode,
+        });
+
+      if (!canReuseFallback) {
+        throw err;
+      }
+
+      const allowed = canAccessApp(fallbackSession, hostMode);
+      hostDebug('secure_unlock:fallback_session', {
+        uid: activeUser.uid,
+        hostMode,
+        status,
+        message: String(err?.message || err || 'verify failed'),
+        allowed,
+      });
+
+      if (!allowed) {
+        setAccessAllowed(false);
+        setBootState('denied');
+        throw new Error('Your current account no longer has access to this workspace.');
+      }
+
+      setProfile({ ...(profile || {}), ...(fallbackSession?.profile || {}) });
+      setAccessAllowed(true);
+      setBootState('ready');
+      setBackgroundVerifyState('refreshing');
+      setBackgroundVerifyMessage('Reconnecting to verify your workspace access.');
+      setUsedCachedStartupSession(true);
+      clearLock();
+      return;
     }
-    setProfile({ ...(profile || {}), ...(refreshedSession?.profile || {}) });
-    setAccessAllowed(true);
-    setBootState('ready');
-    clearLock();
   };
 
   if (firebaseInitErrorMessage) {
     return <div style={{ padding: 16 }}>Firebase init failed: {firebaseInitErrorMessage}</div>;
   }
 
-  if (!authReady || !profileReady || bootState === 'loading') return <LoadingScreen />;
+  if (!authReady || !profileReady || bootState === 'loading') {
+    return (
+      <LoadingScreen
+        message={bootstrapStatusMessage || 'Verifying your workspace access and preparing the app.'}
+        retrying={Boolean(bootstrapStatusMessage)}
+      />
+    );
+  }
 
   if (bootState === 'error' && user && !user.isAnonymous) {
     return (
@@ -961,6 +1056,8 @@ export default function HostRouter() {
         error={bootstrapError}
         onRetry={() => {
           setBootstrapError(null);
+          setBootstrapStatusMessage('');
+          temporaryBootstrapFailureRef.current = 0;
           setBootState('loading');
           setProfileReady(false);
           setBootstrapNonce((value) => value + 1);

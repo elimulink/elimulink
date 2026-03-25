@@ -3,11 +3,172 @@ import { notifyAuthChanged } from "../lib/apiClient";
 import { clearAppSession, loadAppSession, saveAppSession } from "./appSession";
 import { getFirebaseIdToken, logoutFirebase } from "./firebaseAuth";
 
-const VERIFY_SESSION_TIMEOUT_MS = 15000;
-const STARTUP_VERIFY_TIMEOUT_MS = 10000;
-const BACKGROUND_VERIFY_TIMEOUT_MS = 30000;
+const VERIFY_SESSION_TIMEOUT_MS = 30000;
+const STARTUP_VERIFY_TIMEOUT_MS = 45000;
+const BACKGROUND_VERIFY_TIMEOUT_MS = 45000;
 const SESSION_BOOTSTRAP_MAX_AGE_MS = 1000 * 60 * 60 * 12;
 const SESSION_DEFERRED_REUSE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
+const VERIFY_NETWORK_RETRY_DELAY_MS = 2500;
+const VERIFY_NETWORK_RETRY_COUNT = 2;
+const VERIFY_RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const inFlightVerifyRequests = new Map();
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function buildVerifyNetworkError(error, { timeoutMs, verifyUrl, appName } = {}) {
+  const err = new Error(
+    error?.name === "AbortError"
+      ? `Workspace verification timed out after ${Math.round(timeoutMs / 1000)}s`
+      : String(error?.message || error || "Workspace verification failed")
+  );
+  err.status = 0;
+  err.verifyUrl = verifyUrl;
+  err.appName = appName;
+  err.temporary = true;
+  return err;
+}
+
+function isRetryableVerifyStatus(status) {
+  return VERIFY_RETRYABLE_STATUS.has(Number(status || 0));
+}
+
+export function isTemporaryVerifyFailure(error) {
+  const status = Number(error?.status || 0);
+  if (status === 401 || status === 403) return false;
+  if (status === 0) return true;
+  return isRetryableVerifyStatus(status) || error?.temporary === true;
+}
+
+function buildInFlightVerifyKey(firebaseUser, normalizedApp, forceRefreshToken) {
+  return [
+    firebaseUser?.uid || "anonymous",
+    normalizedApp,
+    forceRefreshToken ? "refresh" : "cached",
+  ].join(":");
+}
+
+async function runVerifyFamilySession(firebaseUser, normalizedApp, { timeoutMs, forceRefreshToken }) {
+  const token = await getFirebaseIdToken(forceRefreshToken);
+  if (!token) throw new Error("Missing Firebase ID token");
+  const verifyUrl = apiUrl("/api/auth/verify-app-access");
+  let response;
+
+  for (let attempt = 0; attempt <= VERIFY_NETWORK_RETRY_COUNT; attempt += 1) {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeoutId = controller
+      ? window.setTimeout(() => controller.abort(new Error("Verify session timed out")), timeoutMs)
+      : null;
+
+    try {
+      response = await fetch(verifyUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ app: normalizedApp }),
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      if (timeoutId) window.clearTimeout(timeoutId);
+    } catch (error) {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      const err = buildVerifyNetworkError(error, {
+        timeoutMs,
+        verifyUrl,
+        appName: normalizedApp,
+      });
+      const canRetry = attempt < VERIFY_NETWORK_RETRY_COUNT;
+      console.error("[FAMILY_SESSION] verify:network_error", {
+        app: normalizedApp,
+        verifyUrl,
+        message: err.message,
+        attempt: attempt + 1,
+        retrying: canRetry,
+      });
+      if (!canRetry) {
+        throw err;
+      }
+      await wait(VERIFY_NETWORK_RETRY_DELAY_MS * (attempt + 1));
+      continue;
+    }
+
+    console.info("[FAMILY_SESSION] verify:response", {
+      app: normalizedApp,
+      status: response.status,
+      ok: response.ok,
+      verifyUrl,
+      attempt: attempt + 1,
+    });
+
+    let data = {};
+    try {
+      data = await response.json();
+    } catch (error) {
+      const err = new Error(
+        response.ok
+          ? "Workspace verification returned invalid JSON"
+          : `Verify app access failed (${response.status})`
+      );
+      err.status = response.status;
+      err.verifyUrl = verifyUrl;
+      err.appName = normalizedApp;
+      err.temporary = isRetryableVerifyStatus(response.status);
+      console.error("[FAMILY_SESSION] verify:invalid_json", {
+        app: normalizedApp,
+        status: response.status,
+        verifyUrl,
+        message: String(error?.message || error || "Invalid JSON"),
+      });
+      throw err;
+    }
+
+    if (!response.ok) {
+      const message = data?.detail || data?.error || data?.message || `Verify app access failed (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      error.verifyUrl = verifyUrl;
+      error.appName = normalizedApp;
+      error.temporary = isRetryableVerifyStatus(response.status);
+      const canRetry = error.temporary && attempt < VERIFY_NETWORK_RETRY_COUNT;
+      console.error("[FAMILY_SESSION] verify:failed", {
+        app: normalizedApp,
+        status: response.status,
+        verifyUrl,
+        message,
+        body: data,
+        attempt: attempt + 1,
+        retrying: canRetry,
+      });
+      if (!canRetry) {
+        throw error;
+      }
+      await wait(VERIFY_NETWORK_RETRY_DELAY_MS * (attempt + 1));
+      continue;
+    }
+
+    const normalized = normalizeVerifyResponse(data, {
+      appName: normalizedApp,
+      firebaseUser,
+    });
+    const session = buildFamilySession(normalized, { firebaseUser });
+    saveAppSession(session);
+    notifyAuthChanged();
+    console.info("[FAMILY_SESSION] verify:success", {
+      app: normalizedApp,
+      uid: session.uid,
+      role: session.role,
+      allowed: session.allowed,
+      accessMode: session.access_mode,
+      temporaryReason: session.temporary_reason,
+      access: session.app_access,
+    });
+    return session;
+  }
+
+  throw new Error("Workspace verification did not complete");
+}
 
 function normalizeRole(role) {
   const value = String(role || "").trim().toLowerCase();
@@ -139,104 +300,20 @@ export async function verifyFamilySession(firebaseUser, appName, options = {}) {
     timeoutMs,
     forceRefreshToken,
   });
-  const token = await getFirebaseIdToken(forceRefreshToken);
-  if (!token) throw new Error("Missing Firebase ID token");
-  const verifyUrl = apiUrl("/api/auth/verify-app-access");
-  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timeoutId = controller
-    ? window.setTimeout(() => controller.abort(new Error("Verify session timed out")), timeoutMs)
-    : null;
-
-  let response;
-  try {
-    response = await fetch(verifyUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ app: normalizedApp }),
-      ...(controller ? { signal: controller.signal } : {}),
-    });
-  } catch (error) {
-    if (timeoutId) window.clearTimeout(timeoutId);
-    const err = new Error(
-      error?.name === "AbortError"
-        ? `Workspace verification timed out after ${Math.round(timeoutMs / 1000)}s`
-        : String(error?.message || error || "Workspace verification failed")
-    );
-    err.status = 0;
-    err.verifyUrl = verifyUrl;
-    err.appName = normalizedApp;
-    console.error("[FAMILY_SESSION] verify:network_error", {
-      app: normalizedApp,
-      verifyUrl,
-      message: err.message,
-    });
-    throw err;
+  const inFlightKey = buildInFlightVerifyKey(firebaseUser, normalizedApp, forceRefreshToken);
+  if (inFlightVerifyRequests.has(inFlightKey)) {
+    return inFlightVerifyRequests.get(inFlightKey);
   }
 
-  if (timeoutId) window.clearTimeout(timeoutId);
-  console.info("[FAMILY_SESSION] verify:response", {
-    app: normalizedApp,
-    status: response.status,
-    ok: response.ok,
-    verifyUrl,
+  const requestPromise = runVerifyFamilySession(firebaseUser, normalizedApp, {
+    timeoutMs,
+    forceRefreshToken,
+  }).finally(() => {
+    inFlightVerifyRequests.delete(inFlightKey);
   });
 
-  let data = {};
-  try {
-    data = await response.json();
-  } catch (error) {
-    const err = new Error(
-      response.ok
-        ? "Workspace verification returned invalid JSON"
-        : `Verify app access failed (${response.status})`
-    );
-    err.status = response.status;
-    err.verifyUrl = verifyUrl;
-    err.appName = normalizedApp;
-    console.error("[FAMILY_SESSION] verify:invalid_json", {
-      app: normalizedApp,
-      status: response.status,
-      verifyUrl,
-      message: String(error?.message || error || "Invalid JSON"),
-    });
-    throw err;
-  }
-  if (!response.ok) {
-    const message = data?.detail || data?.error || data?.message || `Verify app access failed (${response.status})`;
-    const error = new Error(message);
-    error.status = response.status;
-    error.verifyUrl = verifyUrl;
-    error.appName = normalizedApp;
-    console.error("[FAMILY_SESSION] verify:failed", {
-      app: normalizedApp,
-      status: response.status,
-      verifyUrl,
-      message,
-      body: data,
-    });
-    throw error;
-  }
-
-  const normalized = normalizeVerifyResponse(data, {
-    appName: normalizedApp,
-    firebaseUser,
-  });
-  const session = buildFamilySession(normalized, { firebaseUser });
-  saveAppSession(session);
-  notifyAuthChanged();
-  console.info("[FAMILY_SESSION] verify:success", {
-    app: normalizedApp,
-    uid: session.uid,
-    role: session.role,
-    allowed: session.allowed,
-    accessMode: session.access_mode,
-    temporaryReason: session.temporary_reason,
-    access: session.app_access,
-  });
-  return session;
+  inFlightVerifyRequests.set(inFlightKey, requestPromise);
+  return requestPromise;
 }
 
 export function getStartupVerifyTimeoutMs() {
