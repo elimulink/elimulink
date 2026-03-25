@@ -8,8 +8,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, selectinload
 
-from ..database import SessionLocal
+from ..database import SessionLocal, engine
 from ..models.research import Conversation, Message, MessageSource, ShareLink, ShareLinkMessage, Source
+from ..services.research_schema import ensure_institution_research_schema
 
 router = APIRouter(prefix="/api/v1/ai/institution", tags=["institution-research-features"])
 
@@ -242,6 +243,7 @@ class CreateShareLinkRequest(BaseModel):
 
 @router.post("/conversations")
 def create_conversation(body: CreateConversationRequest) -> dict[str, Any]:
+    ensure_institution_research_schema(engine)
     with SessionLocal() as db:
         conversation = Conversation(
             id=make_id("conv"),
