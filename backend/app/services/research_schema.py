@@ -205,6 +205,11 @@ def ensure_institution_research_schema(engine: Engine) -> None:
                 )
             )
 
+        if "message_sources" in table_names:
+            message_source_columns = {column["name"] for column in inspector.get_columns("message_sources")}
+            if "citation_id" not in message_source_columns:
+                conn.execute(text("ALTER TABLE message_sources ADD COLUMN citation_id VARCHAR"))
+
         share_columns = {column["name"] for column in inspector.get_columns("share_links")} if "share_links" in table_names else set()
         if "share_links" in table_names:
             if "access_level" not in share_columns:
