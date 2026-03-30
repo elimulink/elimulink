@@ -4,6 +4,14 @@ from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 
+def _compiled_column_type_sql(engine: Engine, table_name: str, column_name: str) -> str:
+    inspector = inspect(engine)
+    for column in inspector.get_columns(table_name):
+        if column["name"] == column_name:
+            return column["type"].compile(dialect=engine.dialect)
+    raise KeyError(f"Column {table_name}.{column_name} not found")
+
+
 def ensure_institution_research_schema(engine: Engine) -> None:
     with engine.begin() as conn:
         dialect = conn.dialect.name
@@ -125,10 +133,10 @@ def ensure_institution_research_schema(engine: Engine) -> None:
 
             conn.execute(
                 text(
-                    """
+                    f"""
                     CREATE TABLE IF NOT EXISTS notebook_items (
                         id VARCHAR PRIMARY KEY,
-                        conversation_id VARCHAR NOT NULL REFERENCES conversations(id),
+                        conversation_id {_compiled_column_type_sql(engine, "conversations", "id")} NOT NULL REFERENCES conversations(id),
                         owner_uid VARCHAR NOT NULL,
                         title VARCHAR NOT NULL DEFAULT 'Untitled Note',
                         content TEXT NOT NULL DEFAULT '',
@@ -181,10 +189,10 @@ def ensure_institution_research_schema(engine: Engine) -> None:
         if "notebook_items" not in table_names:
             conn.execute(
                 text(
-                    """
+                    f"""
                     CREATE TABLE notebook_items (
                         id VARCHAR PRIMARY KEY,
-                        conversation_id VARCHAR NOT NULL REFERENCES conversations(id),
+                        conversation_id {_compiled_column_type_sql(engine, "conversations", "id")} NOT NULL REFERENCES conversations(id),
                         owner_uid VARCHAR NOT NULL,
                         title VARCHAR NOT NULL DEFAULT 'Untitled Note',
                         content TEXT NOT NULL DEFAULT '',
