@@ -102,6 +102,7 @@ def ensure_institution_research_schema(engine: Engine) -> None:
                     """
                 )
             )
+            conn.execute(text("ALTER TABLE message_sources ADD COLUMN IF NOT EXISTS citation_id VARCHAR"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_message_sources_message_id ON message_sources (message_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_message_sources_source_id ON message_sources (source_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_message_sources_citation_id ON message_sources (citation_id)"))
