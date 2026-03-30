@@ -3,15 +3,19 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import relationship
 
 from ..database import Base
 
 
+CONVERSATION_KEY_TYPE = String().with_variant(PGUUID(as_uuid=False), "postgresql")
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
-    id = Column(String, primary_key=True, index=True)
+    id = Column(CONVERSATION_KEY_TYPE, primary_key=True, index=True)
     family = Column(String, nullable=False, index=True, default="ai")
     app = Column(String, nullable=False, index=True, default="institution")
     title = Column(String, nullable=False, default="New conversation")
@@ -32,7 +36,7 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(String, primary_key=True, index=True)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    conversation_id = Column(CONVERSATION_KEY_TYPE, ForeignKey("conversations.id"), nullable=False, index=True)
     role = Column(String, nullable=False, index=True)
     content = Column(Text, nullable=False)
     citations_json = Column(JSON, nullable=False, default=list)
@@ -78,7 +82,7 @@ class ShareLink(Base):
     __tablename__ = "share_links"
 
     id = Column(String, primary_key=True, index=True)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    conversation_id = Column(CONVERSATION_KEY_TYPE, ForeignKey("conversations.id"), nullable=False, index=True)
     visibility = Column(String, nullable=False, default="unlisted")
     access_level = Column(String, nullable=False, default="anyone-with-link")
     invited_emails_json = Column(JSON, nullable=False, default=list)
@@ -109,7 +113,7 @@ class NotebookItem(Base):
     __tablename__ = "notebook_items"
 
     id = Column(String, primary_key=True, index=True)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    conversation_id = Column(CONVERSATION_KEY_TYPE, ForeignKey("conversations.id"), nullable=False, index=True)
     owner_uid = Column(String, nullable=False, index=True)
     title = Column(String, nullable=False, default="Untitled Note")
     content = Column(Text, nullable=False, default="")
