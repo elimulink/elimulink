@@ -15,6 +15,7 @@
 }
 
 .els-page {
+  height: 100dvh;
   min-height: 100dvh;
   background: var(--els-bg);
   display: grid;
@@ -53,7 +54,8 @@
 
 .els-desktop-shell {
   width: min(1220px, 100%);
-  min-height: 760px;
+  height: min(760px, calc(100dvh - 56px));
+  min-height: 0;
   border-radius: 18px;
   position: relative;
   display: grid;
@@ -66,6 +68,7 @@
 
 .els-card {
   width: min(590px, 92vw);
+  max-height: calc(100dvh - 120px);
   padding: 34px 40px 30px;
   border-radius: 34px;
   background: linear-gradient(180deg, rgba(247, 250, 255, 0.66), rgba(236, 242, 249, 0.58));
@@ -321,6 +324,7 @@
   }
 
   .els-desktop-shell {
+    height: auto;
     min-height: auto;
     width: 100%;
     background: transparent;
@@ -331,6 +335,7 @@
   .els-card {
     width: calc(100vw - 16px);
     max-width: 100%;
+    max-height: none;
     padding: 22px 18px 20px;
     border-radius: 26px;
   }

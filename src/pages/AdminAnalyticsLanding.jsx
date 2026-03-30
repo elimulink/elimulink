@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Bell, CalendarDays, ClipboardCheck, Clock3, FileCheck2, LayoutDashboard,
@@ -38,6 +38,8 @@ import {
 import { auth } from "../lib/firebase";
 import NewChatLanding from "./NewChatLanding";
 import AdminActionMenu from "../components/admin/AdminActionMenu";
+import AdminAttendancePanel from "../components/admin/AdminAttendancePanel";
+import DesktopSettingsLauncher from "../shared/settings/DesktopSettingsLauncher.jsx";
 import AdminStarterPanel from "../components/admin/AdminStarterPanel";
 import {
   approveWorkflow, attachWorkflowRubric, createWorkflow, evaluateWorkflowDraft,
@@ -413,324 +415,7 @@ function ResultsManagementPanel({ workflows = [], onOpenWorkflows, onOpenAnalyti
 }
 
 function AttendanceMonitoringPanel() {
-  const [modal, setModal] = useState(null);
-
-  const attendanceMenuItems = [
-    {
-      key: "new",
-      label: "New",
-      children: [
-        { key: "new-doc", label: "Documents", onClick: () => setModal("documents") },
-        { key: "new-template", label: "From a template", onClick: () => setModal("templates") },
-      ],
-    },
-    { type: "separator" },
-    { key: "copy", label: "Make a copy", onClick: () => setModal("copy") },
-    {
-      key: "share",
-      label: "Share",
-      children: [
-        { key: "share-others", label: "Share to others", onClick: () => setModal("share") },
-        { key: "publish", label: "Publish to web", onClick: () => setModal("publish") },
-      ],
-    },
-    {
-      key: "email",
-      label: "Email",
-      children: [
-        { key: "email-file", label: "Email this file", onClick: () => setModal("email-file") },
-        { key: "email-collab", label: "Email collaborators", onClick: () => setModal("email-collab") },
-      ],
-    },
-    { key: "rename", label: "Rename", onClick: () => setModal("rename") },
-    {
-      key: "move",
-      label: "Move",
-      children: [
-        { key: "move-notebook", label: "Notebook", onClick: () => setModal("move-notebook") },
-        { key: "move-newchat", label: "NewChat", onClick: () => setModal("move-newchat") },
-      ],
-    },
-    { key: "shortcut", label: "Add shortcut to Drive", onClick: () => setModal("shortcut") },
-    { key: "trash", label: "Move to trash", onClick: () => setModal("trash") },
-    { key: "page-setup", label: "Page setup", onClick: () => setModal("page-setup") },
-    { key: "print", label: "Print (Ctrl+P)", onClick: () => window.print() },
-    { key: "language", label: "Language", onClick: () => setModal("language") },
-    { key: "security", label: "Security limitations", onClick: () => setModal("security") },
-    { key: "details", label: "Details", onClick: () => setModal("details") },
-  ];
-
-  const rows = [
-    {
-      classType: "Physical",
-      unit: "CSC 201",
-      session: "Mon 8:00 AM",
-      lecturer: "Dr. Mutua",
-      attendance: "88%",
-      risk: "Low",
-    },
-    {
-      classType: "Online",
-      unit: "BUS 110",
-      session: "Tue 2:00 PM",
-      lecturer: "Ms. Ndinda",
-      attendance: "63%",
-      risk: "Medium",
-    },
-    {
-      classType: "Physical",
-      unit: "EDU 101",
-      session: "Wed 11:00 AM",
-      lecturer: "Mr. Kilonzo",
-      attendance: "49%",
-      risk: "High",
-    },
-    {
-      classType: "Online",
-      unit: "CSC 315",
-      session: "Thu 4:00 PM",
-      lecturer: "Dr. Wambua",
-      attendance: "71%",
-      risk: "Medium",
-    },
-  ];
-
-  return (
-    <>
-      <div className="space-y-5">
-        <AdminStarterPanel
-          title="Attendance Monitoring"
-          subtitle="Track online and physical attendance, export snapshots, and identify participation risks early."
-          stats={[
-            { label: "Average attendance", value: "84%", note: "Across all monitored sessions" },
-            { label: "Flagged classes", value: "5", note: "Require follow-up" },
-            { label: "At-risk students", value: "39", note: "Based on threshold rules" },
-          ]}
-          actions={[
-            { label: "Review flagged classes", onClick: () => setModal("flags") },
-            { label: "Send attendance alert", onClick: () => setModal("alert") },
-            { label: "Export weekly snapshot", onClick: () => setModal("export") },
-          ]}
-          highlights={[
-            "Physical classes remain stronger than online sessions this week.",
-            "Two classes fell below the minimum attendance threshold.",
-            "Export tools are ready for reporting and departmental review.",
-          ]}
-        />
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-lg font-semibold text-slate-900">Attendance Records</div>
-              <div className="text-sm text-slate-500">
-                Structured overview for physical and online class attendance.
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setModal("flags")}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                <AlertTriangle size={16} />
-                Flagged classes
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setModal("export")}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                <Download size={16} />
-                Export
-              </button>
-
-              <AdminActionMenu label="Attendance Actions" items={attendanceMenuItems} align="right" />
-            </div>
-          </div>
-
-          <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr className="text-left text-slate-500">
-                  <th className="px-4 py-3 font-medium">Class Type</th>
-                  <th className="px-4 py-3 font-medium">Unit</th>
-                  <th className="px-4 py-3 font-medium">Session</th>
-                  <th className="px-4 py-3 font-medium">Lecturer</th>
-                  <th className="px-4 py-3 font-medium">Attendance</th>
-                  <th className="px-4 py-3 font-medium">Risk</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={`${row.unit}-${row.session}`} className="border-t border-slate-100">
-                    <td className="px-4 py-3 text-slate-700">{row.classType}</td>
-                    <td className="px-4 py-3 font-medium text-slate-800">{row.unit}</td>
-                    <td className="px-4 py-3 text-slate-600">{row.session}</td>
-                    <td className="px-4 py-3 text-slate-600">{row.lecturer}</td>
-                    <td className="px-4 py-3 text-slate-800">{row.attendance}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={[
-                          "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
-                          row.risk === "High"
-                            ? "bg-rose-50 text-rose-700"
-                            : row.risk === "Medium"
-                            ? "bg-amber-50 text-amber-700"
-                            : "bg-emerald-50 text-emerald-700",
-                        ].join(" ")}
-                      >
-                        {row.risk}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                <Users size={16} />
-                Participation Trend
-              </div>
-              <div className="mt-2 text-sm text-slate-500">
-                Online participation is weaker in late afternoon sessions and should be watched closely.
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                <UserCheck size={16} />
-                Lecturer Follow-up
-              </div>
-              <div className="mt-2 text-sm text-slate-500">
-                Two lecturers may need attendance reminders for incomplete weekly records.
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                <CheckCircle2 size={16} />
-                Export Readiness
-              </div>
-              <div className="mt-2 text-sm text-slate-500">
-                Weekly attendance snapshots are ready for export to reporting formats.
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <AdminMiniModal
-        open={modal === "flags"}
-        title="Flagged Classes"
-        onClose={() => setModal(null)}
-      >
-        <div className="space-y-3">
-          {[
-            "EDU 101 - attendance dropped below minimum threshold",
-            "BUS 110 - online participation remained unstable this week",
-            "CSC 315 - lecturer attendance record submission delayed",
-          ].map((item) => (
-            <div key={item} className="rounded-2xl border border-slate-200 p-4">
-              <div className="font-medium text-slate-800">{item}</div>
-              <div className="mt-1 text-sm text-slate-500">
-                Recommended action: review the class record, notify lecturer, and escalate if repeated.
-              </div>
-            </div>
-          ))}
-        </div>
-      </AdminMiniModal>
-
-      <AdminMiniModal
-        open={modal === "export"}
-        title="Export Attendance Snapshot"
-        onClose={() => setModal(null)}
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {[
-            "Microsoft Word (.docx)",
-            "Plain text (.txt)",
-            "PDF Document (.pdf)",
-            "Rich text Format (.rtf)",
-            "Web page (.html, zipped)",
-            "EPUB Publication (.epub)",
-            "Markdown (.md)",
-          ].map((format) => (
-            <button
-              key={format}
-              type="button"
-              className="rounded-2xl border border-slate-200 p-4 text-left hover:bg-slate-50"
-            >
-              <div className="font-medium text-slate-800">{format}</div>
-              <div className="mt-1 text-sm text-slate-500">
-                Export-ready format placeholder for attendance records.
-              </div>
-            </button>
-          ))}
-        </div>
-      </AdminMiniModal>
-
-      <AdminMiniModal
-        open={modal === "documents"}
-        title="New Attendance Document"
-        onClose={() => setModal(null)}
-      >
-        <div className="rounded-2xl border border-slate-200 p-4 text-sm text-slate-600">
-          Start a new attendance document workspace for online or physical classes.
-        </div>
-      </AdminMiniModal>
-
-      <AdminMiniModal
-        open={modal === "templates"}
-        title="Attendance Templates"
-        onClose={() => setModal(null)}
-      >
-        <div className="space-y-3">
-          {["Weekly class register", "Online session tracker", "Hybrid attendance sheet"].map((item) => (
-            <div key={item} className="rounded-2xl border border-slate-200 p-4">
-              <div className="font-medium text-slate-800">{item}</div>
-              <div className="mt-1 text-sm text-slate-500">
-                Template placeholder for future institutional attendance workflows.
-              </div>
-            </div>
-          ))}
-        </div>
-      </AdminMiniModal>
-
-      <AdminMiniModal
-        open={Boolean(
-          modal &&
-            [
-              "copy",
-              "share",
-              "publish",
-              "email-file",
-              "email-collab",
-              "rename",
-              "move-notebook",
-              "move-newchat",
-              "shortcut",
-              "trash",
-              "page-setup",
-              "language",
-              "security",
-              "details",
-              "alert",
-            ].includes(modal)
-        )}
-        title="Attendance Action"
-        onClose={() => setModal(null)}
-      >
-        <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
-          This action is prepared in the interface and can be fully wired to storage, export, email, or policy flows next.
-        </div>
-      </AdminMiniModal>
-    </>
-  );
+  return <AdminAttendancePanel />;
 }
 
 function SubgroupsPanel({ workflows = [], onOpenWorkflows, onOpenAudit }) {
@@ -2125,6 +1810,9 @@ export default function AdminAnalyticsLanding({ userRole }) {
   const [adminSettingsSaveMessage, setAdminSettingsSaveMessage] = useState("");
   const [analyticsSummary, setAnalyticsSummary] = useState(null);
   const [analyticsError, setAnalyticsError] = useState("");
+  const [isDesktopSettingsLauncherOpen, setIsDesktopSettingsLauncherOpen] = useState(false);
+  const [selectedDesktopSettingsSection, setSelectedDesktopSettingsSection] = useState("general");
+  const desktopSettingsTriggerRef = useRef(null);
 
   const role = String(userRole || "institution_admin").toLowerCase();
   const effectiveDept = role.includes("lecturer") ? "academic_results" : "fees";
@@ -2154,6 +1842,27 @@ export default function AdminAnalyticsLanding({ userRole }) {
       ["At-risk Students", String(summary.pending || 0)],
     ];
   }, [analyticsSummary, summary.pending]);
+
+  function openDesktopSettingsLauncher(anchorEl = null) {
+    const isDesktopViewport = typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
+    if (!isDesktopViewport) {
+      setActive("settings");
+      setMobileMenu(false);
+      return;
+    }
+    if (anchorEl) {
+      desktopSettingsTriggerRef.current = anchorEl;
+    }
+    setProfileOpen(false);
+    setMobileMenu(false);
+    setIsDesktopSettingsLauncherOpen(true);
+  }
+
+  function handleDesktopSettingsSectionSelect(sectionId) {
+    setSelectedDesktopSettingsSection(sectionId);
+    setIsDesktopSettingsLauncherOpen(false);
+    setActive("settings");
+  }
 
   async function loadWorkflowData() {
     setWorkflowLoading(true);
@@ -2319,16 +2028,22 @@ export default function AdminAnalyticsLanding({ userRole }) {
             </div>
           </div>
           {notifOpen ? <div className="absolute right-3 mt-2 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-lg md:right-6"><div className="rounded-lg px-2 py-2 text-sm hover:bg-slate-50"><div className="font-semibold">Pending approvals</div><div className="text-xs text-slate-500">2 workflow items waiting for approval.</div></div></div> : null}
-          {profileOpen ? <div className="absolute right-3 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg md:right-6"><button onClick={() => { setActive("profile"); setProfileOpen(false); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Profile</button><button onClick={() => { setActive("settings"); setProfileOpen(false); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Settings</button><button onClick={() => { setProfileOpen(false); window.location.href = "/login?returnTo=%2Finstitution"; }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 inline-flex items-center gap-2"><LogOut size={14} />Logout</button></div> : null}
+          {profileOpen ? <div className="absolute right-3 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg md:right-6"><button onClick={() => { setActive("profile"); setProfileOpen(false); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Profile</button><button onClick={() => openDesktopSettingsLauncher(desktopSettingsTriggerRef.current)} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Settings</button><button onClick={() => { setProfileOpen(false); window.location.href = "/login?returnTo=%2Finstitution"; }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 inline-flex items-center gap-2"><LogOut size={14} />Logout</button></div> : null}
         </div>
       </header>
+      <DesktopSettingsLauncher
+        open={isDesktopSettingsLauncherOpen}
+        anchorRef={desktopSettingsTriggerRef}
+        onClose={() => setIsDesktopSettingsLauncherOpen(false)}
+        onSelectSection={handleDesktopSettingsSectionSelect}
+      />
 
       <div className="mx-auto max-w-7xl overflow-hidden px-3 py-3 md:px-6 md:py-4" style={{ marginTop: `${HEADER_H}px`, height: `calc(100dvh - ${HEADER_H}px)` }}>
         <div className="grid h-full grid-cols-12 gap-4 md:gap-6">
           <aside className={`col-span-12 overflow-hidden ${sidebarCollapsed ? "lg:col-span-2" : "lg:col-span-3"}`}>
             <div className="h-full rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col overflow-hidden">
               <div className="border-b border-slate-200 px-3 py-2.5 flex items-center justify-between"><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{sidebarCollapsed ? "Menu" : "Admin Modules"}</div><button onClick={() => setSidebarCollapsed((v) => !v)} className="hidden h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 lg:inline-flex">{sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}</button></div>
-              <nav className={["min-h-0 flex-1 overflow-y-auto p-3 space-y-3", mobileMenu ? "block" : "hidden lg:block"].join(" ")}>{filteredGroups.map((group) => <div key={group.title} className="space-y-1.5">{!sidebarCollapsed ? <div className="px-2 text-[10px] uppercase tracking-wide font-semibold text-slate-400">{group.title}</div> : null}{group.items.map(([key, label, Icon]) => <button key={key} onClick={() => { setActive(key); setMobileMenu(false); }} title={sidebarCollapsed ? label : undefined} className={["w-full rounded-xl border px-3 py-2 text-left text-sm transition", sidebarCollapsed ? "flex items-center justify-center px-2" : "", active === key ? "border-sky-500 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"].join(" ")}><span className="inline-flex items-center gap-2"><Icon size={15} />{!sidebarCollapsed ? label : null}</span></button>)}</div>)}</nav>
+              <nav className={["min-h-0 flex-1 overflow-y-auto p-3 space-y-3", mobileMenu ? "block" : "hidden lg:block"].join(" ")}>{filteredGroups.map((group) => <div key={group.title} className="space-y-1.5">{!sidebarCollapsed ? <div className="px-2 text-[10px] uppercase tracking-wide font-semibold text-slate-400">{group.title}</div> : null}{group.items.map(([key, label, Icon]) => <button key={key} ref={key === "settings" ? desktopSettingsTriggerRef : undefined} onClick={(event) => { if (key === "settings") { openDesktopSettingsLauncher(event.currentTarget); return; } setActive(key); setMobileMenu(false); }} title={sidebarCollapsed ? label : undefined} className={["w-full rounded-xl border px-3 py-2 text-left text-sm transition", sidebarCollapsed ? "flex items-center justify-center px-2" : "", active === key ? "border-sky-500 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"].join(" ")}><span className="inline-flex items-center gap-2"><Icon size={15} />{!sidebarCollapsed ? label : null}</span></button>)}</div>)}</nav>
             </div>
           </aside>
 

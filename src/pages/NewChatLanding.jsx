@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   Bell,
@@ -44,6 +44,11 @@ import {
 } from "lucide-react";
 import { auth } from "../lib/firebase";
 import { logoutFamilySession } from "../auth/familySession";
+import {
+  clearRegisteredPasskeys,
+  getSecureUnlockCapabilities,
+  registerPasskey,
+} from "../auth/secureLock";
 import { apiUrl } from "../lib/apiUrl";
 import { readScopedJson, writeScopedJson } from "../lib/userScopedStorage";
 import { getStoredPreferences, getStoredProfile } from "../lib/userSettings";
@@ -64,20 +69,34 @@ import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
 import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
 import { isImageGenerationPrompt } from "../shared/image-generation/imageGenerationIntent.js";
 import {
+  archiveAllInstitutionConversations,
   createInstitutionConversation,
   createInstitutionConversationMessage,
+  deleteInstitutionShareLink,
+  deleteAllInstitutionConversations,
+  exportInstitutionData,
+  fetchInstitutionArchivedChats,
+  fetchInstitutionConversation,
+  fetchInstitutionShareLinks,
   fetchInstitutionShareLink,
+  restoreInstitutionConversation,
 } from "../lib/researchApi";
 import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
 import imageAPI from "../services/imageAPI.js";
+import DesktopSettingsLauncher from "../shared/settings/DesktopSettingsLauncher.jsx";
+import DesktopSettingsWorkspace from "../shared/settings/DesktopSettingsWorkspace.jsx";
 import SettingsPage from "./SettingsPage";
+import InstitutionMobileSettingsLanding from "./InstitutionMobileSettingsLanding.jsx";
 import NotebookPage from "./NotebookPage";
+import InstitutionCalendarPage from "./InstitutionCalendarPage";
+import InstitutionFeesPage from "./InstitutionFeesPage";
 import SubgroupRoom from "./SubgroupRoom";
 import CoursesDashboard from "./CoursesDashboard";
 import AssignmentsPage from "./AssignmentsPage";
 import ResultsPage from "./ResultsPage";
 import AdminAnalyticsLanding from "./AdminAnalyticsLanding";
+import StudentAttendancePage from "../student/StudentAttendancePage";
 
 const MAIN_ITEMS = [
   { key: "newchat", label: "NewChat", icon: LayoutGrid },
@@ -557,14 +576,14 @@ function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "", owner
 
 function StatCard({ title, value, subtitle }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-white border border-slate-200/90 shadow-sm px-4 py-3 min-h-[92px]">
+    <div className="flex items-center justify-between rounded-xl bg-white border border-slate-200/90 shadow-sm px-3.5 py-2.5 min-h-[74px]">
       <div>
         <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{title}</div>
-        <div className="mt-1 text-xl leading-tight font-bold text-slate-900 break-words">{value}</div>
-        {subtitle ? <div className="text-[12px] text-slate-500 mt-0.5">{subtitle}</div> : null}
+        <div className="mt-0.5 text-lg leading-tight font-bold text-slate-900 break-words">{value}</div>
+        {subtitle ? <div className="text-[11px] text-slate-500 mt-0.5">{subtitle}</div> : null}
       </div>
       <div className="text-slate-400 shrink-0 ml-3">
-        <BarChart3 size={18} />
+        <BarChart3 size={16} />
       </div>
     </div>
   );
@@ -739,10 +758,10 @@ function Bubble({
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
         <div
         className={[
-          "max-w-[96%] md:max-w-[88%] text-[15px]",
+          isUser ? "max-w-[96%] md:max-w-[88%] text-[15px]" : "max-w-[98.5%] -ml-1 md:max-w-[88%] text-[15px]",
           isUser
             ? "user-msg-bubble rounded-2xl px-4 py-3 md:px-4.5 md:py-3.5 bg-sky-500 text-white rounded-br-md shadow-sm"
-            : "assistant-msg-surface px-1 py-1 md:py-1.5 text-slate-900 dark:text-slate-100",
+            : "assistant-msg-surface px-0.5 py-1 md:py-1.5 text-slate-900 dark:text-slate-100",
         ].join(" ")}
       >
         {isUser ? (
@@ -1027,9 +1046,10 @@ function Bubble({
   );
 }
 
-function SidebarButton({ active, label, onClick, collapsed, icon: Icon }) {
+function SidebarButton({ active, label, onClick, collapsed, icon: Icon, buttonRef = null }) {
   return (
     <button
+      ref={buttonRef}
       onClick={onClick}
       className={[
         "w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors duration-200",
@@ -1051,6 +1071,10 @@ function SidebarButton({ active, label, onClick, collapsed, icon: Icon }) {
 function SectionLabel({ collapsed, children }) {
   if (collapsed) return null;
   return <div className="px-3 pt-2 text-[10px] font-semibold tracking-[0.1em] text-slate-400">{children}</div>;
+}
+
+function isDesktopSettingsViewport() {
+  return typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
 }
 
 export default function NewChatLanding({
@@ -1087,6 +1111,11 @@ export default function NewChatLanding({
   const [isNewChatMenuOpen, setIsNewChatMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationsMenuOpen, setIsNotificationsMenuOpen] = useState(false);
+  const [isDesktopSettingsLauncherOpen, setIsDesktopSettingsLauncherOpen] = useState(false);
+  const [selectedDesktopSettingsSection, setSelectedDesktopSettingsSection] = useState("general");
+  const [useDesktopSettingsWorkspace, setUseDesktopSettingsWorkspace] = useState(false);
+  const [desktopSettingsReturnView, setDesktopSettingsReturnView] = useState("newchat");
+  const [desktopSecurityVersion, setDesktopSecurityVersion] = useState(0);
   const [globalSearch, setGlobalSearch] = useState("");
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [notifications, setNotifications] = useState(() => [
@@ -1152,6 +1181,7 @@ export default function NewChatLanding({
   const mobileAttachmentMenuRef = useRef(null);
   const desktopAttachmentMenuRef = useRef(null);
   const newChatMenuRef = useRef(null);
+  const desktopSettingsTriggerRef = useRef(null);
   const profileMenuRef = useRef(null);
   const notificationsMenuRef = useRef(null);
   const notifBtnRef = useRef(null);
@@ -1193,6 +1223,10 @@ export default function NewChatLanding({
     handlePaste,
   } = useCapturedMedia();
   const [aiEditItem, setAiEditItem] = useState(null);
+  const [desktopSharedLinksRemoteItems, setDesktopSharedLinksRemoteItems] = useState([]);
+  const [desktopSharedLinksLoaded, setDesktopSharedLinksLoaded] = useState(false);
+  const [desktopArchivedChatsRemoteItems, setDesktopArchivedChatsRemoteItems] = useState([]);
+  const [desktopArchivedChatsLoaded, setDesktopArchivedChatsLoaded] = useState(false);
 
   function clearSessionUiState() {
     setChats([]);
@@ -1290,6 +1324,29 @@ export default function NewChatLanding({
       vv.removeEventListener("scroll", update);
     };
   }, []);
+
+  useEffect(() => {
+    if (active !== "newchat") {
+      setKbHeight(0);
+      setComposerHeight(108);
+      return;
+    }
+
+    const id = requestAnimationFrame(() => {
+      const vv = window.visualViewport;
+      const nextKeyboard = vv
+        ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop))
+        : 0;
+      setKbHeight(nextKeyboard);
+      setMobileViewportHeight(mobileMessagesRef.current?.clientHeight || 0);
+      setDesktopViewportHeight(desktopMessagesRef.current?.clientHeight || 0);
+      setMobileScrollTop(mobileMessagesRef.current?.scrollTop || 0);
+      setDesktopScrollTop(desktopMessagesRef.current?.scrollTop || 0);
+      resizeComposerInputs();
+    });
+
+    return () => cancelAnimationFrame(id);
+  }, [active, activeChatId]);
 
   useEffect(() => {
     if (!isAttachOpen) return;
@@ -1592,6 +1649,90 @@ export default function NewChatLanding({
   const hasText = input.trim().length > 0;
   const hasStarterSuggestions = !hasConversation && starterSuggestions.length > 0;
   const unreadNotifications = notifications.filter((item) => !item.read).length;
+  const desktopSettingsUser = useMemo(
+    () => ({
+      ...user,
+      uid: firebaseUser?.uid || null,
+      email: firebaseUser?.email || user?.email || "",
+      displayName: firebaseUser?.displayName || user?.name || "",
+      providerData: firebaseUser?.providerData || [],
+    }),
+    [firebaseUser?.displayName, firebaseUser?.email, firebaseUser?.providerData, firebaseUser?.uid, user],
+  );
+  const desktopSecurityCapabilities = useMemo(
+    () => getSecureUnlockCapabilities(auth?.currentUser || desktopSettingsUser || null),
+    [desktopSecurityVersion, desktopSettingsUser],
+  );
+  const desktopSharedLinksFallbackItems = useMemo(() => {
+    const seen = new Set();
+    return (Array.isArray(chats) ? chats : [])
+      .filter((chat) => chat?.shareId && chat?.shareUrl && !chat?.isSharedView)
+      .filter((chat) => {
+        const shareKey = String(chat.shareId || "");
+        if (!shareKey || seen.has(shareKey)) return false;
+        seen.add(shareKey);
+        return true;
+      })
+      .map((chat) => ({
+        id: String(chat.shareId || chat.id || ""),
+        conversationId: String(chat.conversationId || ""),
+        chatId: String(chat.id || ""),
+        name: String(chat.title || "Shared conversation"),
+        type: isEmbeddedAdminChat ? "Admin conversation" : "Conversation",
+        dateShared: chat.updatedAt || Date.now(),
+        url: String(chat.shareUrl || ""),
+        canDelete: true,
+      }));
+  }, [chats, isEmbeddedAdminChat]);
+  const desktopSharedLinksItems = useMemo(() => {
+    if (desktopSharedLinksLoaded) {
+      return desktopSharedLinksRemoteItems;
+    }
+    return desktopSharedLinksFallbackItems;
+  }, [desktopSharedLinksFallbackItems, desktopSharedLinksLoaded, desktopSharedLinksRemoteItems]);
+  const desktopPersonalizationHistoryItems = useMemo(
+    () =>
+      (Array.isArray(chats) ? chats : [])
+        .filter((chat) => !chat?.isSharedView)
+        .slice(0, 8)
+        .map((chat) => ({
+          id: String(chat.id || ""),
+          title: String(chat.title || "Conversation"),
+          updatedAt: chat.updatedAt || Date.now(),
+          messageCount: Array.isArray(chat.messages) ? chat.messages.length : 0,
+        })),
+    [chats],
+  );
+  const desktopArchivedChatsFallbackItems = useMemo(
+    () =>
+      (Array.isArray(chats) ? chats : [])
+        .filter((chat) => Boolean(chat?.archivedAt || chat?.isArchived || chat?.hiddenAt || chat?.isHidden))
+        .map((chat) => {
+          const lastAssistantText = Array.isArray(chat.messages)
+            ? [...chat.messages]
+                .reverse()
+                .find((message) => typeof message?.text === "string" && message.text.trim())
+            : null;
+          return {
+            id: String(chat.id || chat.conversationId || ""),
+            chatId: String(chat.id || ""),
+            conversationId: String(chat.conversationId || ""),
+            title: String(chat.title || "Archived conversation"),
+            preview: String(lastAssistantText?.text || "Conversation preview unavailable.").slice(0, 120),
+            dateArchived: chat.archivedAt || chat.hiddenAt || chat.updatedAt || Date.now(),
+            canOpen: true,
+            canRestore: true,
+            canDelete: false,
+          };
+        }),
+    [chats],
+  );
+  const desktopArchivedChatsItems = useMemo(() => {
+    if (desktopArchivedChatsLoaded) {
+      return desktopArchivedChatsRemoteItems;
+    }
+    return desktopArchivedChatsFallbackItems;
+  }, [desktopArchivedChatsFallbackItems, desktopArchivedChatsLoaded, desktopArchivedChatsRemoteItems]);
   const normalizedNotifications = useMemo(
     () =>
       notifications.map((item) => ({
@@ -1605,6 +1746,162 @@ export default function NewChatLanding({
     [notifications]
   );
   const profileInitials = initialsOf(user.name);
+
+  const refreshDesktopArchivedChats = useCallback(async () => {
+    const activeUser = auth?.currentUser || null;
+    if (!activeUser?.uid) {
+      setDesktopArchivedChatsRemoteItems([]);
+      setDesktopArchivedChatsLoaded(false);
+      return;
+    }
+    const payload = await fetchInstitutionArchivedChats({ limit: 100 });
+    const rows = Array.isArray(payload?.archived_chats) ? payload.archived_chats : [];
+    setDesktopArchivedChatsRemoteItems(
+      rows.map((item) => {
+        const conversationId = String(item?.conversation_id || item?.id || "");
+        const matchingChat = (Array.isArray(chats) ? chats : []).find(
+          (chat) => String(chat?.conversationId || "") === conversationId,
+        );
+        return {
+          id: conversationId,
+          chatId: String(matchingChat?.id || ""),
+          conversationId,
+          title: String(item?.title || matchingChat?.title || "Archived conversation"),
+          preview: String(item?.preview || "Conversation preview unavailable.").slice(0, 120),
+          dateArchived: item?.archived_at || item?.updated_at || Date.now(),
+          canOpen: true,
+          canRestore: true,
+          canDelete: false,
+        };
+      }),
+    );
+    setDesktopArchivedChatsLoaded(true);
+  }, [chats]);
+
+  const refreshDesktopSharedLinks = useCallback(async () => {
+    const activeUser = auth?.currentUser || null;
+    if (!activeUser?.uid) {
+      setDesktopSharedLinksRemoteItems([]);
+      setDesktopSharedLinksLoaded(false);
+      return;
+    }
+    const payload = await fetchInstitutionShareLinks({ limit: 100 });
+    const rows = Array.isArray(payload?.share_links) ? payload.share_links : [];
+    setDesktopSharedLinksRemoteItems(
+      rows.map((item) => ({
+        id: String(item?.id || ""),
+        conversationId: String(item?.conversation_id || ""),
+        chatId: String(
+          (Array.isArray(chats) ? chats : []).find(
+            (chat) => String(chat?.conversationId || "") === String(item?.conversation_id || ""),
+          )?.id || "",
+        ),
+        name: String(item?.title || "Shared conversation"),
+        type: String(item?.type || "Conversation"),
+        dateShared: item?.updated_at || item?.created_at || Date.now(),
+        url: String(item?.url || ""),
+        canDelete: true,
+      })),
+    );
+    setDesktopSharedLinksLoaded(true);
+  }, [chats]);
+
+  const handleDesktopArchivedChatOpen = useCallback(
+    async (item) => {
+      const nextConversationId = String(item?.conversationId || item?.id || "");
+      const existingChat = (Array.isArray(chats) ? chats : []).find(
+        (chat) => String(chat?.conversationId || "") === nextConversationId || String(chat?.id || "") === String(item?.chatId || ""),
+      );
+
+      if (existingChat?.id) {
+        setActiveChatId(existingChat.id);
+        setUseDesktopSettingsWorkspace(false);
+        setActive("newchat");
+        return;
+      }
+
+      if (!nextConversationId) return;
+      const payload = await fetchInstitutionConversation(nextConversationId);
+      const conversation = payload?.conversation || {};
+      const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+      const nextChatId = makeChatId();
+      const mappedChat = {
+        ...createDefaultChat(String(conversation?.title || "Archived conversation"), "", currentUid),
+        id: nextChatId,
+        ownerUid: currentUid,
+        chatScope: storageScope,
+        conversationId: nextConversationId,
+        archivedAt: item?.dateArchived || conversation?.archived_at || Date.now(),
+        isArchived: true,
+        messages: messages.map((message) => ({
+          id: message?.id || "",
+          conversationId: nextConversationId,
+          role: message?.role || "assistant",
+          text: message?.content || "",
+          sources: message?.sources || [],
+          ownerUid: currentUid,
+          createdAt: Date.parse(message?.created_at || "") || Date.now(),
+        })),
+        updatedAt:
+          Date.parse(conversation?.updated_at || conversation?.archived_at || "") || Date.now(),
+      };
+      setChats((current) => [mappedChat, ...(Array.isArray(current) ? current : [])]);
+      setActiveChatId(nextChatId);
+      setUseDesktopSettingsWorkspace(false);
+      setActive("newchat");
+    },
+    [chats, currentUid, storageScope],
+  );
+
+  const handleDesktopArchivedChatRestore = useCallback(
+    async (item) => {
+      const nextConversationId = String(item?.conversationId || item?.id || "");
+      if (!nextConversationId) return;
+      await restoreInstitutionConversation(nextConversationId);
+      setChats((current) =>
+        current.map((chat) =>
+          String(chat?.conversationId || "") === nextConversationId || String(chat?.id || "") === String(item?.chatId || "")
+            ? {
+                ...chat,
+                archivedAt: null,
+                hiddenAt: null,
+                isArchived: false,
+                isHidden: false,
+                updatedAt: Date.now(),
+              }
+            : chat,
+        ),
+      );
+      await refreshDesktopArchivedChats();
+    },
+    [refreshDesktopArchivedChats],
+  );
+
+  useEffect(() => {
+    if (active !== SETTINGS_ITEM.key) return;
+    if (!auth?.currentUser?.uid) {
+      setDesktopSharedLinksRemoteItems([]);
+      setDesktopSharedLinksLoaded(false);
+      return;
+    }
+    refreshDesktopSharedLinks().catch(() => {
+      setDesktopSharedLinksRemoteItems([]);
+      setDesktopSharedLinksLoaded(false);
+    });
+  }, [active, refreshDesktopSharedLinks]);
+
+  useEffect(() => {
+    if (!useDesktopSettingsWorkspace || !isDesktopSettingsViewport()) return;
+    if (!auth?.currentUser?.uid) {
+      setDesktopArchivedChatsRemoteItems([]);
+      setDesktopArchivedChatsLoaded(false);
+      return;
+    }
+    refreshDesktopArchivedChats().catch(() => {
+      setDesktopArchivedChatsRemoteItems([]);
+      setDesktopArchivedChatsLoaded(false);
+    });
+  }, [refreshDesktopArchivedChats, useDesktopSettingsWorkspace]);
 
   const estimateMessageHeight = (message, mode) => {
     const text = String(message?.text || "");
@@ -1625,6 +1922,13 @@ export default function NewChatLanding({
     const overscan = 8;
     if (!messages.length) {
       return { items: [], paddingTop: 0, paddingBottom: 0 };
+    }
+    if (viewportHeight <= 0) {
+      return {
+        items: messages.map((message, index) => ({ index, message })),
+        paddingTop: 0,
+        paddingBottom: 0,
+      };
     }
 
     const heights = messages.map((m, idx) => {
@@ -1940,10 +2244,185 @@ export default function NewChatLanding({
     setActive("newchat");
   }
 
-  function openSettingsPanel() {
+  function openSettingsPanel(options = {}) {
+    const { skipLauncher = false, anchorEl = null } = options;
     setIsProfileMenuOpen(false);
     setIsNotificationsMenuOpen(false);
+    if (!skipLauncher && isDesktopSettingsViewport()) {
+      if (anchorEl) {
+        desktopSettingsTriggerRef.current = anchorEl;
+      }
+      setIsMoreOpen(false);
+      setIsMorePopupOpen(false);
+      setIsDesktopSettingsLauncherOpen(true);
+      return;
+    }
+    setIsDesktopSettingsLauncherOpen(false);
+    if (!skipLauncher || !isDesktopSettingsViewport()) {
+      setUseDesktopSettingsWorkspace(false);
+    }
     syncActiveView("settings", "push");
+  }
+
+  function handleDesktopSettingsSectionSelect(sectionId) {
+    setDesktopSettingsReturnView(active === SETTINGS_ITEM.key ? desktopSettingsReturnView : active);
+    setSelectedDesktopSettingsSection(sectionId);
+    setUseDesktopSettingsWorkspace(true);
+    setIsDesktopSettingsLauncherOpen(false);
+    openSettingsPanel({ skipLauncher: true });
+  }
+
+  async function handleDesktopSecurityAddPasskey() {
+    const activeUser = auth?.currentUser || null;
+    if (!activeUser) {
+      window.alert("Sign in again before setting up a passkey.");
+      return;
+    }
+    try {
+      await registerPasskey(activeUser, { label: "This device" });
+      setDesktopSecurityVersion((value) => value + 1);
+    } catch (error) {
+      window.alert(String(error?.message || error || "Passkey setup failed."));
+    }
+  }
+
+  function handleDesktopSecurityRemovePasskey() {
+    const activeUser = auth?.currentUser || null;
+    if (!activeUser?.uid) {
+      window.alert("No passkey is registered for this account on this device.");
+      return;
+    }
+    clearRegisteredPasskeys(activeUser.uid);
+    setDesktopSecurityVersion((value) => value + 1);
+  }
+
+  function handleDesktopSecurityChangePassword() {
+    window.alert("Password change will use email verification flow.");
+  }
+
+  async function handleDesktopSecurityLogoutCurrentDevice() {
+    await logoutFamilySession({
+      clearKeys: ["activeDepartmentId", "activeDepartmentName", "elimulink_admin_token"],
+    }).catch(() => {});
+    window.location.replace("/login?returnTo=%2Finstitution");
+  }
+
+  function handleDesktopSecurityLogoutAllDevices() {
+    window.alert("Log out all devices can be wired later.");
+  }
+
+  function handleDesktopAccountChangeEmail({ newEmail }) {
+    return {
+      status: "verification-ready",
+      message: `Verification is required before switching this account to ${newEmail}. Connect the real verification send step here.`,
+    };
+  }
+
+  function handleDesktopAccountManageSubscription() {
+    window.alert("Subscription management can be connected to billing later.");
+  }
+
+  function handleDesktopAccountManagePayment() {
+    window.alert("Payment management can be connected later.");
+  }
+
+  function handleDesktopAccountDelete() {
+    window.alert("Account deletion remains protected until the full flow is connected.");
+  }
+
+  async function handleDesktopSharedLinkDelete(item) {
+    const shareId = String(item?.id || "");
+    if (!shareId) return;
+    await deleteInstitutionShareLink(shareId);
+    setChats((prev) =>
+      (Array.isArray(prev) ? prev : []).map((chat) =>
+        chat?.shareId === shareId
+          ? {
+              ...chat,
+              shareId: "",
+              shareUrl: "",
+            }
+          : chat,
+      ),
+    );
+    await refreshDesktopSharedLinks().catch(() => {
+      setDesktopSharedLinksRemoteItems([]);
+      setDesktopSharedLinksLoaded(false);
+    });
+  }
+
+  async function handleDataControlsExport() {
+    const { blob, filename } = await exportInstitutionData();
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = (filename.match(/filename=\"?([^\";]+)\"?/) || [])[1] || "elimulink-institution-export.json";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.URL.revokeObjectURL(url);
+    return { message: "Institution data export downloaded." };
+  }
+
+  async function handleDataControlsArchiveAllChats() {
+    const payload = await archiveAllInstitutionConversations();
+    const archivedIds = new Set(Array.isArray(payload?.archived_conversation_ids) ? payload.archived_conversation_ids.map(String) : []);
+    if (archivedIds.size) {
+      setChats((current) =>
+        (Array.isArray(current) ? current : []).map((chat) =>
+          archivedIds.has(String(chat?.conversationId || chat?.id || ""))
+            ? {
+                ...chat,
+                archivedAt: Date.now(),
+                isArchived: true,
+                hiddenAt: Date.now(),
+                isHidden: true,
+                updatedAt: Date.now(),
+              }
+            : chat,
+        ),
+      );
+    }
+    await refreshDesktopArchivedChats().catch(() => {
+      setDesktopArchivedChatsRemoteItems([]);
+      setDesktopArchivedChatsLoaded(false);
+    });
+    return {
+      message: archivedIds.size
+        ? `${archivedIds.size} chat${archivedIds.size === 1 ? "" : "s"} archived.`
+        : "No active chats were available to archive.",
+    };
+  }
+
+  async function handleDataControlsDeleteAllChats() {
+    const payload = await deleteAllInstitutionConversations();
+    const deletedIds = new Set(Array.isArray(payload?.deleted_conversation_ids) ? payload.deleted_conversation_ids.map(String) : []);
+    if (deletedIds.size) {
+      setActiveChatId((current) => {
+        const activeChat = (Array.isArray(chats) ? chats : []).find((chat) => String(chat?.id || "") === String(current || ""));
+        return activeChat && deletedIds.has(String(activeChat?.conversationId || activeChat?.id || "")) ? null : current;
+      });
+      setChats((current) =>
+        (Array.isArray(current) ? current : []).filter(
+          (chat) => !deletedIds.has(String(chat?.conversationId || chat?.id || "")),
+        ),
+      );
+    }
+    await Promise.allSettled([
+      refreshDesktopArchivedChats().catch(() => {
+        setDesktopArchivedChatsRemoteItems([]);
+        setDesktopArchivedChatsLoaded(false);
+      }),
+      refreshDesktopSharedLinks().catch(() => {
+        setDesktopSharedLinksRemoteItems([]);
+        setDesktopSharedLinksLoaded(false);
+      }),
+    ]);
+    return {
+      message: deletedIds.size
+        ? `${deletedIds.size} chat${deletedIds.size === 1 ? "" : "s"} deleted.`
+        : "No owned chats were available to delete.",
+    };
   }
 
   function openAdminPanel() {
@@ -2860,7 +3339,110 @@ export default function NewChatLanding({
     };
   }, [active]);
 
+  useEffect(() => {
+    if (active !== SETTINGS_ITEM.key) {
+      setIsDesktopSettingsLauncherOpen(false);
+    }
+  }, [active]);
+
   if (active === "settings") {
+    if (useDesktopSettingsWorkspace && isDesktopSettingsViewport()) {
+      return (
+        <DesktopSettingsWorkspace
+          user={desktopSettingsUser}
+          activeSection={selectedDesktopSettingsSection}
+          onSelectSection={setSelectedDesktopSettingsSection}
+          onClose={() => {
+            setUseDesktopSettingsWorkspace(false);
+            syncActiveView(desktopSettingsReturnView || "newchat", "push");
+          }}
+          generalProps={{ user: desktopSettingsUser }}
+          personalizationProps={{
+            historyItems: desktopPersonalizationHistoryItems,
+          }}
+          securityProps={{
+            capabilities: {
+              ...desktopSecurityCapabilities,
+              provider: desktopSecurityCapabilities?.federatedProvider,
+              hasPasskey: desktopSecurityCapabilities?.passkey,
+              passkeyRegistered: desktopSecurityCapabilities?.passkey,
+            },
+            onAddPasskey: handleDesktopSecurityAddPasskey,
+            onRemovePasskey: handleDesktopSecurityRemovePasskey,
+            onChangePassword: handleDesktopSecurityChangePassword,
+            onLogoutCurrentDevice: handleDesktopSecurityLogoutCurrentDevice,
+            onLogoutAllDevices: handleDesktopSecurityLogoutAllDevices,
+          }}
+          accountProps={{
+            user: desktopSettingsUser,
+            currentPlan: "Education",
+            onChangeEmail: handleDesktopAccountChangeEmail,
+            onManageSubscription: handleDesktopAccountManageSubscription,
+            onManagePayment: handleDesktopAccountManagePayment,
+            onDeleteAccount: handleDesktopAccountDelete,
+          }}
+          dataControlsProps={{
+            sharedLinksItems: desktopSharedLinksItems,
+            onDeleteSharedLink: handleDesktopSharedLinkDelete,
+            sharedLinksMode: desktopSharedLinksLoaded
+              ? "live"
+              : desktopSharedLinksFallbackItems.length
+                ? "partial"
+                : "preview",
+            archivedChatsItems: desktopArchivedChatsItems,
+            archivedChatsMode: desktopArchivedChatsLoaded
+              ? "live"
+              : desktopArchivedChatsFallbackItems.length
+                ? "partial"
+                : "preview",
+            onOpenArchivedChat: handleDesktopArchivedChatOpen,
+            onRestoreArchivedChat: handleDesktopArchivedChatRestore,
+            onExportData: handleDataControlsExport,
+            onArchiveAllChats: handleDataControlsArchiveAllChats,
+            onDeleteAllChats: handleDataControlsDeleteAllChats,
+          }}
+        />
+      );
+    }
+    if (!isDesktopSettingsViewport()) {
+      return (
+        <InstitutionMobileSettingsLanding
+          user={{
+            ...user,
+            uid: firebaseUser?.uid || null,
+            email: firebaseUser?.email || user?.email || "",
+            displayName: firebaseUser?.displayName || user?.name || "",
+            providerData: firebaseUser?.providerData || [],
+          }}
+          onBack={() => syncActiveView("newchat", "push")}
+          canShowAdmin={isAdminRole}
+          onOpenAdmin={openAdminPanel}
+          onLogout={handleLogout}
+          sharedLinksItems={desktopSharedLinksItems}
+          onDeleteSharedLink={handleDesktopSharedLinkDelete}
+          sharedLinksMode={
+            desktopSharedLinksLoaded
+              ? "live"
+              : desktopSharedLinksFallbackItems.length
+                ? "partial"
+                : "preview"
+          }
+          archivedChatsItems={desktopArchivedChatsItems}
+          archivedChatsMode={
+            desktopArchivedChatsLoaded
+              ? "live"
+              : desktopArchivedChatsFallbackItems.length
+                ? "partial"
+                : "preview"
+          }
+          onOpenArchivedChat={handleDesktopArchivedChatOpen}
+          onRestoreArchivedChat={handleDesktopArchivedChatRestore}
+          onExportData={handleDataControlsExport}
+          onArchiveAllChats={handleDataControlsArchiveAllChats}
+          onDeleteAllChats={handleDataControlsDeleteAllChats}
+        />
+      );
+    }
     return (
       <SettingsPage
         user={{
@@ -2873,6 +3455,7 @@ export default function NewChatLanding({
         onBack={() => syncActiveView("newchat", "push")}
         canShowAdmin={isAdminRole}
         onOpenAdmin={openAdminPanel}
+        launcherSectionId={selectedDesktopSettingsSection}
       />
     );
   }
@@ -2919,23 +3502,49 @@ export default function NewChatLanding({
   }
 
   if (active === "notebook") {
-    return <NotebookPage onBack={() => syncActiveView("newchat", "push")} />;
+    return (
+      <NotebookPage
+        onBack={() => syncActiveView("newchat", "push")}
+        onOpenMainMenu={() => setIsMobileDrawerOpen(true)}
+        onOpenLive={() => setVoiceOpen(true)}
+        enableDesktopLanding
+      />
+    );
   }
 
   if (active === "subgroups") {
     return <SubgroupRoom onBack={() => syncActiveView("newchat", "push")} />;
   }
 
+  if (active === "calendar") {
+    return <InstitutionCalendarPage onBack={() => syncActiveView("newchat", "push")} onOpenMainMenu={() => setIsMobileDrawerOpen(true)} />;
+  }
+
+  if (active === "fees") {
+    return <InstitutionFeesPage onBack={() => syncActiveView("newchat", "push")} onOpenMainMenu={() => setIsMobileDrawerOpen(true)} />;
+  }
+
   if (active === "courses") {
-    return <CoursesDashboard onBack={() => syncActiveView("newchat", "push")} />;
+    return <CoursesDashboard onBack={() => syncActiveView("newchat", "push")} onOpenMainMenu={() => setIsMobileDrawerOpen(true)} />;
   }
 
   if (active === "assignments") {
-    return <AssignmentsPage />;
+    return <AssignmentsPage onOpenMainMenu={() => setIsMobileDrawerOpen(true)} />;
   }
 
   if (active === "results") {
-    return <ResultsPage />;
+    return <ResultsPage onOpenMainMenu={() => setIsMobileDrawerOpen(true)} />;
+  }
+
+  if (active === "attendance") {
+    return (
+      <StudentAttendancePage
+        user={user}
+        profile={settingsProfile}
+        onBack={() => syncActiveView("newchat", "push")}
+        onOpenMainMenu={() => setIsMobileDrawerOpen(true)}
+      />
+    );
   }
 
   if (active === "admin") {
@@ -2946,41 +3555,43 @@ export default function NewChatLanding({
     <div
       className={[
         isAdminShellEmbed
-          ? "h-full min-h-0 bg-slate-100 dark:bg-slate-950 flex flex-col overflow-hidden"
-          : "min-h-[100dvh] h-[100dvh] bg-slate-100 dark:bg-slate-950 flex flex-col overflow-hidden md:h-[100dvh] md:overflow-hidden",
+          ? "h-full min-h-0 bg-white dark:bg-[#020617] flex flex-col overflow-hidden"
+          : "min-h-[100dvh] h-[100dvh] bg-white dark:bg-[#020617] flex flex-col overflow-hidden md:h-[100dvh] md:overflow-hidden",
       ].join(" ")}
     >
       {!isAdminShellEmbed ? (
       <div className="md:hidden fixed top-0 left-0 right-0 z-50 pointer-events-none">
-        <div className="bg-gradient-to-b from-white/80 via-white/40 to-transparent px-3 py-3 flex items-center justify-between pointer-events-auto dark:from-slate-950/95 dark:via-slate-950/70 dark:to-transparent">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="relative overflow-hidden border-b border-slate-200/60 bg-white/68 px-3.5 py-3.5 flex items-center justify-between pointer-events-auto shadow-[0_10px_30px_rgba(15,23,42,0.06)] supports-[backdrop-filter]:backdrop-blur-3xl dark:border-white/[0.1] dark:bg-slate-950/62 dark:shadow-[0_10px_34px_rgba(0,0,0,0.42)]">
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),rgba(255,255,255,0.04))] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))]" />
+          <div className="pointer-events-none absolute inset-x-8 top-0 h-full bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.34),rgba(255,255,255,0)_62%)] blur-2xl dark:bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.18),rgba(255,255,255,0)_62%)]" />
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
-              className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm grid place-items-center text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              className="relative h-10 w-10 rounded-[18px] border border-slate-200/70 bg-white/70 shadow-[0_10px_24px_rgba(14,30,63,0.08)] backdrop-blur-xl grid place-items-center text-slate-700 dark:border-white/[0.1] dark:bg-slate-900/78 dark:text-slate-100"
               onClick={() => setIsMobileDrawerOpen(true)}
               title="Menu"
             >
               <Menu size={16} />
             </button>
-            <div className="flex items-center gap-1 min-w-0">
-              <span className="px-3 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="relative px-3.5 py-1.5 rounded-full border border-slate-200/70 bg-white/56 shadow-[0_8px_18px_rgba(14,30,63,0.05)] backdrop-blur-xl text-[14px] font-semibold text-[#16335f] dark:border-white/[0.1] dark:bg-slate-900/66 dark:text-white">
                 ElimuLink
               </span>
-              <span className="px-3 py-1.5 rounded-full border border-slate-200 bg-white shadow-sm text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
+              <span className="relative px-3.5 py-1.5 rounded-full border border-cyan-100/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.62),rgba(236,249,255,0.5))] shadow-[0_8px_18px_rgba(14,30,63,0.05)] backdrop-blur-xl text-[14px] font-semibold text-[#1171c8] dark:border-white/[0.1] dark:bg-slate-900/66 dark:text-white">
                 University
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <div className="relative">
               <button
                 ref={notifBtnRef}
                 onClick={openMobileNotifications}
-                className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm grid place-items-center text-slate-700 relative dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                className="relative h-10 w-10 rounded-[18px] border border-slate-200/70 bg-white/70 shadow-[0_10px_24px_rgba(14,30,63,0.08)] backdrop-blur-xl grid place-items-center text-slate-700 dark:border-white/[0.1] dark:bg-slate-900/78 dark:text-slate-100"
                 title="Notifications"
               >
                 <Bell size={18} />
                 {unreadNotifications > 0 ? (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-sky-500 text-white text-[10px] font-semibold leading-[18px] px-1">
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-[linear-gradient(180deg,#1c8bf2,#0ea5b7)] text-white text-[10px] font-semibold leading-[18px] px-1 shadow-[0_6px_12px_rgba(14,165,233,0.28)]">
                     {unreadNotifications > 9 ? "9+" : unreadNotifications}
                   </span>
                 ) : null}
@@ -2990,7 +3601,7 @@ export default function NewChatLanding({
             <div ref={profileMenuRef} className="relative">
               <button
                 onClick={() => setIsProfileSheetOpen(true)}
-                className="h-9 w-9 rounded-full border border-slate-200 bg-white shadow-sm overflow-hidden grid place-items-center text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                className="relative h-10 min-w-[2.5rem] px-2 rounded-full border border-slate-200/70 bg-white/70 shadow-[0_10px_24px_rgba(14,30,63,0.08)] backdrop-blur-xl overflow-hidden grid place-items-center text-slate-700 dark:border-white/[0.1] dark:bg-slate-900/78 dark:text-slate-100"
                 title="Profile"
               >
                 {user.avatarUrl ? (
@@ -3021,20 +3632,20 @@ export default function NewChatLanding({
             onClick={() => setIsNotifOpen(false)}
           />
           <div
-            className="fixed z-50 rounded-2xl bg-white shadow-xl border border-slate-200 p-2 space-y-2 md:hidden"
+            className="fixed z-50 rounded-2xl border border-slate-200 bg-white p-2 space-y-2 shadow-xl md:hidden dark:border-slate-700 dark:bg-slate-900"
             style={{ top: notifAnchor.top, left: notifAnchor.left, width: notifAnchor.width }}
           >
-            <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 flex items-center justify-between">
+            <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 flex items-center justify-between dark:bg-slate-800 dark:border-slate-700">
               <div>
-                <div className="text-[11px] font-semibold tracking-wider text-slate-500">NOTIFICATIONS</div>
-                <div className="text-xs text-slate-600">
+                <div className="text-[11px] font-semibold tracking-wider text-slate-500 dark:text-slate-300">NOTIFICATIONS</div>
+                <div className="text-xs text-slate-600 dark:text-slate-200">
                   {settingsPrefs.muteNotifications ? "Muted from Settings" : "Recent updates"}
                 </div>
               </div>
               {!settingsPrefs.muteNotifications ? (
                 <button
                   onClick={markAllNotificationsRead}
-                  className="text-xs font-semibold text-slate-700 hover:text-slate-900"
+                  className="text-xs font-semibold text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
                 >
                   Mark all read
                 </button>
@@ -3043,19 +3654,19 @@ export default function NewChatLanding({
 
             <div className="max-h-64 overflow-auto smart-scrollbar space-y-2">
               {settingsPrefs.muteNotifications ? (
-                <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100">
                   Notifications are muted.
-                  <button onClick={openSettingsPanel} className="ml-2 text-slate-900 font-semibold underline">
+                  <button onClick={openSettingsPanel} className="ml-2 text-slate-900 font-semibold underline dark:text-white">
                     Open Settings
                   </button>
                 </div>
               ) : (
                 normalizedNotifications.map((item) => (
-                  <div key={item.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                    <div className="text-sm font-semibold text-slate-900">{item.title}</div>
-                    <div className="text-xs text-slate-600 mt-1">{item.body}</div>
+                  <div key={item.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+                    <div className="text-sm font-semibold text-slate-900 dark:text-white">{item.title}</div>
+                    <div className="text-xs text-slate-600 mt-1 dark:text-slate-300">{item.body}</div>
                     {item.createdAt ? (
-                      <div className="text-[11px] text-slate-400 mt-1">{formatTimeAgo(item.createdAt)}</div>
+                      <div className="text-[11px] text-slate-400 mt-1 dark:text-slate-500">{formatTimeAgo(item.createdAt)}</div>
                     ) : null}
                   </div>
                 ))
@@ -3074,22 +3685,22 @@ export default function NewChatLanding({
             onClick={() => setIsProfileSheetOpen(false)}
           />
           <div
-            className="fixed bottom-0 left-0 right-0 z-[70] rounded-t-3xl bg-white shadow-2xl md:hidden"
+            className="fixed bottom-0 left-0 right-0 z-[70] rounded-t-3xl bg-white shadow-2xl md:hidden dark:bg-slate-900"
             style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
           >
             <div className="p-3">
               <div className="mb-3 flex items-center justify-between">
-                <div className="mx-auto h-1.5 w-12 rounded-full bg-slate-300" />
+                <div className="mx-auto h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
                 <button
                   type="button"
                   onClick={() => setIsProfileSheetOpen(false)}
-                  className="absolute right-3 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                  className="absolute right-3 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Done
                 </button>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-slate-800">
                 <div className="flex items-center gap-3">
                   <div className="h-11 w-11 rounded-full overflow-hidden bg-slate-900 text-white flex items-center justify-center text-xs font-semibold">
                     {auth.currentUser?.photoURL ? (
@@ -3099,10 +3710,10 @@ export default function NewChatLanding({
                     )}
                   </div>
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-slate-900 truncate">
+                    <div className="text-sm font-semibold text-slate-900 truncate dark:text-white">
                       {auth.currentUser?.displayName || "Student"}
                     </div>
-                    <div className="text-xs text-slate-600 truncate">{auth.currentUser?.email || ""}</div>
+                    <div className="text-xs text-slate-600 truncate dark:text-slate-300">{auth.currentUser?.email || ""}</div>
                   </div>
                 </div>
               </div>
@@ -3155,7 +3766,7 @@ export default function NewChatLanding({
 
       {!isAdminShellEmbed ? (
       <div className="hidden md:block w-full px-4 md:px-5 pt-1.5 pb-0.5 shrink-0 relative z-20">
-        <div className="surface-elevated h-12 rounded-xl border border-slate-200/85 bg-slate-50/95 shadow-[0_6px_16px_rgba(15,23,42,0.05)] px-2.5 md:px-3 flex items-center gap-2">
+          <div className="surface-elevated h-12 rounded-xl border border-slate-200/85 bg-slate-50/95 shadow-[0_6px_16px_rgba(15,23,42,0.05)] px-2.5 md:px-3 flex items-center gap-2 dark:border-white/[0.06] dark:bg-slate-900/88 dark:shadow-[0_10px_24px_rgba(0,0,0,0.24)]">
           <button
             className="md:hidden h-9 w-9 rounded-lg bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
             onClick={() => setIsMobileDrawerOpen(true)}
@@ -3166,7 +3777,7 @@ export default function NewChatLanding({
 
           <div className="hidden md:flex items-center gap-2 shrink-0">
             <button
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-slate-800"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
               title="Home"
             >
               <span className="h-6 w-6 rounded-md bg-emerald-500 text-white text-xs font-semibold inline-flex items-center justify-center">
@@ -3175,7 +3786,7 @@ export default function NewChatLanding({
               <ChevronDown size={14} className="text-slate-500" />
             </button>
             <button
-              className="h-8 w-8 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 inline-flex items-center justify-center"
+              className="h-8 w-8 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 inline-flex items-center justify-center dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               title="Calendar"
               onClick={() => handleNavClick("calendar")}
             >
@@ -3197,7 +3808,7 @@ export default function NewChatLanding({
                   }
                 }}
                 placeholder="Search Ctrl K"
-                className="w-full h-9 rounded-full border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                className="w-full h-9 rounded-full border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:ring-sky-500/20"
               />
             </div>
           </div>
@@ -3236,7 +3847,7 @@ export default function NewChatLanding({
           <div ref={notificationsMenuRef} className="relative">
             <button
               onClick={toggleNotificationsMenu}
-              className="h-9 w-9 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 relative"
+              className="h-9 w-9 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 relative dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               title="Notifications"
             >
               <Bell size={16} className="mx-auto" />
@@ -3307,7 +3918,7 @@ export default function NewChatLanding({
           <div ref={profileMenuRef} className="relative">
             <button
               onClick={toggleProfileMenu}
-              className="h-9 w-9 rounded-full overflow-hidden bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center"
+              className="h-9 w-9 rounded-full overflow-hidden bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               title={`${user.name} profile`}
             >
               {user.avatarUrl ? (
@@ -3361,14 +3972,14 @@ export default function NewChatLanding({
 
                     <div className="mt-3 space-y-1">
                       <button
-                        onClick={openSettingsPanel}
+                        onClick={() => openSettingsPanel()}
                         className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                       >
                         <IdCard size={16} />
                         Profile & Account
                       </button>
                       <button
-                        onClick={openSettingsPanel}
+                        onClick={() => openSettingsPanel({ anchorEl: desktopSettingsTriggerRef.current })}
                         className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                       >
                         <Settings size={16} />
@@ -3412,14 +4023,14 @@ export default function NewChatLanding({
                   </div>
 
                   <button
-                    onClick={openSettingsPanel}
+                    onClick={() => openSettingsPanel()}
                     className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                   >
                     <IdCard size={15} />
                     Profile & Account
                   </button>
                   <button
-                    onClick={openSettingsPanel}
+                    onClick={() => openSettingsPanel({ anchorEl: desktopSettingsTriggerRef.current })}
                     className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                   >
                     <Settings size={15} />
@@ -3451,8 +4062,8 @@ export default function NewChatLanding({
 
       {!isAdminShellEmbed && isMobileDrawerOpen ? (
         <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setIsMobileDrawerOpen(false)} />
-          <div className="absolute left-0 top-0 h-full w-72 bg-white/94 shadow-[0_20px_48px_rgba(15,23,42,0.22)] backdrop-blur-2xl dark:bg-slate-950/88">
+          <div className="absolute inset-0 bg-slate-950/28 backdrop-blur-[2px]" onClick={() => setIsMobileDrawerOpen(false)} />
+          <div className="absolute left-0 top-0 flex h-full w-72 flex-col overflow-hidden bg-white shadow-[0_20px_48px_rgba(15,23,42,0.22)] dark:bg-slate-950">
             <div className="px-4 py-4 flex items-center justify-between border-b border-slate-200/60 dark:border-white/[0.04]">
               <div className="flex items-center gap-2">
                 <div className="h-7 w-7 rounded-xl bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_20px_rgba(99,102,241,0.35)]" />
@@ -3466,7 +4077,7 @@ export default function NewChatLanding({
               </button>
             </div>
 
-            <nav className="p-2 space-y-3">
+            <nav className="flex-1 overflow-y-auto overscroll-contain p-2 pb-6 space-y-3">
               <div className="space-y-1">
                 <div className="px-3 pt-1 text-[11px] font-semibold tracking-wider text-slate-500">MAIN</div>
                 <div className="space-y-1 relative" ref={newChatMenuRef}>
@@ -3834,13 +4445,22 @@ export default function NewChatLanding({
               <div className="space-y-1">
                 <SectionLabel collapsed={!isSidebarOpen}>SYSTEM</SectionLabel>
 
-                <SidebarButton
-                  label={SETTINGS_ITEM.label}
-                  icon={SETTINGS_ITEM.icon}
-                  active={active === SETTINGS_ITEM.key}
-                  collapsed={!isSidebarOpen}
-                  onClick={() => handleNavClick(SETTINGS_ITEM.key)}
-                />
+                <div className="relative">
+                  <SidebarButton
+                    buttonRef={desktopSettingsTriggerRef}
+                    label={SETTINGS_ITEM.label}
+                    icon={SETTINGS_ITEM.icon}
+                    active={active === SETTINGS_ITEM.key || isDesktopSettingsLauncherOpen}
+                    collapsed={!isSidebarOpen}
+                    onClick={() => openSettingsPanel({ anchorEl: desktopSettingsTriggerRef.current })}
+                  />
+                  <DesktopSettingsLauncher
+                    open={isDesktopSettingsLauncherOpen}
+                    anchorRef={desktopSettingsTriggerRef}
+                    onClose={() => setIsDesktopSettingsLauncherOpen(false)}
+                    onSelectSection={handleDesktopSettingsSectionSelect}
+                  />
+                </div>
 
                 <button
                   onClick={() => {
@@ -3923,27 +4543,27 @@ export default function NewChatLanding({
           />
 
           {active === "newchat" ? (
-            <div className="md:hidden h-[100dvh] overflow-hidden flex flex-col dark:bg-slate-950">
+            <div className="md:hidden h-[100dvh] overflow-hidden flex flex-col bg-white dark:bg-[#020617]">
               <div
                 ref={mobileMessagesRef}
                 onScroll={handleChatScroll}
-                className="chat-scroll-surface flex-1 overflow-y-auto overscroll-none touch-pan-y px-4 pt-20 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-4 dark:bg-slate-950"
+                className="chat-scroll-surface flex-1 overflow-y-auto overscroll-none touch-pan-y bg-white px-4 pt-24 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-4 dark:bg-[#020617]"
                 style={{ paddingBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom) + ${kbHeight}px + 28px)` }}
               >
                 {messages.length === 0 ? (
-                  <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-4 py-4 shadow-[0_6px_20px_rgba(15,23,42,0.04)] dark:border-slate-700 dark:bg-slate-900">
-                    <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500 dark:text-slate-300">{timeGreeting()}</div>
-                    <div className="mt-1.5 text-[28px] leading-[1.2] font-semibold text-slate-900 dark:text-white">
+                  <div className="px-1 pt-1 pb-1">
+                    <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-sky-600 dark:text-slate-300">{timeGreeting()}</div>
+                    <div className="mt-2 text-[29px] leading-[1.18] font-semibold text-slate-950 dark:text-white">
                       {modeConfig.title}
                     </div>
-                    <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                    <div className="mt-2.5 max-w-[32ch] text-[14px] leading-relaxed text-slate-600 dark:text-slate-200">
                       {modeConfig.subtitle}
                     </div>
                   </div>
                 ) : null}
 
                 {messages.length === 0 ? (
-                  <div className="flex flex-wrap items-start gap-1.5 pt-1 pb-2">
+                  <div className="flex flex-wrap items-start gap-2 pt-2 pb-2">
                     {starterSet.map((starter) => {
                       const isActive = selectedStarter === starter.key;
                       return (
@@ -3951,13 +4571,13 @@ export default function NewChatLanding({
                           key={starter.key}
                           onClick={() => applyStarter(starter)}
                           className={[
-                            "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-left text-[13px] font-medium leading-tight bg-white/95 shadow-[0_2px_10px_rgba(15,23,42,0.04)] transition active:scale-[0.99] dark:border-slate-700 dark:bg-slate-900",
+                            "inline-flex items-center gap-2 rounded-full border px-3.5 py-2.5 text-left text-[12px] font-semibold leading-tight bg-white shadow-[0_10px_24px_rgba(14,30,63,0.06)] transition active:scale-[0.99] dark:border-slate-700/90 dark:bg-slate-900/96 dark:shadow-[0_12px_28px_rgba(0,0,0,0.32)]",
                             isActive
-                              ? "border-sky-300 bg-sky-50 text-slate-900 dark:border-sky-500/70 dark:bg-sky-500/15 dark:text-white"
-                              : "border-slate-200/90 text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800",
+                              ? "border-cyan-200 bg-[linear-gradient(180deg,rgba(239,248,255,0.98),rgba(232,250,249,0.96))] text-[#103765] dark:border-sky-500/70 dark:bg-sky-500/15 dark:text-white"
+                              : "border-slate-200/90 text-slate-700 hover:border-sky-200 hover:bg-slate-50 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800/95",
                           ].join(" ")}
                         >
-                          <span className="text-[15px] leading-none">{starter.emoji}</span>
+                          <span className="text-[14px] leading-none">{starter.emoji}</span>
                           <span>{starter.label}</span>
                         </button>
                       );
@@ -4041,13 +4661,16 @@ export default function NewChatLanding({
 
               <div
                 ref={mobileComposerRef}
-                className="fixed left-0 right-0 bottom-0 z-50 bg-white/92 backdrop-blur-2xl border-t border-slate-200/45 px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:static md:z-auto dark:border-white/[0.04] dark:bg-slate-950/90"
+                className={[
+                  "fixed left-0 right-0 bottom-0 z-50 bg-[linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,0.9)_28%,rgba(255,255,255,0.98)_100%)] backdrop-blur-2xl px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:static md:z-auto dark:bg-[linear-gradient(180deg,rgba(2,6,23,0),rgba(2,6,23,0.88)_28%,rgba(2,6,23,0.97)_100%)]",
+                  isMobileDrawerOpen ? "pointer-events-none opacity-0" : "opacity-100",
+                ].join(" ")}
                 style={{ bottom: `${kbHeight}px` }}
               >
                 <div className="max-w-xl mx-auto space-y-2">
                   {hasStarterSuggestions ? (
-                    <div className="rounded-2xl border border-slate-200/80 bg-white/95 shadow-[0_8px_24px_rgba(15,23,42,0.05)] p-2.5 dark:border-slate-700 dark:bg-slate-900">
-                      <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase dark:text-slate-400">
+                    <div className="rounded-[24px] border border-sky-100/70 bg-white shadow-[0_14px_30px_rgba(14,30,63,0.07)] p-2.5 dark:border-slate-700 dark:bg-slate-900/96">
+                      <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-sky-700/80 uppercase dark:text-slate-400">
                         Suggested prompts
                       </div>
                       <div className="space-y-1.5">
@@ -4055,7 +4678,7 @@ export default function NewChatLanding({
                           <button
                             key={suggestion}
                             onClick={() => applySuggestion(suggestion)}
-                            className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:border-slate-200/80 dark:text-slate-100 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                            className="w-full text-left rounded-2xl border border-transparent px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:border-sky-100/80 dark:text-slate-100 dark:hover:border-slate-700 dark:hover:bg-slate-800"
                           >
                             {suggestion}
                           </button>
@@ -4064,7 +4687,7 @@ export default function NewChatLanding({
                     </div>
                   ) : null}
 
-                  <div className="surface-elevated rounded-[26px] border border-slate-200/35 bg-white/72 backdrop-blur-2xl px-2.5 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.06)] dark:border-white/[0.04] dark:bg-slate-900/58">
+                  <div className="surface-elevated rounded-[34px] border border-sky-100/55 bg-white/92 backdrop-blur-2xl px-2.5 py-2.5 shadow-[0_18px_34px_rgba(14,30,63,0.1)] dark:border-white/[0.05] dark:bg-slate-950/72 dark:shadow-[0_20px_40px_rgba(0,0,0,0.36)]">
                     <AttachmentChipsTray
                       items={attachments}
                       onPreview={openAttachmentItem}
@@ -4075,7 +4698,7 @@ export default function NewChatLanding({
                       <div ref={mobileAttachmentMenuRef} className="relative shrink-0">
                         <button
                           onClick={toggleAttachmentPanel}
-                          className="h-10 w-10 rounded-2xl bg-slate-100/55 text-slate-700 grid place-items-center transition hover:bg-slate-100/75 active:scale-[0.98] dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.07]"
+                          className="h-11 w-11 rounded-full bg-[linear-gradient(180deg,rgba(239,246,255,0.92),rgba(245,247,252,0.96))] text-[#27415f] grid place-items-center transition hover:bg-slate-100/75 active:scale-[0.98] dark:border dark:border-white/[0.12] dark:bg-slate-800 dark:text-white dark:shadow-[0_8px_18px_rgba(0,0,0,0.28)] dark:hover:bg-slate-700"
                           title="Add attachment"
                         >
                           <Plus size={17} />
@@ -4083,7 +4706,7 @@ export default function NewChatLanding({
 
                         <div
                           className={[
-                            "surface-elevated absolute left-0 bottom-12 z-30 w-[320px] max-w-[calc(100vw-24px)] rounded-2xl border border-white/40 bg-white/75 backdrop-blur-xl shadow-[0_18px_40px_rgba(15,23,42,0.16)] p-2 origin-bottom-left transition duration-150 dark:border-slate-700 dark:bg-slate-900/95",
+                            "surface-elevated absolute left-0 bottom-12 z-30 w-[320px] max-w-[calc(100vw-24px)] rounded-2xl border border-white/40 bg-white/75 backdrop-blur-xl shadow-[0_18px_40px_rgba(15,23,42,0.16)] p-2 origin-bottom-left transition duration-150 dark:border-slate-700 dark:bg-slate-950/96",
                             isAttachOpen ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-1.5 scale-95 pointer-events-none",
                           ].join(" ")}
                         >
@@ -4182,7 +4805,7 @@ export default function NewChatLanding({
                         }
                       }}
                       onPaste={handlePaste}
-                      className="min-h-[42px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-400"
+                      className="composer-plain-input min-h-[44px] flex-1 resize-none appearance-none border-0 bg-transparent px-1.5 py-2.5 text-[15px] leading-6 text-slate-800 outline-none shadow-none ring-0 placeholder:text-slate-400 dark:bg-transparent dark:text-slate-100 dark:placeholder:text-slate-500"
                       placeholder="Type your message..."
                       />
 
@@ -4191,7 +4814,7 @@ export default function NewChatLanding({
                           audioPlayer.closePlayer();
                           setVoiceOpen(true);
                         }}
-                        className="h-10 w-10 shrink-0 rounded-2xl bg-slate-100/58 text-slate-700 grid place-items-center transition hover:bg-slate-100/78 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.07]"
+                        className="h-11 w-11 shrink-0 rounded-full bg-[linear-gradient(180deg,rgba(239,246,255,0.92),rgba(245,247,252,0.96))] text-[#27415f] grid place-items-center transition hover:bg-slate-100/78 dark:border dark:border-white/[0.12] dark:bg-slate-800 dark:text-white dark:shadow-[0_8px_18px_rgba(0,0,0,0.28)] dark:hover:bg-slate-700"
                         title="Open live voice chat"
                       >
                         <PhoneCall size={16} />
@@ -4200,16 +4823,16 @@ export default function NewChatLanding({
                       <button
                         onClick={() => (hasText ? sendMessage(input) : toggleMic())}
                         className={[
-                          "relative h-10 w-10 shrink-0 rounded-2xl transition grid place-items-center overflow-hidden",
+                          "relative h-11 w-11 shrink-0 rounded-full transition grid place-items-center overflow-hidden",
                           hasText
-                            ? "bg-sky-500 text-white shadow-sm hover:bg-sky-600 active:scale-[0.98]"
-                            : "bg-white/82 text-slate-700 hover:bg-white dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.08]",
+                            ? "bg-[linear-gradient(180deg,#0f7ae5,#0ea5b7)] text-white shadow-[0_10px_20px_rgba(14,165,233,0.26)] hover:brightness-105 active:scale-[0.98]"
+                            : "bg-[linear-gradient(180deg,rgba(239,246,255,0.92),rgba(245,247,252,0.96))] text-[#27415f] hover:bg-white dark:border dark:border-white/[0.12] dark:bg-slate-800 dark:text-white dark:shadow-[0_8px_18px_rgba(0,0,0,0.28)] dark:hover:bg-slate-700",
                         ].join(" ")}
                         title={hasText ? "Send" : "Live AI ready"}
                       >
                       {!hasText ? (
                         <>
-                            <span className="absolute inset-0 rounded-2xl border border-sky-400/18" />
+                            <span className="absolute inset-0 rounded-full border border-sky-300/25" />
                             <Mic size={16} className="relative z-10" />
                           </>
                         ) : (
@@ -4266,113 +4889,94 @@ export default function NewChatLanding({
                 </div>
               ) : null}
 
-              <div ref={desktopMessagesRef} onScroll={handleChatScroll} className="chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain px-1 py-3.5">
+              <div
+                ref={desktopMessagesRef}
+                onScroll={handleChatScroll}
+                className="chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-4 space-y-3"
+              >
                 <div className="max-w-[920px] w-full mx-auto space-y-5 pb-8">
-                {messages.length === 0 ? (
-                  <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-5 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] dark:border-slate-700 dark:bg-slate-900">
-                    <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500 dark:text-slate-300">{timeGreeting()}</div>
-                    <div className="mt-1.5 text-[30px] leading-[1.2] font-semibold text-slate-900 dark:text-white">
-                      {modeConfig.title}
-                    </div>
-                    <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-                      {modeConfig.subtitle}
-                    </div>
-                  </div>
-                ) : null}
-
-                {messages.length > 0 ? <div style={{ height: desktopVirtualWindow.paddingTop }} /> : null}
-                {desktopVirtualWindow.items.map(({ message: m, index: idx }) => (
-                  <div key={idx} ref={(node) => measureVirtualRow("desktop", idx, node)}>
-                    {shouldShowSectionAnchor(idx) ? (
-                      <div className="my-3 flex items-center gap-3">
-                        <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase dark:text-slate-500">
-                          {sectionLabelForIndex(idx)}
-                        </span>
-                        <span className="h-px flex-1 bg-slate-200/70 dark:bg-slate-800" />
+                  {messages.length === 0 ? (
+                    <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
+                      <div className="text-sm text-slate-500 dark:text-slate-300">{timeGreeting()}</div>
+                      <div className="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">
+                        {modeConfig.title}
                       </div>
-                    ) : null}
-                    <Bubble
-                      role={m.role}
-                      text={m.text}
-                      imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
-                      streaming={Boolean(m.streaming)}
-                      imageSearchResults={m.imageSearchResults || []}
-                      imageSearchQuery={m.imageSearchQuery || ""}
-                      sources={m.sources || []}
-                      chatId={activeChat?.conversationId || ""}
-                      messageId={m.id || ""}
-                      shareId={activeChat?.shareId || ""}
-                      shareUrl={activeChat?.shareUrl || ""}
-                      isSharedView={Boolean(activeChat?.isSharedView)}
-                      chatTitle={activeChat?.title || untitledChatBase}
-                      onImagePreview={setImageSearchPreview}
-                      onGeneratedImagePreview={(imageUrl) =>
-                        openPreview({
-                          id: `generated-desktop-${idx}`,
-                          name: "Generated image",
-                          url: imageUrl,
-                          isImage: true,
-                          source: "ai-generated",
-                        })
-                      }
-                      onImageReuse={(result) => {
-                        setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`);
-                        requestAnimationFrame(() => focusPromptInput());
-                      }}
-                      onAssistantSpeak={speakAssistantText}
-                      isSpeaking={isSpeaking}
-                      speakingText={speakingText}
-                      onRetry={() => {
-                        if (lastPrompt) sendMessage(lastPrompt);
-                      }}
-                      onLearnMore={() => sendMessage("Learn more about the error and how I can fix it.")}
-                      onCopy={() => copyPromptText(idx, m.text)}
-                      onEdit={m.role === "user" ? () => editPromptText(m.text) : undefined}
-                      isCopied={copiedMessageIndex === idx}
-                      reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
-                      onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
-                      onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
-                      onShare={() => shareAssistantMessage(m.text)}
-                      onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
-                      onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
-                      onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
-                      onSummarizeTool={() => sendMessage(`Summarize this answer for me:\n\n${m.text}`)}
-                      onNotesTool={() => sendMessage(`Turn this answer into clean study notes:\n\n${m.text}`)}
-                      onFlashcardsTool={() => sendMessage(`Generate revision flashcards (Q/A) from this answer:\n\n${m.text}`)}
-                      onSimplerTool={() => sendMessage(`Explain this answer in simpler student-friendly language:\n\n${m.text}`)}
-                      showStudyTools={!isEmbeddedAdminChat}
-                    />
-                  </div>
-                ))}
-                {messages.length > 0 ? <div style={{ height: desktopVirtualWindow.paddingBottom }} /> : null}
-                <div ref={messagesEndRef} />
+                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                        {modeConfig.subtitle}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {messages.length > 0 ? <div style={{ height: desktopVirtualWindow.paddingTop }} /> : null}
+                  {desktopVirtualWindow.items.map(({ message: m, index: idx }) => (
+                      <div key={idx} ref={(node) => measureVirtualRow("desktop", idx, node)}>
+                        {shouldShowSectionAnchor(idx) ? (
+                          <div className="my-3 flex items-center gap-3">
+                            <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase dark:text-slate-500">
+                              {sectionLabelForIndex(idx)}
+                            </span>
+                            <span className="h-px flex-1 bg-slate-200/70 dark:bg-slate-800" />
+                          </div>
+                        ) : null}
+                        <Bubble
+                          role={m.role}
+                          text={m.text}
+                          imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
+                          streaming={Boolean(m.streaming)}
+                          imageSearchResults={m.imageSearchResults || []}
+                          imageSearchQuery={m.imageSearchQuery || ""}
+                          sources={m.sources || []}
+                          chatId={activeChat?.conversationId || ""}
+                          messageId={m.id || ""}
+                          shareId={activeChat?.shareId || ""}
+                          shareUrl={activeChat?.shareUrl || ""}
+                          isSharedView={Boolean(activeChat?.isSharedView)}
+                          chatTitle={activeChat?.title || untitledChatBase}
+                          onImagePreview={setImageSearchPreview}
+                          onGeneratedImagePreview={(imageUrl) =>
+                            openPreview({
+                              id: `generated-desktop-${idx}`,
+                              name: "Generated image",
+                              url: imageUrl,
+                              isImage: true,
+                              source: "ai-generated",
+                            })
+                          }
+                          onImageReuse={(result) => {
+                            setInput(`Use this image in my workspace/report flow:\nTitle: ${result.title}\nSource: ${result.link}`);
+                            requestAnimationFrame(() => focusPromptInput());
+                          }}
+                          onAssistantSpeak={speakAssistantText}
+                          isSpeaking={isSpeaking}
+                          speakingText={speakingText}
+                          onRetry={() => {
+                            if (lastPrompt) sendMessage(lastPrompt);
+                          }}
+                          onLearnMore={() => sendMessage("Learn more about the error and how I can fix it.")}
+                          onCopy={() => copyPromptText(idx, m.text)}
+                          onEdit={m.role === "user" ? () => editPromptText(m.text) : undefined}
+                          isCopied={copiedMessageIndex === idx}
+                          reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
+                          onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
+                          onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
+                          onShare={() => shareAssistantMessage(m.text)}
+                          onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
+                          onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
+                          onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
+                          onSummarizeTool={() => sendMessage(`Summarize this answer for me:\n\n${m.text}`)}
+                          onNotesTool={() => sendMessage(`Turn this answer into clean study notes:\n\n${m.text}`)}
+                          onFlashcardsTool={() => sendMessage(`Generate revision flashcards (Q/A) from this answer:\n\n${m.text}`)}
+                          onSimplerTool={() => sendMessage(`Explain this answer in simpler student-friendly language:\n\n${m.text}`)}
+                          showStudyTools={!isEmbeddedAdminChat}
+                        />
+                      </div>
+                  ))}
+                  {messages.length > 0 ? <div style={{ height: desktopVirtualWindow.paddingBottom }} /> : null}
+                  <div ref={messagesEndRef} />
                 </div>
               </div>
 
-              {messages.length === 0 ? (
-                <div className="mt-3 flex flex-wrap items-start gap-1.5 shrink-0 max-w-[920px] w-full mx-auto">
-                  {starterSet.map((starter) => {
-                    const isActive = selectedStarter === starter.key;
-                    return (
-                      <button
-                        key={starter.key}
-                        onClick={() => applyStarter(starter)}
-                        className={[
-                          "inline-flex items-center gap-2 rounded-2xl border bg-white/95 px-3 py-2 text-left text-[13px] font-medium text-slate-700 shadow-[0_2px_10px_rgba(15,23,42,0.04)] transition active:scale-[0.99] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100",
-                          isActive
-                            ? "border-sky-300 bg-sky-50 text-slate-900 dark:border-sky-500/70 dark:bg-sky-500/15 dark:text-white"
-                            : "border-slate-200/90 hover:border-slate-300 hover:bg-slate-50 dark:hover:border-slate-600 dark:hover:bg-slate-800",
-                        ].join(" ")}
-                      >
-                        <span className="text-[15px] leading-none">{starter.emoji}</span>
-                        <span>{starter.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              {hasStarterSuggestions ? (
+              {hasStarterSuggestions && !hasConversation ? (
                 <div className="surface-elevated mt-3 rounded-2xl border border-slate-200/80 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0 max-w-[920px] w-full mx-auto dark:border-slate-700 dark:bg-slate-900">
                   <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase dark:text-slate-400">
                     Suggested prompts
@@ -4421,7 +5025,7 @@ export default function NewChatLanding({
                         }
                       }}
                       onPaste={handlePaste}
-                      className="min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-400"
+                      className="composer-plain-input min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-400"
                       placeholder="Type your message..."
                     />
 
@@ -4463,7 +5067,10 @@ export default function NewChatLanding({
                     </button>
 
                     <button
-                      onClick={() => canSend && sendMessage(input)}
+                      onClick={() => {
+                        if (!canSend) return;
+                        sendMessage(input);
+                      }}
                       disabled={!canSend}
                       className={[
                         "h-10 w-10 rounded-xl text-white shadow-sm transition",

@@ -16,11 +16,16 @@ class Conversation(Base):
     app = Column(String, nullable=False, index=True, default="institution")
     title = Column(String, nullable=False, default="New conversation")
     owner_uid = Column(String, nullable=True, index=True)
+    workspace_kind = Column(String, nullable=True, index=True)
+    workspace_settings_json = Column(JSON, nullable=False, default=dict)
+    is_archived = Column(Boolean, nullable=False, index=True, default=False)
+    archived_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     share_links = relationship("ShareLink", back_populates="conversation", cascade="all, delete-orphan")
+    notebook_items = relationship("NotebookItem", back_populates="conversation", cascade="all, delete-orphan")
 
 
 class Message(Base):
@@ -75,6 +80,10 @@ class ShareLink(Base):
     id = Column(String, primary_key=True, index=True)
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
     visibility = Column(String, nullable=False, default="unlisted")
+    access_level = Column(String, nullable=False, default="anyone-with-link")
+    invited_emails_json = Column(JSON, nullable=False, default=list)
+    subgroup_id = Column(Integer, nullable=True, index=True)
+    subgroup_name = Column(String, nullable=True)
     allow_continue_chat = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at = Column(DateTime, nullable=True)
@@ -94,3 +103,19 @@ class ShareLinkMessage(Base):
 
     share_link = relationship("ShareLink", back_populates="share_link_messages")
     message = relationship("Message", back_populates="share_link_messages")
+
+
+class NotebookItem(Base):
+    __tablename__ = "notebook_items"
+
+    id = Column(String, primary_key=True, index=True)
+    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    owner_uid = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False, default="Untitled Note")
+    content = Column(Text, nullable=False, default="")
+    is_archived = Column(Boolean, nullable=False, index=True, default=False)
+    archived_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    conversation = relationship("Conversation", back_populates="notebook_items")

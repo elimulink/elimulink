@@ -64,6 +64,7 @@ import ScreenshotPreviewToast from './shared/chat-media/ScreenshotPreviewToast.j
 import useCapturedMedia from './shared/chat-media/useCapturedMedia.js';
 import LiveMultimodalSessionContainerV2 from './shared/live/LiveMultimodalSessionContainerV2.jsx';
 import { isImageGenerationPrompt } from './shared/image-generation/imageGenerationIntent.js';
+import DesktopSettingsLauncher from './shared/settings/DesktopSettingsLauncher.jsx';
 import './shared/audio/audio-ui.css';
 import './shared/chat-media/chat-media.css';
 
@@ -218,6 +219,9 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
   const [adminPasscode, setAdminPasscode] = useState('');
   const [externalApiUrl, setExternalApiUrl] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDesktopSettingsLauncherOpen, setIsDesktopSettingsLauncherOpen] = useState(false);
+  const [selectedDesktopSettingsSection, setSelectedDesktopSettingsSection] = useState('general');
+  const [desktopSettingsAnchorKey, setDesktopSettingsAnchorKey] = useState('footer');
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('elimulink_settings');
     return saved ? JSON.parse(saved) : { theme: 'dark', aiTone: 'Academic', useGoogleSearch: true, userName: 'Guest Scholar' };
@@ -278,6 +282,32 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
     dismissToast,
   } = useCapturedMedia();
   const [aiEditItem, setAiEditItem] = useState(null);
+  const accountSettingsTriggerRef = useRef(null);
+  const footerSettingsTriggerRef = useRef(null);
+  const desktopSettingsAnchorRef =
+    desktopSettingsAnchorKey === 'account' ? accountSettingsTriggerRef : footerSettingsTriggerRef;
+
+  function openDesktopSettingsLauncher(anchorKey = 'footer') {
+    const isDesktopViewport = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches;
+    if (!isDesktopViewport) {
+      setIsSettingsOpen(true);
+      return;
+    }
+    setDesktopSettingsAnchorKey(anchorKey);
+    setIsDesktopSettingsLauncherOpen(true);
+  }
+
+  function handleDesktopSettingsSectionSelect(sectionId) {
+    setSelectedDesktopSettingsSection(sectionId);
+    setIsDesktopSettingsLauncherOpen(false);
+    setIsSettingsOpen(true);
+  }
+
+  useEffect(() => {
+    if (isSettingsOpen || isMobile) {
+      setIsDesktopSettingsLauncherOpen(false);
+    }
+  }, [isSettingsOpen, isMobile]);
 
   // Time-aware greeting helper (keeps inside component scope)
   const getGreeting = () => {
@@ -1545,7 +1575,9 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
                 <div>
                   <p className="px-2 pb-2 text-xs text-gray-400 uppercase">Account</p>
                   <div className="space-y-1">
-                    <ExecutiveSidebarItem icon={Settings} label="Settings & Profile" onClick={() => setIsSettingsOpen(true)} />
+                    <div ref={accountSettingsTriggerRef}>
+                      <ExecutiveSidebarItem icon={Settings} label="Settings & Profile" onClick={() => openDesktopSettingsLauncher('account')} />
+                    </div>
                     <ExecutiveSidebarItem icon={Bell} label="Notifications" onClick={() => {}} />
                     <ExecutiveSidebarItem icon={Home} label="Institution Snapshot" onClick={handlePortalClick} />
                   </div>
@@ -1558,7 +1590,9 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
         <div className="p-3 border-t border-slate-800 space-y-1">
           {isInstitutionHost ? (
             <>
-              <SidebarItem icon={Settings} label="Settings" onClick={() => setIsSettingsOpen(true)} />
+              <div ref={footerSettingsTriggerRef}>
+                <SidebarItem icon={Settings} label="Settings" onClick={() => openDesktopSettingsLauncher('footer')} />
+              </div>
               <SidebarItem icon={HelpCircle} label="Help" onClick={() => {}} />
             </>
           ) : (
@@ -2168,6 +2202,12 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
           </div>
         </div>
       )}
+      <DesktopSettingsLauncher
+        open={isDesktopSettingsLauncherOpen}
+        anchorRef={desktopSettingsAnchorRef}
+        onClose={() => setIsDesktopSettingsLauncherOpen(false)}
+        onSelectSection={handleDesktopSettingsSectionSelect}
+      />
       {isSettingsOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-white/10 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl">

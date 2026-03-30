@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost } from "../lib/apiClient";
+import { apiGet, apiPost, fetchResultDetail, fetchResultsSummary } from "../lib/apiClient";
 import { auth } from "../lib/firebase";
+import ResultsDesktopLanding from "./ResultsDesktopLanding";
+import MobileFeatureLandingShell from "../shared/feature-landing/MobileFeatureLandingShell";
 import {
+  ArrowLeft,
+  Archive,
   BarChart3,
   TrendingUp,
   AlertTriangle,
@@ -10,14 +14,19 @@ import {
   Printer,
   GraduationCap,
   BookOpen,
+  Copy,
   Info,
   Sparkles,
   Target,
   SlidersHorizontal,
   FileText,
+  PenLine,
+  Rows3,
+  Trash2,
   X,
   ChevronDown,
   ChevronUp,
+  Plus,
 } from "lucide-react";
 
 const DESKTOP_TABS = [
@@ -38,18 +47,11 @@ const MOBILE_TABS = [
 
 const RESULTS_HISTORY_KEY = "resultsMobileState";
 const DEFAULT_SNAPSHOT = {
-  gpa: 3.52,
-  cgpa: 3.31,
-  credits: 74,
-  standing: "Good Standing",
+  gpa: 0,
+  cgpa: 0,
+  credits: 0,
+  standing: "No published results",
 };
-const DEFAULT_SEMESTER_ROWS = [
-  { code: "CSC 210", name: "Data Structures", cat: 18, exam: 42, total: 60, grade: "B", credits: 3, remark: "Pass" },
-  { code: "MAT 201", name: "Calculus II", cat: 14, exam: 31, total: 45, grade: "C", credits: 3, remark: "Pass" },
-  { code: "STA 205", name: "Probability", cat: 11, exam: 28, total: 39, grade: "D", credits: 3, remark: "Repeat" },
-  { code: "CSC 220", name: "OOP (Java)", cat: 20, exam: 48, total: 68, grade: "B+", credits: 3, remark: "Pass" },
-  { code: "COM 212", name: "Technical Writing", cat: 22, exam: 50, total: 72, grade: "A-", credits: 2, remark: "Pass" },
-];
 
 function resolveBackendUserId() {
   const uid = String(auth?.currentUser?.uid || "");
@@ -242,7 +244,8 @@ function Drawer({ open, title, onClose, children }) {
   );
 }
 
-export default function ResultsPage() {
+export default function ResultsPage({ onOpenMainMenu, audience = "institution" }) {
+  const isStudentAudience = audience === "student";
   const [tab, setTab] = useState("overview");
   const [mobileTabsCollapsed, setMobileTabsCollapsed] = useState(true);
   const [mobileTabFullscreen, setMobileTabFullscreen] = useState(false);
@@ -266,14 +269,12 @@ export default function ResultsPage() {
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsError, setResultsError] = useState("");
 
-  const gpaTrend = useMemo(() => [2.9, 3.1, 3.15, 3.22, 3.31, 3.52], []);
-  const creditsTrend = useMemo(() => [12, 15, 15, 16, 16, 0], []);
-  const gradeDist = useMemo(
-    () => ({ A: 6, B: 9, C: 3, D: 1, E: 0 }),
-    []
-  );
+  const [gpaTrend, setGpaTrend] = useState([]);
+  const [creditsTrend, setCreditsTrend] = useState([]);
+  const [gradeDist, setGradeDist] = useState({ A: 0, B: 0, C: 0, D: 0, E: 0 });
+  const [transcriptTerms, setTranscriptTerms] = useState([]);
 
-  const [semesterRows, setSemesterRows] = useState(DEFAULT_SEMESTER_ROWS);
+  const [semesterRows, setSemesterRows] = useState([]);
 
   const risks = useMemo(
     () => [
@@ -332,10 +333,106 @@ export default function ResultsPage() {
   const [targetCgpa, setTargetCgpa] = useState("3.50");
   const [nextCredits, setNextCredits] = useState("18");
   const [nextGpaGuess, setNextGpaGuess] = useState("3.70");
+  const [showDesktopLanding, setShowDesktopLanding] = useState(
+    () => !(typeof window !== "undefined" ? window.matchMedia("(max-width: 767px)").matches : false)
+  );
+  const [showMobileLanding, setShowMobileLanding] = useState(
+    () => typeof window !== "undefined" ? window.matchMedia("(max-width: 767px)").matches : false
+  );
+  const [activeMobileSection, setActiveMobileSection] = useState("overview");
+  const [isMobileSectionMenuOpen, setIsMobileSectionMenuOpen] = useState(false);
+  const [isLandingMenuOpen, setIsLandingMenuOpen] = useState(false);
+  const [isLandingShareOpen, setIsLandingShareOpen] = useState(false);
+  const [isLandingSettingsOpen, setIsLandingSettingsOpen] = useState(false);
+  const [isLandingUtilityMenuOpen, setIsLandingUtilityMenuOpen] = useState(false);
+  const [landingRowMenuId, setLandingRowMenuId] = useState(null);
+  const [landingMoveMenuId, setLandingMoveMenuId] = useState(null);
+  const [landingShareInvite, setLandingShareInvite] = useState("");
+  const [landingShareAccess, setLandingShareAccess] = useState("institution only");
+  const [landingShareStatus, setLandingShareStatus] = useState("");
+  const [landingWorkspaceStatus, setLandingWorkspaceStatus] = useState("");
+  const [landingDeleteOpen, setLandingDeleteOpen] = useState(false);
+  const [landingWorkspaceSettings, setLandingWorkspaceSettings] = useState({
+    name: "Results Workspace",
+    description: "Review semester performance, transcripts, and trends in one calm results workspace.",
+    linkedInstitution: isStudentAudience ? "Your academic record" : "ElimuLink University",
+    defaultView: "semester results",
+    collaboration: isStudentAudience ? "personal review" : "institution review",
+  });
 
   function openCourse(row) {
     setSelectedCourse(row);
     setDrawerOpen(true);
+  }
+
+  const landingRows = useMemo(
+    () =>
+      semesterRows.map((row) => ({
+        id: row.code,
+        title: row.name,
+        preview: `${row.code} • ${semester} • Grade ${row.grade || "N/A"} • ${row.remark || "Published result"}`,
+        meta: row.total != null ? `${row.total} total` : "Published",
+        source: row,
+      })),
+    [semesterRows, semester]
+  );
+
+  function openLandingResultRow(item) {
+    const userId = resolveBackendUserId();
+    fetchResultDetail(userId, item.id)
+      .then((data) => {
+        setTab("semester");
+        openCourse(data?.result || item.source);
+        setShowDesktopLanding(false);
+        setShowMobileLanding(false);
+      })
+      .catch(() => {
+        setTab("semester");
+        openCourse(item.source);
+        setShowDesktopLanding(false);
+        setShowMobileLanding(false);
+      });
+  }
+
+  function renameLandingResultRow(rowId) {
+    const target = semesterRows.find((row) => row.code === rowId);
+    if (!target) return;
+    setLandingWorkspaceStatus(`${target.name} is an official published result and cannot be renamed here.`);
+  }
+
+  function moveLandingResultRow(rowId, destination) {
+    const target = semesterRows.find((row) => row.code === rowId);
+    if (!target) return;
+    setLandingWorkspaceStatus(`${target.name} is prepared to move into ${destination} as a safe frontend-first Results action.`);
+  }
+
+  function archiveLandingResultRow(rowId) {
+    const target = semesterRows.find((row) => row.code === rowId);
+    if (!target) return;
+    setLandingWorkspaceStatus(`${target.name} is an official published result and cannot be archived here.`);
+  }
+
+  function deleteLandingResultRow(rowId) {
+    const target = semesterRows.find((row) => row.code === rowId);
+    if (!target) return;
+    setLandingWorkspaceStatus(`${target.name} is an official published result and cannot be deleted here.`);
+  }
+
+  function renameResultsWorkspace() {
+    const nextName = window.prompt("Rename results workspace", landingWorkspaceSettings.name);
+    if (!nextName) return;
+    const normalized = nextName.trim();
+    if (!normalized) return;
+    setLandingWorkspaceSettings((prev) => ({ ...prev, name: normalized }));
+    setLandingWorkspaceStatus("Results workspace renamed.");
+  }
+
+  function moveResultsWorkspace() {
+    setLandingWorkspaceStatus("Move to workspace is prepared here as a safe frontend-first Results action.");
+  }
+
+  function archiveResultsWorkspace() {
+    setLandingWorkspaceStatus("Archive is prepared here as a safe frontend-first Results action.");
   }
 
   async function sendAI(text) {
@@ -589,12 +686,12 @@ export default function ResultsPage() {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card title="GPA Trend" subtitle="Historical GPA per semester" icon={TrendingUp} right={<Badge tone="indigo">Trend</Badge>}>
-          <LineChart points={gpaTrend} />
+          <LineChart points={gpaTrend.length ? gpaTrend : [0]} />
         </Card>
 
-        <Card title="Credits Trend" subtitle="Credits taken per semester (sample)" icon={BarChart3}>
+        <Card title="Credits Trend" subtitle="Credits recorded per published term" icon={BarChart3}>
           <div className="space-y-3">
-            {creditsTrend.map((c, i) => (
+            {(creditsTrend.length ? creditsTrend : [0]).map((c, i) => (
               <MiniBar key={i} label={`S${i + 1}`} value={c} max={18} />
             ))}
           </div>
@@ -672,11 +769,27 @@ export default function ResultsPage() {
   function Transcript() {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card title="Unofficial Transcript" subtitle="Download or print (backend later)" icon={FileText}>
+        <Card title="Unofficial Transcript" subtitle="Published terms and units from the current backend source" icon={FileText}>
           <div className="space-y-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-              Shows all semesters, grades, credits, and CGPA. (PDF generation later)
-            </div>
+            {transcriptTerms.length ? (
+              <div className="space-y-3">
+                {transcriptTerms.map((term) => (
+                  <div key={term.term} className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold text-slate-900">{term.term}</span>
+                      <Badge tone="indigo">{Number(term.gpa || 0).toFixed(2)}</Badge>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {term.courses} units • {term.credits} credits
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                No transcript rows are available from the current backend source yet.
+              </div>
+            )}
             <div className="flex gap-2 flex-wrap">
               <PrimaryButton icon={Download} onClick={() => alert("Generate PDF (backend later)")}>
                 Download PDF
@@ -715,6 +828,15 @@ export default function ResultsPage() {
     if (!isMobileViewport) {
       setMobileTabFullscreen(false);
       setMobileTabsCollapsed(true);
+      setShowMobileLanding(false);
+    }
+  }, [isMobileViewport]);
+
+  useEffect(() => {
+    if (isMobileViewport) {
+      setShowDesktopLanding(false);
+    } else {
+      setShowMobileLanding(false);
     }
   }, [isMobileViewport]);
 
@@ -737,33 +859,40 @@ export default function ResultsPage() {
       setResultsError("");
       const userId = resolveBackendUserId();
       try {
-        const data = await apiGet(`/api/results/${userId}`);
+        const data = await fetchResultsSummary(userId);
         if (!active) return;
         const nextSnapshot = {
           ...DEFAULT_SNAPSHOT,
           gpa: Number.isFinite(Number(data?.gpa)) ? Number(data.gpa) : DEFAULT_SNAPSHOT.gpa,
           cgpa: Number.isFinite(Number(data?.cgpa)) ? Number(data.cgpa) : DEFAULT_SNAPSHOT.cgpa,
+          credits: Number.isFinite(Number(data?.credits)) ? Number(data.credits) : DEFAULT_SNAPSHOT.credits,
+          standing: String(data?.standing || DEFAULT_SNAPSHOT.standing),
         };
         setSnapshot(nextSnapshot);
-        if (Array.isArray(data?.semester) && data.semester.length > 0) {
-          const mapped = data.semester.map((item, idx) => {
-            const gradeText = String(item?.grade || "B");
-            return {
-              code: String(item?.course || `COURSE ${idx + 1}`),
-              name: String(item?.course || `Course ${idx + 1}`),
-              cat: item?.cat ?? 0,
-              exam: item?.exam ?? 0,
-              total: item?.total ?? 0,
-              grade: gradeText,
-              credits: item?.credits ?? 3,
-              remark: item?.remark || (gradeText.includes("F") ? "Repeat" : "Pass"),
-            };
-          });
-          setSemesterRows(mapped);
-        }
+        setSemester(data?.current_term || "Published results");
+        setSemesterRows(Array.isArray(data?.semester) ? data.semester : []);
+        setTranscriptTerms(Array.isArray(data?.transcript) ? data.transcript : []);
+        setGpaTrend(Array.isArray(data?.trends?.gpa) ? data.trends.gpa : []);
+        setCreditsTrend(Array.isArray(data?.trends?.credits) ? data.trends.credits : []);
+        setGradeDist(
+          data?.grade_distribution && typeof data.grade_distribution === "object"
+            ? {
+                A: Number(data.grade_distribution.A || 0),
+                B: Number(data.grade_distribution.B || 0),
+                C: Number(data.grade_distribution.C || 0),
+                D: Number(data.grade_distribution.D || 0),
+                E: Number(data.grade_distribution.E || 0),
+              }
+            : { A: 0, B: 0, C: 0, D: 0, E: 0 }
+        );
       } catch (error) {
         if (!active) return;
         setResultsError(error?.message || "Failed to load results.");
+        setSemesterRows([]);
+        setTranscriptTerms([]);
+        setGpaTrend([]);
+        setCreditsTrend([]);
+        setGradeDist({ A: 0, B: 0, C: 0, D: 0, E: 0 });
       } finally {
         if (active) setResultsLoading(false);
       }
@@ -814,6 +943,40 @@ export default function ResultsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, mobileTabFullscreen]);
 
+  useEffect(() => {
+    const handlePointerDown = (event) => {
+      if (
+        event.target?.closest?.("[data-results-landing-menu]") ||
+        event.target?.closest?.("[data-results-utility-menu]") ||
+        event.target?.closest?.("[data-results-row-menu]")
+      ) {
+        return;
+      }
+      setIsLandingMenuOpen(false);
+      setIsLandingUtilityMenuOpen(false);
+      setLandingRowMenuId(null);
+      setLandingMoveMenuId(null);
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      setIsLandingMenuOpen(false);
+      setIsLandingUtilityMenuOpen(false);
+      setLandingRowMenuId(null);
+      setLandingMoveMenuId(null);
+      setIsLandingShareOpen(false);
+      setIsLandingSettingsOpen(false);
+      setLandingDeleteOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
   function handleMobileTabSelect(nextTab) {
     setTab(nextTab);
     setMobileTabsCollapsed(true);
@@ -823,13 +986,469 @@ export default function ResultsPage() {
     }
   }
 
+  const mobileSectionItems = useMemo(
+    () => [
+      { key: "overview", label: "Overview", icon: TrendingUp },
+      { key: "semester", label: "Semester", icon: BookOpen },
+      { key: "trends", label: "Trends", icon: BarChart3 },
+      { key: "insights", label: "Insights", icon: Sparkles },
+      { key: "transcript", label: "Transcript", icon: FileText },
+    ],
+    []
+  );
+
+  function openMobileSection(sectionKey) {
+    setIsMobileSectionMenuOpen(false);
+    setActiveMobileSection(sectionKey);
+    setTab(sectionKey);
+    setMobileTabsCollapsed(true);
+    setMobileTabFullscreen(false);
+    setShowMobileLanding(false);
+  }
+
+  if (!isMobileViewport && showDesktopLanding) {
+    return (
+      <ResultsDesktopLanding
+        isLandingMenuOpen={isLandingMenuOpen}
+        setIsLandingMenuOpen={setIsLandingMenuOpen}
+        isLandingShareOpen={isLandingShareOpen}
+        setIsLandingShareOpen={setIsLandingShareOpen}
+        isLandingSettingsOpen={isLandingSettingsOpen}
+        setIsLandingSettingsOpen={setIsLandingSettingsOpen}
+        isLandingUtilityMenuOpen={isLandingUtilityMenuOpen}
+        setIsLandingUtilityMenuOpen={setIsLandingUtilityMenuOpen}
+        landingRowMenuId={landingRowMenuId}
+        setLandingRowMenuId={setLandingRowMenuId}
+        landingMoveMenuId={landingMoveMenuId}
+        setLandingMoveMenuId={setLandingMoveMenuId}
+        landingShareInvite={landingShareInvite}
+        setLandingShareInvite={setLandingShareInvite}
+        landingShareAccess={landingShareAccess}
+        setLandingShareAccess={setLandingShareAccess}
+        landingShareStatus={landingShareStatus}
+        setLandingShareStatus={setLandingShareStatus}
+        landingWorkspaceStatus={landingWorkspaceStatus}
+        setLandingWorkspaceStatus={setLandingWorkspaceStatus}
+        landingDeleteOpen={landingDeleteOpen}
+        setLandingDeleteOpen={setLandingDeleteOpen}
+        landingWorkspaceSettings={landingWorkspaceSettings}
+        setLandingWorkspaceSettings={setLandingWorkspaceSettings}
+        landingRows={landingRows}
+        resultsLoading={resultsLoading}
+        snapshot={snapshot}
+        onOpenRow={openLandingResultRow}
+        onPrimaryAction={() => {
+          setTab("semester");
+          setShowDesktopLanding(false);
+        }}
+        onQuickSemester={() => {
+          setTab("semester");
+          setShowDesktopLanding(false);
+        }}
+        onQuickTranscript={() => {
+          setTab("transcript");
+          setShowDesktopLanding(false);
+        }}
+        onQuickTrends={() => {
+          setTab("trends");
+          setShowDesktopLanding(false);
+        }}
+        onQuickSubgroup={() => {
+          setLandingWorkspaceStatus("Subgroup routing is prepared here as a safe frontend-first Results shortcut.");
+          setIsLandingSettingsOpen(true);
+        }}
+        onRenameWorkspace={renameResultsWorkspace}
+        onMoveWorkspace={moveResultsWorkspace}
+        onArchiveWorkspace={archiveResultsWorkspace}
+        onRenameRow={renameLandingResultRow}
+        onMoveRow={moveLandingResultRow}
+        onArchiveRow={archiveLandingResultRow}
+        onDeleteRow={deleteLandingResultRow}
+      />
+    );
+  }
+
+  if (isMobileViewport && showMobileLanding) {
+    return (
+      <MobileFeatureLandingShell
+        featureName="Results"
+        featureSubtitle="Semester performance and calmer review"
+        featureDescription={isStudentAudience ? "Scan your published results, jump into transcript or trends, and open a focused review section only when you need more detail." : "Scan published results, jump into transcript or trends, and enter the full results workspace only when deeper analysis is needed."}
+        featureIcon={GraduationCap}
+        featureStyle="soft"
+        workspaceLabel={landingWorkspaceSettings.name}
+        workspaceHint={landingWorkspaceSettings.description}
+        workspaceBadge={isStudentAudience ? "Student workspace" : "Institution workspace"}
+        hideInstitutionStrip
+        quickActions={[
+          { key: "latest", label: "Latest results", icon: BookOpen, onClick: () => openMobileSection("semester") },
+          { key: "transcript", label: "Transcript", icon: FileText, onClick: () => openMobileSection("transcript") },
+          { key: "trends", label: "Trends", icon: TrendingUp, onClick: () => openMobileSection("trends") },
+          { key: "insights", label: "AI insights", icon: Sparkles, onClick: () => openMobileSection("insights") },
+        ]}
+        quickActionsStyle="rows"
+        utilityActions={[
+          { key: "rename-workspace", label: "Rename workspace", icon: PenLine, onClick: renameResultsWorkspace },
+          { key: "move-workspace", label: "Move workspace", icon: Rows3, onClick: moveResultsWorkspace },
+          { key: "archive-workspace", label: "Archive workspace", icon: Archive, onClick: archiveResultsWorkspace },
+          {
+            key: "delete-workspace",
+            label: "Delete workspace",
+            icon: Trash2,
+            destructive: true,
+            onClick: () => {
+              setLandingWorkspaceStatus("Delete stays protected in the full results workspace.");
+              setShowMobileLanding(false);
+            },
+          },
+        ]}
+        shareConfig={{
+          title: "Share Results",
+          description: "Choose who can access this results workspace and keep the share flow readable on mobile.",
+          emailLabel: "Invite reviewer",
+          emailPlaceholder: "advisor@example.com",
+          accessLabel: "Access level",
+          accessOptions: [
+            { value: "institution only", label: isStudentAudience ? "Private" : "Institution only" },
+            { value: "published summary", label: "Published summary" },
+            { value: "review access", label: "Review access" },
+          ],
+          defaultAccess: landingShareAccess,
+          membersTitle: "Results owner",
+          members: [{ key: "owner", label: "Results workspace", role: "Owner" }],
+          privacyNote: "Results sharing remains frontend-first here, but the share experience is now a full mobile surface.",
+          submitLabel: "Save share setup",
+        }}
+        items={landingRows.map((item) => ({
+          ...item,
+          actions: [
+            { key: "share", label: "Share", icon: Copy, onClick: () => setLandingShareStatus(`Sharing for "${item.title}" is prepared here as a safe frontend-first action.`) },
+            { key: "open", label: "Open result", icon: BookOpen, onClick: () => openLandingResultRow(item) },
+            { key: "rename", label: "Rename", icon: PenLine, onClick: () => renameLandingResultRow(item.id) },
+            { key: "move", label: "Move", icon: Rows3, onClick: () => moveLandingResultRow(item.id, "Transcript") },
+            { key: "archive", label: "Archive", icon: Archive, onClick: () => archiveLandingResultRow(item.id) },
+            { key: "delete", label: "Delete", icon: Trash2, destructive: true, onClick: () => deleteLandingResultRow(item.id) },
+          ],
+        }))}
+        listStyle="plain"
+        inputPlaceholder="Ask about your results"
+        inputValue={aiInput}
+        onInputChange={setAiInput}
+        onInputSubmit={(value) => {
+          openMobileSection("insights");
+          sendAI(value);
+        }}
+        onMenu={onOpenMainMenu || (() => {
+          setTab("overview");
+          setShowMobileLanding(false);
+        })}
+        onShare={() => {
+          setLandingWorkspaceStatus("Share is prepared here as a safe frontend-first Results action.");
+          setShowMobileLanding(false);
+        }}
+        onShareSubmit={async ({ email, access }) => {
+          setLandingShareInvite(email);
+          setLandingShareAccess(access);
+          setLandingShareStatus(email ? `Results sharing prepared for ${email}.` : `Results access saved as ${access}.`);
+          return { status: email ? `Results sharing prepared for ${email}.` : `Results access saved as ${access}.` };
+        }}
+        onSettings={() => {
+          openMobileSection("overview");
+        }}
+        onNewWork={() => {
+          openMobileSection("semester");
+        }}
+        onStartCall={() => {
+          openMobileSection("insights");
+        }}
+        onOpenItem={(item) => {
+          openMobileSection("semester");
+          openLandingResultRow(item);
+        }}
+        emptyStateTitle="No results published yet"
+        emptyState="Published result rows will appear here once the semester data is ready."
+      />
+    );
+  }
+
+  if (isMobileViewport) {
+    const activeMobileMeta = mobileSectionItems.find((item) => item.key === activeMobileSection) || mobileSectionItems[0];
+
+    return (
+      <div className="relative min-h-[100dvh] overflow-x-hidden bg-[radial-gradient(circle_at_top,#162846_0%,#10192f_58%,#0b1220_100%)] px-5 pb-28 pt-5 text-white">
+        <div className="space-y-6">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Results</div>
+            <div className="mt-2 text-[30px] font-semibold leading-[1.08] text-white">
+              {activeMobileSection === "overview" ? "Results Overview" : null}
+              {activeMobileSection === "semester" ? "Semester Results" : null}
+              {activeMobileSection === "trends" ? "Performance Trends" : null}
+              {activeMobileSection === "insights" ? "Insights" : null}
+              {activeMobileSection === "transcript" ? "Transcript" : null}
+            </div>
+            <div className="mt-2 max-w-[34ch] text-[15px] leading-7 text-slate-300">
+              {activeMobileSection === "overview" ? "A calmer result summary with your GPA, credits, and current standing." : null}
+              {activeMobileSection === "semester" ? "Read the current semester results without the old mobile section boxes." : null}
+              {activeMobileSection === "trends" ? "Follow GPA and credits patterns in one cleaner view." : null}
+              {activeMobileSection === "insights" ? "Keep risks, strengths, and AI explanation in one focused place." : null}
+              {activeMobileSection === "transcript" ? "Review published terms in a simpler transcript view." : null}
+            </div>
+          </div>
+
+          {resultsLoading ? <div className="text-sm font-medium text-slate-400">Loading results...</div> : null}
+          {resultsError ? <div className="text-sm font-medium text-rose-300">{resultsError}</div> : null}
+          {aiError ? <div className="text-sm font-medium text-rose-300">{aiError}</div> : null}
+
+          {activeMobileSection === "overview" ? (
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Current standing</div>
+                <div className="text-[28px] font-semibold leading-tight text-white">{snapshot.standing || "No published results"}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">GPA</div>
+                  <div className="mt-2 text-[24px] font-semibold text-white">{snapshot.gpa ?? 0}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">CGPA</div>
+                  <div className="mt-2 text-[24px] font-semibold text-white">{snapshot.cgpa ?? 0}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Credits</div>
+                  <div className="mt-2 text-[24px] font-semibold text-white">{snapshot.credits ?? 0}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Year</div>
+                  <div className="mt-2 text-[18px] font-medium text-slate-200">{year}</div>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">At risk</div>
+                {risks.map((risk) => (
+                  <div key={risk.code}>
+                    <div className="text-base font-semibold text-white">{risk.code} - {risk.name}</div>
+                    <div className="mt-1 text-sm leading-6 text-slate-300">{risk.issue}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "semester" ? (
+            <div className="space-y-5">
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Academic year</div>
+                  <div className="mt-2 text-[16px] text-white">{year}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Semester</div>
+                  <div className="mt-2 text-[16px] text-white">{semester}</div>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {semesterRows.map((row) => (
+                  <button
+                    key={row.code}
+                    type="button"
+                    onClick={() => openCourse(row)}
+                    className="block w-full text-left"
+                  >
+                    <div className="text-base font-semibold text-white">{row.code} - {row.name}</div>
+                    <div className="mt-1 text-sm leading-6 text-slate-300">
+                      Grade {row.grade || "N/A"} • Total {row.total ?? "N/A"} • {row.remark || "Published result"}
+                    </div>
+                  </button>
+                ))}
+                {!semesterRows.length && !resultsLoading ? (
+                  <div className="text-[15px] leading-7 text-slate-300">No semester rows are available yet.</div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "trends" ? (
+            <div className="space-y-6">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">GPA trend</div>
+                <div className="mt-3 rounded-[28px] bg-white/[0.03] p-3">
+                  <LineChart points={gpaTrend.length ? gpaTrend : [0, 0, 0, 0]} />
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Credits trend</div>
+                {(creditsTrend.length ? creditsTrend : [0]).map((value, index) => (
+                  <div key={index} className="flex items-center gap-3">
+                    <div className="w-10 text-xs font-semibold text-slate-400">{`S${index + 1}`}</div>
+                    <div className="h-2 flex-1 rounded-full bg-white/[0.08]">
+                      <div className="h-full rounded-full bg-cyan-400" style={{ width: `${Math.max(8, Math.min(100, (value / 18) * 100))}%` }} />
+                    </div>
+                    <div className="w-8 text-right text-xs font-semibold text-slate-300">{value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "insights" ? (
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Skills</div>
+                {skills.map((skill) => (
+                  <div key={skill.label}>
+                    <div className="text-base font-semibold text-white">{skill.label}</div>
+                    <div className="mt-1 text-sm leading-6 text-slate-300">{skill.level}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Ask AI</div>
+                <label className="block">
+                  <textarea
+                    value={aiInput}
+                    onChange={(event) => setAiInput(event.target.value)}
+                    placeholder="Ask about your results..."
+                    rows={5}
+                    className="w-full border-0 bg-white/[0.04] px-0 py-0 text-[15px] leading-7 text-white outline-none placeholder:text-slate-500"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => sendAI(aiInput)}
+                  disabled={aiBusy}
+                  className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(90deg,#2563eb,#14b8a6)] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  <Sparkles size={16} />
+                  {aiBusy ? "Thinking..." : "Explain results"}
+                </button>
+                {aiMsgs.slice(-3).map((message, index) => (
+                  <div key={`${message.role}-${index}`} className="text-[15px] leading-7 text-slate-300">
+                    {message.text}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "transcript" ? (
+            <div className="space-y-6">
+              {transcriptTerms.map((term) => (
+                <div key={term.term} className="space-y-3">
+                  <div>
+                    <div className="text-base font-semibold text-white">{term.term}</div>
+                    <div className="mt-1 text-sm leading-6 text-slate-300">
+                      GPA {term.gpa ?? "N/A"} • Credits {term.credits ?? "N/A"}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {(term.rows || []).map((row) => (
+                      <div key={`${term.term}-${row.code}`} className="text-sm leading-6 text-slate-300">
+                        {row.code} - {row.name} • {row.grade || "N/A"}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {!transcriptTerms.length && !resultsLoading ? (
+                <div className="text-[15px] leading-7 text-slate-300">No transcript terms are available yet.</div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-end px-5 pb-8">
+          <div className="relative pointer-events-auto">
+            {isMobileSectionMenuOpen ? (
+              <div className="absolute bottom-20 right-0 flex flex-col items-end gap-3">
+                {[...mobileSectionItems].reverse().map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => openMobileSection(item.key)}
+                      className="inline-flex items-center gap-3 rounded-full bg-[#066b2f] px-5 py-4 text-sm font-semibold text-white shadow-[0_16px_36px_rgba(6,107,47,0.34)]"
+                    >
+                      <Icon size={18} />
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => setIsMobileSectionMenuOpen((prev) => !prev)}
+              className="inline-flex h-16 w-16 items-center justify-center rounded-[22px] bg-[#066b2f] text-white shadow-[0_18px_42px_rgba(6,107,47,0.34)]"
+              aria-label={isMobileSectionMenuOpen ? "Close sections" : "Open sections"}
+              title={activeMobileMeta.label}
+            >
+              <Plus size={28} className={isMobileSectionMenuOpen ? "rotate-45 transition-transform" : "transition-transform"} />
+            </button>
+          </div>
+        </div>
+
+        <Drawer
+          open={drawerOpen}
+          title={selectedCourse ? `${selectedCourse.code} • ${selectedCourse.name}` : "Course Breakdown"}
+          onClose={() => setDrawerOpen(false)}
+        >
+          {!selectedCourse || !breakdown ? (
+            <div className="text-sm text-slate-600">No breakdown data yet.</div>
+          ) : (
+            <div className="space-y-4">
+              <Card title="Grade Composition" subtitle="Weights vs achieved score (sample)" icon={BookOpen}>
+                <div className="space-y-3">
+                  {breakdown.composition.map((x) => (
+                    <div key={x.k} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-extrabold text-slate-900">{x.k}</div>
+                        <Badge tone="indigo">{x.w}%</Badge>
+                      </div>
+                      <div className="mt-2 text-sm text-slate-700">
+                        Score contribution: <b>{x.s}</b>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+        </Drawer>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full bg-slate-100 p-4 md:p-6 h-[100dvh] overflow-hidden flex flex-col md:min-h-[100dvh] md:h-auto md:overflow-visible">
       {!hideMobilePageHeader ? (
         <>
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
+              {!isMobileViewport ? (
+                <div className="mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDesktopLanding(true)}
+                    className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <ArrowLeft size={12} />
+                    Workspace
+                  </button>
+                </div>
+              ) : null}
               <div className="text-xl font-extrabold text-slate-900">Results</div>
+              {isMobileViewport ? (
+                <button
+                  type="button"
+                  onClick={() => setShowMobileLanding(true)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Landing
+                </button>
+              ) : null}
               <div className="text-sm text-slate-600">
                 Understand your performance with trends, breakdowns, and improvement guidance.
               </div>

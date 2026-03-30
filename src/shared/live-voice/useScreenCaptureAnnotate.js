@@ -92,6 +92,7 @@ export function useScreenCaptureAnnotate({ onAskVision } = {}) {
 
       try {
         let highlights = [];
+        let answer = "";
 
         if (onAskVision) {
           const result = await onAskVision({
@@ -102,6 +103,7 @@ export function useScreenCaptureAnnotate({ onAskVision } = {}) {
           });
 
           highlights = Array.isArray(result?.highlights) ? result.highlights : [];
+          answer = String(result?.answer || "").trim();
         }
 
         if (!highlights.length) {
@@ -131,7 +133,10 @@ export function useScreenCaptureAnnotate({ onAskVision } = {}) {
           previewUrl: rendered.dataUrl,
           rawDataUrl: rawCapture.rawDataUrl,
           highlightedDataUrl: rendered.dataUrl,
+          width: rawCapture.width || rendered.width,
+          height: rawCapture.height || rendered.height,
           highlights,
+          answer,
           createdAt: Date.now(),
         };
 

@@ -31,13 +31,13 @@
   --el-bg-card: #ffffff;
   --el-bg-input: #ffffff;
   --el-text-primary: #0f172a;
-  --el-text-secondary: #334155;
-  --el-text-muted: #64748b;
+  --el-text-secondary: #1e293b;
+  --el-text-muted: #475569;
   --el-border-soft: rgba(15, 23, 42, 0.08);
   --el-border-strong: rgba(15, 23, 42, 0.12);
   --el-tab-bg: rgba(15, 23, 42, 0.04);
   --el-tab-bg-active: rgba(37, 99, 235, 0.12);
-  --el-tab-text: #334155;
+  --el-tab-text: #1e293b;
   --el-tab-text-active: #eff6ff;
 }
 
@@ -47,8 +47,8 @@ html.dark {
   --el-bg-card: #101c31;
   --el-bg-input: #13213a;
   --el-text-primary: #eef4ff;
-  --el-text-secondary: #c4d0e3;
-  --el-text-muted: #94a3b8;
+  --el-text-secondary: #d5e0f1;
+  --el-text-muted: #afbdd1;
   --el-border-soft: rgba(255, 255, 255, 0.1);
   --el-border-strong: rgba(255, 255, 255, 0.16);
   --el-tab-bg: rgba(255, 255, 255, 0.04);
@@ -67,6 +67,23 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  color-scheme: light;
+  -webkit-tap-highlight-color: rgba(37, 99, 235, 0.14);
+}
+
+html.dark {
+  color-scheme: dark;
+  -webkit-tap-highlight-color: rgba(56, 189, 248, 0.18);
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.18);
+  color: #0f172a;
+}
+
+html.dark ::selection {
+  background: rgba(56, 189, 248, 0.24);
+  color: #eef4ff;
 }
 
 html.login-viewport-lock,
@@ -108,6 +125,25 @@ input,
 textarea,
 select {
   letter-spacing: -0.01em;
+}
+
+html:not(.dark) .text-slate-600,
+html[data-theme="light"] .text-slate-600 {
+  color: #334155 !important;
+}
+
+html:not(.dark) .text-slate-500,
+html[data-theme="light"] .text-slate-500,
+html:not(.dark) .text-gray-500,
+html[data-theme="light"] .text-gray-500 {
+  color: #475569 !important;
+}
+
+html:not(.dark) .text-slate-400,
+html[data-theme="light"] .text-slate-400,
+html:not(.dark) .text-gray-400,
+html[data-theme="light"] .text-gray-400 {
+  color: #334155 !important;
 }
 
 /* Global dark-mode surface overrides so existing screens switch cleanly */
@@ -161,7 +197,11 @@ html.dark .text-slate-500 {
   color: var(--el-text-muted) !important;
 }
 html.dark .text-slate-400 {
-  color: #7f94b1 !important;
+  color: #c2d0e2 !important;
+}
+html.dark .text-gray-500,
+html.dark .text-gray-400 {
+  color: var(--el-text-muted) !important;
 }
 html.dark .shadow-sm,
 html.dark .shadow,
@@ -179,6 +219,18 @@ html.dark select {
   background-color: var(--el-bg-input);
   color: var(--el-text-primary);
   border-color: var(--el-border-soft);
+}
+
+html.dark .composer-plain-input,
+html.dark .composer-plain-input:focus,
+html.dark .composer-plain-input:hover,
+html.dark .composer-plain-input:-webkit-autofill,
+html.dark .composer-plain-input:-webkit-autofill:hover,
+html.dark .composer-plain-input:-webkit-autofill:focus {
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  -webkit-box-shadow: none !important;
 }
 
 html.dark input::placeholder,

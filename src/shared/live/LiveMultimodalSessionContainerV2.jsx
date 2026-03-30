@@ -41,6 +41,7 @@ export default function LiveMultimodalSessionContainerV2({
 
   const voiceSettings = useMemo(() => loadVoiceSettings(settingsUid), [settingsUid]);
   const [toastMessage, setToastMessage] = useState("");
+  const [textOverlayOpen, setTextOverlayOpen] = useState(false);
 
   const liveVoice = useLiveVoiceSession({
     language,
@@ -88,6 +89,7 @@ export default function LiveMultimodalSessionContainerV2({
   ]);
 
   const handleClose = () => {
+    setTextOverlayOpen(false);
     liveVoice.endSession();
     onClose?.();
   };
@@ -103,6 +105,49 @@ export default function LiveMultimodalSessionContainerV2({
     if (!capture) return;
     await liveVoice.highlightLatestCapture("Analyze this screen and show the user what to tap next.");
   };
+
+  const cameraActive = liveVoice.cameraEnabled;
+
+  const latestGuidedCapture = useMemo(() => {
+    const reversed = [...(liveVoice.captures || [])].reverse();
+    return (
+      reversed.find((item) => Array.isArray(item?.highlights) && item.highlights.length) || null
+    );
+  }, [liveVoice.captures]);
+
+  const liveVisionHints = useMemo(() => {
+    if (!cameraActive) return [];
+    const answer = String(latestGuidedCapture?.answer || "").trim();
+    return answer ? [{ id: "vision-answer", label: answer }] : [];
+  }, [cameraActive, latestGuidedCapture]);
+
+  const fallbackSceneHints = useMemo(() => {
+    if (!cameraActive) return [];
+    return [
+      { id: "hint_laptop", label: "I can see a laptop" },
+      { id: "hint_books", label: "I can see books" },
+      { id: "hint_screen", label: "I can see a screen" },
+      { id: "hint_explain", label: "Explain this screen" },
+      { id: "hint_object", label: "What is this object?" },
+    ];
+  }, [cameraActive]);
+
+  const sceneHints = liveVisionHints.length ? liveVisionHints : fallbackSceneHints;
+
+  const liveGuidanceHighlights = useMemo(
+    () => normalizeGuidanceHighlights(latestGuidedCapture),
+    [latestGuidedCapture]
+  );
+
+  async function handleSendTextOverlay(text) {
+    if (!text?.trim()) return;
+    await liveVoice.submitTextMessage?.(text.trim());
+  }
+
+  async function handleSelectSceneHint(hint) {
+    if (!hint?.label) return;
+    await liveVoice.submitTextMessage?.(hint.label);
+  }
 
   return (
     <>
@@ -154,6 +199,14 @@ export default function LiveMultimodalSessionContainerV2({
         onTakeScreenshot={handleTakeScreenshot}
         onToggleScreenRecording={liveVoice.toggleScreenRecording}
         onSubmitTextMessage={liveVoice.submitTextMessage}
+        sceneHints={sceneHints}
+        onSelectSceneHint={handleSelectSceneHint}
+        textOverlayOpen={textOverlayOpen}
+        onOpenTextOverlay={() => setTextOverlayOpen(true)}
+        onCloseTextOverlay={() => setTextOverlayOpen(false)}
+        onSendTextOverlay={handleSendTextOverlay}
+        guidanceHighlights={liveGuidanceHighlights}
+        cameraModeActive={cameraActive}
         onInterrupt={liveVoice.interrupt}
         onRetryListen={liveVoice.retryListen}
         onStartVoice={liveVoice.startVoice}
@@ -185,4 +238,48 @@ function normalizeLiveMessage(message, support) {
   }
 
   return raw;
+}
+
+function normalizeGuidanceHighlights(capture) {
+  const highlights = Array.isArray(capture?.highlights) ? capture.highlights : [];
+  const width = Number(capture?.width || 0);
+  const height = Number(capture?.height || 0);
+
+  if (!highlights.length || width <= 0 || height <= 0) return [];
+
+  return highlights
+    .map((item, index) => {
+      const label = String(item?.label || "").trim();
+
+      if (item?.type === "circle") {
+        const radius = Number(item?.radius ?? Math.max(item?.width || 0, item?.height || 0) / 2);
+        const diameter = radius * 2;
+        return {
+          id: item?.id || `guide-${index}`,
+          shape: "circle",
+          x: clampPercent(((Number(item?.x || 0) - radius) / width) * 100),
+          y: clampPercent(((Number(item?.y || 0) - radius) / height) * 100),
+          width: clampPercent((diameter / width) * 100),
+          height: clampPercent((diameter / height) * 100),
+          label,
+        };
+      }
+
+      return {
+        id: item?.id || `guide-${index}`,
+        shape: item?.type === "spotlight" ? "spotlight" : "rect",
+        x: clampPercent((Number(item?.x || 0) / width) * 100),
+        y: clampPercent((Number(item?.y || 0) / height) * 100),
+        width: clampPercent((Number(item?.width || 0) / width) * 100),
+        height: clampPercent((Number(item?.height || 0) / height) * 100),
+        label,
+      };
+    })
+    .filter((item) => item.width > 0 && item.height > 0);
+}
+
+function clampPercent(value) {
+  const next = Number(value || 0);
+  if (!Number.isFinite(next)) return 0;
+  return Math.max(0, Math.min(100, next));
 }

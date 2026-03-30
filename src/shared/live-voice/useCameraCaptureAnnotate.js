@@ -109,6 +109,7 @@ export function useCameraCaptureAnnotate({ onAskVision } = {}) {
 
       try {
         let highlights = [];
+        let answer = "";
 
         if (onAskVision) {
           const result = await onAskVision({
@@ -119,6 +120,7 @@ export function useCameraCaptureAnnotate({ onAskVision } = {}) {
           });
 
           highlights = Array.isArray(result?.highlights) ? result.highlights : [];
+          answer = String(result?.answer || "").trim();
         }
 
         if (!highlights.length) {
@@ -147,7 +149,10 @@ export function useCameraCaptureAnnotate({ onAskVision } = {}) {
           previewUrl: rendered.dataUrl,
           rawDataUrl: rawPhoto.rawDataUrl,
           highlightedDataUrl: rendered.dataUrl,
+          width: rawPhoto.width || rendered.width,
+          height: rawPhoto.height || rendered.height,
           highlights,
+          answer,
           createdAt: Date.now(),
         };
 

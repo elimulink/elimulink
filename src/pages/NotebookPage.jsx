@@ -3,7 +3,9 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  Archive,
   Bold,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -14,6 +16,8 @@ import {
   Italic,
   List,
   ListOrdered,
+  Menu,
+  MoreHorizontal,
   Palette,
   PaintBucket,
   Paintbrush,
@@ -30,7 +34,24 @@ import {
   Type,
   Trash2,
   Underline,
+  X,
 } from "lucide-react";
+import MobileFeatureLandingShell from "../shared/feature-landing/MobileFeatureLandingShell";
+import { auth } from "../lib/firebase";
+import {
+  createInstitutionNotebookItem,
+  createInstitutionShareLink,
+  deleteInstitutionNotebookItem,
+  deleteInstitutionNotebookWorkspace,
+  deleteInstitutionShareLink,
+  fetchInstitutionNotebookItem,
+  fetchInstitutionNotebookItems,
+  fetchInstitutionNotebookWorkspace,
+  fetchInstitutionSubgroups,
+  updateInstitutionNotebookItem,
+  updateInstitutionNotebookWorkspace,
+  updateInstitutionShareLink,
+} from "../lib/researchApi";
 
 const PEN_THEMES = [
   { key: "slate", name: "Slate", textClass: "text-slate-800" },
@@ -105,6 +126,25 @@ const NUMBERING_LIBRARY = [
 
 function makeId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function mapNotebookItem(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    title: String(item.title || "Untitled Note"),
+    content: String(item.content || ""),
+    updatedAt: item.updated_at ? new Date(item.updated_at).getTime() : Date.now(),
+    createdAt: item.created_at ? new Date(item.created_at).getTime() : null,
+    isArchived: Boolean(item.is_archived),
+    preview: String(item.preview || ""),
+  };
+}
+
+function buildNotePreview(content) {
+  const text = String(content || "").replace(/\s+/g, " ").trim();
+  if (!text) return "Open this note to continue writing.";
+  return text.length > 72 ? `${text.slice(0, 69).trimEnd()}...` : text;
 }
 
 function formatTime(ts) {
@@ -326,17 +366,171 @@ function RibbonIconButton({ icon: Icon, label, onClick, active = false }) {
   );
 }
 
+function NotebookWorkspaceModal({ open, title, onClose, children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
+      <button
+        type="button"
+        aria-label={`Close ${title}`}
+        className="absolute inset-0"
+        onClick={onClose}
+      />
+      <div className="relative z-[1] w-full max-w-3xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_28px_70px_rgba(15,23,42,0.18)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/90 px-6 py-5">
+          <div>
+            <div className="text-lg font-semibold text-slate-900">{title}</div>
+            <div className="mt-1 text-sm text-slate-500">Frontend-first workspace flow for Institution Notebook.</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            aria-label={`Close ${title}`}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="max-h-[78vh] overflow-y-auto px-6 py-6">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function MobileNotebookSheet({ open, title, onClose, children, footer = null }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[80]">
+      <button
+        type="button"
+        aria-label={`Close ${title}`}
+        className="absolute inset-0 bg-slate-950/40 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+      <div className="absolute inset-x-0 bottom-0 max-h-[82vh] overflow-hidden rounded-t-[28px] border border-slate-200 bg-white shadow-[0_-20px_60px_rgba(15,23,42,0.18)]">
+        <div className="mx-auto mt-3 h-1.5 w-12 rounded-full bg-slate-200" />
+        <div className="flex items-center justify-between gap-4 px-5 pb-4 pt-4">
+          <div>
+            <div className="text-base font-semibold text-slate-900">{title}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            aria-label={`Close ${title}`}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="max-h-[calc(82vh-7.5rem)] overflow-y-auto px-5 pb-5">{children}</div>
+        {footer ? <div className="border-t border-slate-100 px-5 py-4">{footer}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function NotebookSubgroupPicker({
+  selectedId = "",
+  selectedLabel = "",
+  searchValue = "",
+  onSearchChange,
+  results = [],
+  loading = false,
+  error = "",
+  onSelect,
+  onClear,
+  helperText = "",
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="relative">
+        <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          value={searchValue}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search subgroup by name"
+          className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm text-slate-900 outline-none focus:border-sky-300"
+        />
+      </div>
+
+      {selectedId ? (
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-sky-200 bg-sky-50/80 px-4 py-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium text-slate-900">{selectedLabel || "Selected subgroup"}</div>
+            <div className="mt-1 text-xs text-slate-500">Subgroup #{selectedId}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClear}
+            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Clear
+          </button>
+        </div>
+      ) : null}
+
+      <div className="rounded-2xl border border-slate-200 bg-white">
+        {loading ? <div className="px-4 py-4 text-sm text-slate-500">Loading subgroups...</div> : null}
+        {!loading && error ? <div className="px-4 py-4 text-sm text-rose-700">{error}</div> : null}
+        {!loading && !error && results.length === 0 ? (
+          <div className="px-4 py-4 text-sm text-slate-500">No matching subgroups found.</div>
+        ) : null}
+        {!loading && !error && results.length > 0 ? (
+          <div className="max-h-52 overflow-y-auto p-2">
+            {results.map((group) => (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => onSelect(group)}
+                className={[
+                  "flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-3 text-left hover:bg-slate-50",
+                  String(selectedId) === String(group.id) ? "bg-sky-50 text-slate-900" : "text-slate-700",
+                ].join(" ")}
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{group.name}</div>
+                  <div className="mt-1 text-xs text-slate-400">Subgroup #{group.id}</div>
+                </div>
+                {group.is_admin ? (
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    Admin
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {helperText ? <div className="text-xs text-slate-500">{helperText}</div> : null}
+    </div>
+  );
+}
+
 export default function NotebookPage({
   onBack,
+  onOpenMainMenu,
+  onOpenLive = null,
   onSaveNote = null,
   embedded = false,
+  enableDesktopLanding = false,
   initialTitle = "",
   initialBody = "",
   loadToken = "",
 }) {
+  const initialIsCompactMobile =
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 820px)").matches : false;
   const [noteTitle, setNoteTitle] = useState(() => String(initialTitle || "Note_ElimuLink_1_2026"));
   const [noteBody, setNoteBody] = useState(() => String(initialBody || ""));
   const [activeNotebookTab, setActiveNotebookTab] = useState("home");
+  const [isCompactMobile, setIsCompactMobile] = useState(initialIsCompactMobile);
+  const [showMobileLanding, setShowMobileLanding] = useState(initialIsCompactMobile && !embedded);
+  const [isMobileFormatSheetOpen, setIsMobileFormatSheetOpen] = useState(false);
+  const [isMobileInsertSheetOpen, setIsMobileInsertSheetOpen] = useState(false);
+  const [isMobileMoreSheetOpen, setIsMobileMoreSheetOpen] = useState(false);
+  const [isMobileExportSheetOpen, setIsMobileExportSheetOpen] = useState(false);
+  const [isMobileAssistSheetOpen, setIsMobileAssistSheetOpen] = useState(false);
+  const [landingInputValue, setLandingInputValue] = useState("");
   const [penTheme, setPenTheme] = useState("slate");
   const [customPenColor, setCustomPenColor] = useState("#1e40af");
   const [headerSearch, setHeaderSearch] = useState("");
@@ -369,10 +563,45 @@ export default function NotebookPage({
   const [attachments, setAttachments] = useState([]);
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
-  const [notes, setNotes] = useState([
-    { id: makeId(), title: "Intro to Biology", updatedAt: Date.now() },
-    { id: makeId(), title: "Assignment Ideas", updatedAt: Date.now() - 3600_000 },
-  ]);
+  const [currentNoteId, setCurrentNoteId] = useState(null);
+  const [showDesktopLanding, setShowDesktopLanding] = useState(
+    () => !initialIsCompactMobile && !embedded && enableDesktopLanding
+  );
+  const [isDesktopLandingMenuOpen, setIsDesktopLandingMenuOpen] = useState(false);
+  const [isDesktopUtilityMenuOpen, setIsDesktopUtilityMenuOpen] = useState(false);
+  const [activeDesktopNoteMenuId, setActiveDesktopNoteMenuId] = useState(null);
+  const [activeDesktopMoveMenuId, setActiveDesktopMoveMenuId] = useState(null);
+  const [isDesktopShareOpen, setIsDesktopShareOpen] = useState(false);
+  const [isDesktopSettingsOpen, setIsDesktopSettingsOpen] = useState(false);
+  const [desktopShareInvite, setDesktopShareInvite] = useState("");
+  const [desktopShareAccess, setDesktopShareAccess] = useState("only-invited");
+  const [desktopShareStatus, setDesktopShareStatus] = useState("");
+  const [desktopWorkspaceSettings, setDesktopWorkspaceSettings] = useState({
+    name: "ElimuLink Notebook",
+    instructions: "",
+    visibility: "institution",
+    permissions: "members-can-view",
+    linkedInstitution: "ElimuLink University",
+    linkedSubgroupId: "",
+    linkedSubgroup: "Not linked",
+    memoryBehavior: "workspace-default",
+  });
+  const [desktopWorkspaceStatus, setDesktopWorkspaceStatus] = useState("");
+  const [desktopWorkspaceConversationId, setDesktopWorkspaceConversationId] = useState("");
+  const [desktopWorkspaceShareLink, setDesktopWorkspaceShareLink] = useState(null);
+  const [isDesktopWorkspaceLoading, setIsDesktopWorkspaceLoading] = useState(false);
+  const [isDesktopShareBusy, setIsDesktopShareBusy] = useState(false);
+  const [isDesktopSettingsBusy, setIsDesktopSettingsBusy] = useState(false);
+  const [isDesktopDeleteConfirmOpen, setIsDesktopDeleteConfirmOpen] = useState(false);
+  const [desktopDeleteConfirmText, setDesktopDeleteConfirmText] = useState("");
+  const [desktopSubgroupQuery, setDesktopSubgroupQuery] = useState("");
+  const [desktopSubgroupResults, setDesktopSubgroupResults] = useState([]);
+  const [isDesktopSubgroupLoading, setIsDesktopSubgroupLoading] = useState(false);
+  const [desktopSubgroupError, setDesktopSubgroupError] = useState("");
+  const [notes, setNotes] = useState([]);
+  const [isNotebookItemsLoading, setIsNotebookItemsLoading] = useState(false);
+  const [notebookItemsError, setNotebookItemsError] = useState("");
+  const [isNotebookItemSaving, setIsNotebookItemSaving] = useState(false);
   const [stickies, setStickies] = useState([
     { id: makeId(), text: "Review chapter 4", color: STICKY_COLORS[0] },
     { id: makeId(), text: "Ask tutor about lab", color: STICKY_COLORS[1] },
@@ -387,6 +616,7 @@ export default function NotebookPage({
   const numberMenuRef = useRef(null);
   const noteBodyRef = useRef(null);
   const selectionRangeRef = useRef(null);
+  const currentNoteRequestRef = useRef(0);
   const activePen = useMemo(
     () => PEN_THEMES.find((theme) => theme.key === penTheme) ?? PEN_THEMES[0],
     [penTheme]
@@ -398,10 +628,78 @@ export default function NotebookPage({
   const pageToneClass =
     pageTone === "warm" ? "bg-amber-50" : pageTone === "cool" ? "bg-sky-50" : "bg-white";
   const editorBorderClass = hasEditorBorder ? "border-slate-200" : "border-transparent";
+  const showNotebookDesktopLanding = !embedded && !isCompactMobile && enableDesktopLanding && showDesktopLanding;
+  const currentNote = useMemo(
+    () => notes.find((note) => note.id === currentNoteId) || null,
+    [currentNoteId, notes]
+  );
+  const notebookLandingItems = useMemo(
+    () =>
+      [...notes]
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .map((note) => ({
+          id: note.id,
+          title: note.title,
+          preview: note.preview || buildNotePreview(note.content),
+          meta: note.updatedAt ? new Date(note.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "",
+          updatedAt: note.updatedAt,
+          actions: [
+            { key: "share", label: "Share", icon: Copy, onClick: handleNotebookShare },
+            { key: "open", label: "Open note", icon: BookOpen, onClick: () => openNotebookNote(note.id) },
+            { key: "rename", label: "Rename", icon: PencilLine, onClick: () => renameNoteById(note.id) },
+            { key: "archive", label: "Archive", icon: Archive, onClick: () => archiveNoteById(note.id) },
+            { key: "delete", label: "Delete", icon: Trash2, destructive: true, onClick: () => confirmDeleteNoteById(note.id) },
+          ],
+        })),
+    [notes]
+  );
+  const notebookOwnerLabel = useMemo(
+    () =>
+      String(
+        auth?.currentUser?.displayName ||
+          auth?.currentUser?.email ||
+          "You"
+      ).trim() || "You",
+    []
+  );
+  const notebookOwnerEmail = String(auth?.currentUser?.email || "").trim().toLowerCase();
+  const desktopWorkspaceMembers = useMemo(() => {
+    const invited = Array.isArray(desktopWorkspaceShareLink?.invited_emails)
+      ? desktopWorkspaceShareLink.invited_emails
+      : [];
+    return [
+      { key: "owner", label: notebookOwnerLabel, role: "Owner", removable: false },
+      ...invited.map((email) => ({
+        key: email,
+        label: email,
+        role: "Invited",
+        removable: true,
+      })),
+    ];
+  }, [desktopWorkspaceShareLink?.invited_emails, notebookOwnerLabel]);
 
   useEffect(() => {
     setFontSizeInput(String(fontSizePx));
   }, [fontSizePx]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || embedded) return undefined;
+    const mediaQuery = window.matchMedia("(max-width: 820px)");
+    const syncViewportMode = () => {
+      const nextIsCompact = mediaQuery.matches;
+      setIsCompactMobile(nextIsCompact);
+      if (!nextIsCompact) {
+        setShowMobileLanding(false);
+      }
+    };
+    syncViewportMode();
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", syncViewportMode);
+      return () => mediaQuery.removeEventListener("change", syncViewportMode);
+    }
+    mediaQuery.addListener(syncViewportMode);
+    return () => mediaQuery.removeListener(syncViewportMode);
+  }, [embedded]);
 
   useEffect(() => {
     const editor = noteBodyRef.current;
@@ -414,10 +712,160 @@ export default function NotebookPage({
 
   useEffect(() => {
     if (!loadToken) return;
+    setCurrentNoteId(null);
     setNoteTitle(String(initialTitle || "Note_ElimuLink_1_2026"));
     setNoteBody(String(initialBody || ""));
     setSaveMessage("");
+    setShowMobileLanding(false);
   }, [initialBody, initialTitle, loadToken]);
+
+  useEffect(() => {
+    if (!isCompactMobile) {
+      setIsMobileFormatSheetOpen(false);
+      setIsMobileInsertSheetOpen(false);
+      setIsMobileMoreSheetOpen(false);
+      setIsMobileExportSheetOpen(false);
+      setIsMobileAssistSheetOpen(false);
+    }
+  }, [isCompactMobile]);
+
+  useEffect(() => {
+    if (isCompactMobile || embedded || !enableDesktopLanding) {
+      setShowDesktopLanding(false);
+    }
+  }, [embedded, enableDesktopLanding, isCompactMobile]);
+
+  useEffect(() => {
+    if (!enableDesktopLanding || embedded || isCompactMobile) return;
+    if (!currentNoteId) {
+      setShowDesktopLanding(true);
+    }
+  }, [currentNoteId, embedded, enableDesktopLanding, isCompactMobile]);
+
+  useEffect(() => {
+    const handlePointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest("[data-desktop-landing-menu]")) {
+        setIsDesktopLandingMenuOpen(false);
+      }
+      if (!target.closest("[data-desktop-utility-menu]")) {
+        setIsDesktopUtilityMenuOpen(false);
+      }
+      if (!target.closest("[data-desktop-note-menu]")) {
+        setActiveDesktopNoteMenuId(null);
+        setActiveDesktopMoveMenuId(null);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      setIsDesktopLandingMenuOpen(false);
+      setIsDesktopUtilityMenuOpen(false);
+      setActiveDesktopNoteMenuId(null);
+      setActiveDesktopMoveMenuId(null);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    const workspaceName = currentNoteId ? String(noteTitle || "Untitled Note") : "ElimuLink Notebook";
+    setDesktopWorkspaceSettings((prev) => ({ ...prev, name: workspaceName }));
+  }, [currentNoteId, noteTitle]);
+
+  useEffect(() => {
+    if (!enableDesktopLanding || embedded || isCompactMobile) return undefined;
+    let cancelled = false;
+    setIsDesktopWorkspaceLoading(true);
+    fetchInstitutionNotebookWorkspace({
+      baseUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+    })
+      .then((response) => {
+        if (cancelled) return;
+        applyDesktopWorkspacePayload(response?.workspace || null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setDesktopWorkspaceStatus(error?.message || "Unable to load workspace details right now.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsDesktopWorkspaceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [embedded, enableDesktopLanding, isCompactMobile]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsNotebookItemsLoading(true);
+    setNotebookItemsError("");
+    fetchInstitutionNotebookItems()
+      .then((response) => {
+        if (cancelled) return;
+        const nextItems = Array.isArray(response?.items) ? response.items.map(mapNotebookItem).filter(Boolean) : [];
+        setNotes(nextItems);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setNotes([]);
+        setNotebookItemsError(error?.message || "Unable to load notebook items right now.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsNotebookItemsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!enableDesktopLanding || embedded || isCompactMobile) return undefined;
+    if (!isDesktopShareOpen && !isDesktopSettingsOpen) return undefined;
+
+    let cancelled = false;
+    const timeoutId = setTimeout(() => {
+      setIsDesktopSubgroupLoading(true);
+      setDesktopSubgroupError("");
+      fetchInstitutionSubgroups({
+        query: desktopSubgroupQuery,
+        limit: 24,
+      })
+        .then((response) => {
+          if (cancelled) return;
+          setDesktopSubgroupResults(Array.isArray(response?.groups) ? response.groups : []);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setDesktopSubgroupResults([]);
+          setDesktopSubgroupError(error?.message || "Unable to load subgroups right now.");
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setIsDesktopSubgroupLoading(false);
+        });
+    }, desktopSubgroupQuery ? 180 : 0);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [
+    desktopSubgroupQuery,
+    embedded,
+    enableDesktopLanding,
+    isCompactMobile,
+    isDesktopSettingsOpen,
+    isDesktopShareOpen,
+  ]);
 
   useEffect(() => {
     const onDocumentMouseDown = (event) => {
@@ -436,6 +884,561 @@ export default function NotebookPage({
     return () => document.removeEventListener("mousedown", onDocumentMouseDown);
   }, []);
 
+  useEffect(() => {
+    if (!currentNoteId) return;
+    const normalizedTitle = String(noteTitle || "").trim() || "Untitled Note";
+    const normalizedBody = String(noteBody || "");
+    setNotes((prev) =>
+      prev.map((note) =>
+        note.id === currentNoteId
+          ? {
+              ...note,
+              title: normalizedTitle,
+              content: normalizedBody,
+              updatedAt: Date.now(),
+            }
+          : note
+      )
+    );
+  }, [currentNoteId, noteBody, noteTitle]);
+
+  const showNotebookLanding = !embedded && isCompactMobile && showMobileLanding;
+
+  const loadNotebookItems = async ({ quiet = false } = {}) => {
+    if (!quiet) {
+      setIsNotebookItemsLoading(true);
+    }
+    setNotebookItemsError("");
+    try {
+      const response = await fetchInstitutionNotebookItems();
+      const nextItems = Array.isArray(response?.items) ? response.items.map(mapNotebookItem).filter(Boolean) : [];
+      setNotes(nextItems);
+      return nextItems;
+    } catch (error) {
+      const message = error?.message || "Unable to load notebook items right now.";
+      setNotebookItemsError(message);
+      return [];
+    } finally {
+      if (!quiet) {
+        setIsNotebookItemsLoading(false);
+      }
+    }
+  };
+
+  const createNotebookNote = async (seedTitle = "") => {
+    const normalized = String(seedTitle || "").trim();
+    setNotebookItemsError("");
+    try {
+      const response = await createInstitutionNotebookItem({
+        title: normalized || "Untitled Note",
+        content: "",
+      });
+      const nextNote = mapNotebookItem(response?.item);
+      if (!nextNote) throw new Error("Unable to create note right now.");
+      setNotes((prev) => [nextNote, ...prev.filter((item) => item.id !== nextNote.id)]);
+      setCurrentNoteId(nextNote.id);
+      setNoteTitle(nextNote.title);
+      setNoteBody(nextNote.content);
+      setActiveNotebookTab("home");
+      setSaveMessage("Note created.");
+      setLandingInputValue("");
+      setShowMobileLanding(false);
+      setShowDesktopLanding(false);
+      setTimeout(() => setSaveMessage(""), 2000);
+      return nextNote;
+    } catch (error) {
+      const message = error?.message || "Unable to create note right now.";
+      setNotebookItemsError(message);
+      setSaveMessage(message);
+      setTimeout(() => setSaveMessage(""), 2200);
+      return null;
+    }
+  };
+
+  const openNotebookNote = async (noteOrId) => {
+    const noteId = typeof noteOrId === "object" ? noteOrId?.id : noteOrId;
+    const target = notes.find((note) => note.id === noteId);
+    if (!noteId) return;
+    const requestId = Date.now();
+    currentNoteRequestRef.current = requestId;
+    setSaveMessage("");
+    setNotebookItemsError("");
+    setShowMobileLanding(false);
+    setShowDesktopLanding(false);
+    if (target) {
+      setCurrentNoteId(target.id);
+      setNoteTitle(target.title || "Untitled Note");
+      setNoteBody(target.content || "");
+    }
+    try {
+      const response = await fetchInstitutionNotebookItem(noteId);
+      if (currentNoteRequestRef.current !== requestId) return;
+      const nextNote = mapNotebookItem(response?.item);
+      if (!nextNote) return;
+      setNotes((prev) => {
+        const rest = prev.filter((item) => item.id !== nextNote.id);
+        return [nextNote, ...rest];
+      });
+      setCurrentNoteId(nextNote.id);
+      setNoteTitle(nextNote.title);
+      setNoteBody(nextNote.content || "");
+    } catch (error) {
+      if (currentNoteRequestRef.current !== requestId) return;
+      const message = error?.message || "Unable to open this note right now.";
+      setNotebookItemsError(message);
+      if (!target) {
+        setCurrentNoteId(null);
+      }
+    }
+  };
+
+  const openNotebookSettings = () => {
+    if (!embedded && !isCompactMobile && enableDesktopLanding) {
+      setIsDesktopSettingsOpen(true);
+      setDesktopWorkspaceStatus("");
+      return;
+    }
+    setActiveNotebookTab("file");
+    setShowMobileLanding(false);
+  };
+
+  const handleNotebookShare = async () => {
+    const shareTitle = currentNoteId ? noteTitle : "ElimuLink Notebook";
+    const sharePayload = {
+      title: shareTitle,
+      text: currentNoteId
+        ? `Continue working on "${shareTitle}" in ElimuLink Notebook.`
+        : "Continue working in ElimuLink Notebook.",
+      url: typeof window !== "undefined" ? window.location.href : "",
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(sharePayload);
+        return;
+      } catch {
+        // fall through to clipboard copy
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(sharePayload.url || sharePayload.text);
+      setSaveMessage("Link copied.");
+      setTimeout(() => setSaveMessage(""), 2000);
+    } catch {
+      setSaveMessage("Share unavailable on this device.");
+      setTimeout(() => setSaveMessage(""), 2000);
+    }
+  };
+
+  const handleMobileNotebookShareSubmit = async ({ email, access }) => {
+    if (!embedded && !isCompactMobile && enableDesktopLanding) {
+      return { status: "Desktop workspace share is already available here.", closeOnSuccess: true };
+    }
+    const nextAccess = String(access || desktopShareAccess || "only-invited").trim();
+    const nextEmail = String(email || "").trim().toLowerCase();
+    const invitedEmails = nextEmail
+      ? Array.from(
+          new Set([
+            ...(Array.isArray(desktopWorkspaceShareLink?.invited_emails) ? desktopWorkspaceShareLink.invited_emails : []),
+            nextEmail,
+          ])
+        )
+      : Array.isArray(desktopWorkspaceShareLink?.invited_emails)
+        ? desktopWorkspaceShareLink.invited_emails
+        : [];
+
+    try {
+      const shareLink = await syncDesktopShareLink({
+        accessLevel: nextAccess,
+        invitedEmails,
+      });
+      const shareUrl = String(shareLink?.url || "").trim();
+      if (shareUrl && navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      }
+      return {
+        status: nextEmail ? `Shared with ${nextEmail}. Link copied.` : "Workspace sharing updated. Link copied.",
+      };
+    } catch (error) {
+      return {
+        status: error?.message || "Unable to update notebook sharing right now.",
+      };
+    }
+  };
+
+  const openNotebookDesktopLanding = () => {
+    setShowDesktopLanding(true);
+    setSaveMessage("");
+  };
+
+  const applyDesktopWorkspacePayload = (workspace) => {
+    if (!workspace) return null;
+    const settings = workspace.settings || {};
+    setDesktopWorkspaceConversationId(workspace.conversation_id || "");
+    setDesktopWorkspaceShareLink(workspace.share_link || null);
+    setDesktopWorkspaceSettings({
+      name: workspace.title || "ElimuLink Notebook",
+      instructions: settings.instructions || "",
+      visibility: settings.visibility || "institution",
+      permissions: settings.permissions || "members-can-view",
+      linkedInstitution: settings.linked_institution || "ElimuLink University",
+      linkedSubgroupId:
+        settings.linked_subgroup_id === null || settings.linked_subgroup_id === undefined
+          ? ""
+          : String(settings.linked_subgroup_id),
+      linkedSubgroup:
+        settings.linked_subgroup_label || settings.linked_subgroup || "Not linked",
+      memoryBehavior: settings.memory_behavior || "workspace-default",
+    });
+    if (workspace.share_link?.access_level) {
+      setDesktopShareAccess(workspace.share_link.access_level);
+    }
+    return workspace;
+  };
+
+  const loadDesktopWorkspace = async ({ quiet = false } = {}) => {
+    if (!enableDesktopLanding || embedded || isCompactMobile) return null;
+    if (!quiet) {
+      setIsDesktopWorkspaceLoading(true);
+    }
+    try {
+      const response = await fetchInstitutionNotebookWorkspace({
+        baseUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+      });
+      return applyDesktopWorkspacePayload(response?.workspace || null);
+    } catch (error) {
+      const message = error?.message || "Unable to load workspace details right now.";
+      setDesktopWorkspaceStatus(message);
+      setDesktopShareStatus(message);
+      return null;
+    } finally {
+      if (!quiet) {
+        setIsDesktopWorkspaceLoading(false);
+      }
+    }
+  };
+
+  const ensureDesktopWorkspace = async () => {
+    if (desktopWorkspaceConversationId) {
+      return {
+        conversation_id: desktopWorkspaceConversationId,
+        share_link: desktopWorkspaceShareLink,
+      };
+    }
+    return loadDesktopWorkspace({ quiet: false });
+  };
+
+  const syncDesktopShareLink = async ({ accessLevel, invitedEmails, subgroupName } = {}) => {
+    const workspace = await ensureDesktopWorkspace();
+    const conversationId = workspace?.conversation_id || desktopWorkspaceConversationId;
+    if (!conversationId) {
+      throw new Error("Workspace share is not ready yet.");
+    }
+
+    const nextAccessLevel = accessLevel || desktopShareAccess;
+    const nextInvitedEmails =
+      invitedEmails ||
+      (Array.isArray(desktopWorkspaceShareLink?.invited_emails)
+        ? desktopWorkspaceShareLink.invited_emails
+        : []);
+    const nextSubgroupName =
+      typeof subgroupName === "string"
+        ? subgroupName
+        : desktopWorkspaceShareLink?.subgroup_name ||
+          (desktopWorkspaceSettings.linkedSubgroup === "Not linked" ? "" : desktopWorkspaceSettings.linkedSubgroup);
+    const nextSubgroupId =
+      desktopWorkspaceShareLink?.subgroup_id ??
+      (desktopWorkspaceSettings.linkedSubgroupId ? Number(desktopWorkspaceSettings.linkedSubgroupId) : null);
+
+    const response = desktopWorkspaceShareLink?.id
+      ? await updateInstitutionShareLink(
+          desktopWorkspaceShareLink.id,
+          {
+            accessLevel: nextAccessLevel,
+            invitedEmails: nextInvitedEmails,
+            subgroupId: nextSubgroupId,
+            subgroupName: nextSubgroupName || null,
+          },
+          { baseUrl: typeof window !== "undefined" ? window.location.origin : undefined }
+        )
+      : await createInstitutionShareLink({
+          conversationId,
+          messageIds: [],
+          accessLevel: nextAccessLevel,
+          invitedEmails: nextInvitedEmails,
+          subgroupId: nextSubgroupId,
+          subgroupName: nextSubgroupName || null,
+          baseUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        });
+
+    const nextShareLink = response?.share_link || null;
+    setDesktopWorkspaceShareLink(nextShareLink);
+    if (nextShareLink?.access_level) {
+      setDesktopShareAccess(nextShareLink.access_level);
+    }
+    return nextShareLink;
+  };
+
+  const handleDesktopShareAccessChange = async (nextAccessLevel) => {
+    setDesktopShareAccess(nextAccessLevel);
+    setDesktopShareStatus("");
+    setIsDesktopShareBusy(true);
+    try {
+      const shareLink = await syncDesktopShareLink({ accessLevel: nextAccessLevel });
+      const subgroupMessage =
+        nextAccessLevel === "subgroup-only"
+          ? ` Only the owner and members of subgroup #${shareLink?.subgroup_id || desktopWorkspaceSettings.linkedSubgroupId} can open it.`
+          : "";
+      setDesktopShareStatus(`Access level saved as ${shareLink?.access_level || nextAccessLevel}.${subgroupMessage}`);
+    } catch (error) {
+      setDesktopShareStatus(error?.message || "Unable to save share access right now.");
+    } finally {
+      setIsDesktopShareBusy(false);
+    }
+  };
+
+  const handleDesktopShareCopyLink = async () => {
+    setDesktopShareStatus("");
+    setIsDesktopShareBusy(true);
+    try {
+      const shareLink = await syncDesktopShareLink();
+      if (!shareLink?.url) {
+        throw new Error("Share link is not available yet.");
+      }
+      await navigator.clipboard.writeText(shareLink.url);
+      setDesktopShareStatus("Workspace link copied.");
+    } catch (error) {
+      setDesktopShareStatus(error?.message || "Unable to copy the workspace link.");
+    } finally {
+      setIsDesktopShareBusy(false);
+    }
+  };
+
+  const handleDesktopShareInvite = async () => {
+    const normalized = String(desktopShareInvite || "").trim().toLowerCase();
+    if (!normalized) {
+      setDesktopShareStatus("Add an email first.");
+      return;
+    }
+    if (!normalized.includes("@")) {
+      setDesktopShareStatus("Enter a valid invite email.");
+      return;
+    }
+    setDesktopShareStatus("");
+    setIsDesktopShareBusy(true);
+    try {
+      const currentInvites = Array.isArray(desktopWorkspaceShareLink?.invited_emails)
+        ? desktopWorkspaceShareLink.invited_emails
+        : [];
+      const nextInvites = Array.from(new Set([...currentInvites, normalized]));
+      const shareLink = await syncDesktopShareLink({ invitedEmails: nextInvites });
+      setDesktopShareInvite("");
+      const subgroupMessage =
+        shareLink?.access_level === "subgroup-only"
+          ? " Invite list is kept for visibility, but subgroup membership is the enforcement source of truth."
+          : "";
+      setDesktopShareStatus(`Invite added for ${normalized}.${subgroupMessage}`);
+    } catch (error) {
+      setDesktopShareStatus(error?.message || "Unable to add that invite right now.");
+    } finally {
+      setIsDesktopShareBusy(false);
+    }
+  };
+
+  const handleDesktopShareRemoveInvite = async (email) => {
+    setDesktopShareStatus("");
+    setIsDesktopShareBusy(true);
+    try {
+      const currentInvites = Array.isArray(desktopWorkspaceShareLink?.invited_emails)
+        ? desktopWorkspaceShareLink.invited_emails
+        : [];
+      const nextInvites = currentInvites.filter((item) => item !== email);
+      await syncDesktopShareLink({ invitedEmails: nextInvites });
+      setDesktopShareStatus(`${email} no longer has invited access.`);
+    } catch (error) {
+      setDesktopShareStatus(error?.message || "Unable to remove that invite right now.");
+    } finally {
+      setIsDesktopShareBusy(false);
+    }
+  };
+
+  const handleDesktopShareRemoveAccess = async () => {
+    if (!desktopWorkspaceShareLink?.id) {
+      setDesktopShareStatus("No active share link to remove.");
+      return;
+    }
+    setDesktopShareStatus("");
+    setIsDesktopShareBusy(true);
+    try {
+      await deleteInstitutionShareLink(desktopWorkspaceShareLink.id);
+      setDesktopWorkspaceShareLink(null);
+      setDesktopShareAccess("only-invited");
+      setDesktopShareStatus("Workspace share access removed.");
+    } catch (error) {
+      setDesktopShareStatus(error?.message || "Unable to remove workspace access right now.");
+    } finally {
+      setIsDesktopShareBusy(false);
+    }
+  };
+
+  const selectDesktopSubgroup = (group) => {
+    setDesktopWorkspaceSettings((prev) => ({
+      ...prev,
+      linkedSubgroupId: String(group?.id || ""),
+      linkedSubgroup: String(group?.name || "Not linked"),
+    }));
+    setDesktopSubgroupQuery(String(group?.name || ""));
+    setDesktopSubgroupError("");
+  };
+
+  const clearDesktopSubgroupSelection = () => {
+    setDesktopWorkspaceSettings((prev) => ({
+      ...prev,
+      linkedSubgroupId: "",
+      linkedSubgroup: "Not linked",
+    }));
+    setDesktopSubgroupQuery("");
+    setDesktopSubgroupError("");
+  };
+
+  const handleDesktopShareSubgroupSelect = async (group) => {
+    selectDesktopSubgroup(group);
+    setDesktopShareStatus("");
+    setIsDesktopShareBusy(true);
+    try {
+      const workspaceResponse = await updateInstitutionNotebookWorkspace({
+        linked_subgroup_id: Number(group.id),
+        linked_subgroup: group.name,
+      });
+      applyDesktopWorkspacePayload(workspaceResponse?.workspace || null);
+      if (desktopShareAccess === "subgroup-only") {
+        const shareLink = await syncDesktopShareLink({
+          subgroupName: group.name,
+        });
+        setDesktopShareStatus(`Subgroup ${group.name} is now enforced for this workspace share.`);
+        if (shareLink?.subgroup_id) {
+          setDesktopWorkspaceSettings((prev) => ({
+            ...prev,
+            linkedSubgroupId: String(shareLink.subgroup_id),
+            linkedSubgroup: shareLink.subgroup_name || group.name,
+          }));
+        }
+      } else {
+        setDesktopShareStatus(`Workspace subgroup updated to ${group.name}.`);
+      }
+    } catch (error) {
+      setDesktopShareStatus(error?.message || "Unable to update subgroup selection right now.");
+    } finally {
+      setIsDesktopShareBusy(false);
+    }
+  };
+
+  const handleDesktopWorkspaceSave = async () => {
+    setDesktopWorkspaceStatus("");
+    setIsDesktopSettingsBusy(true);
+    try {
+      const response = await updateInstitutionNotebookWorkspace({
+        title: desktopWorkspaceSettings.name,
+        instructions: desktopWorkspaceSettings.instructions,
+        visibility: desktopWorkspaceSettings.visibility,
+        permissions: desktopWorkspaceSettings.permissions,
+        linked_institution: desktopWorkspaceSettings.linkedInstitution,
+        linked_subgroup: desktopWorkspaceSettings.linkedSubgroup,
+        linked_subgroup_id: desktopWorkspaceSettings.linkedSubgroupId
+          ? Number(desktopWorkspaceSettings.linkedSubgroupId)
+          : null,
+        memory_behavior: desktopWorkspaceSettings.memoryBehavior,
+      });
+      applyDesktopWorkspacePayload(response?.workspace || null);
+      setDesktopWorkspaceStatus("Workspace settings saved.");
+    } catch (error) {
+      setDesktopWorkspaceStatus(error?.message || "Unable to save workspace settings right now.");
+    } finally {
+      setIsDesktopSettingsBusy(false);
+    }
+  };
+
+  const handleDesktopWorkspaceArchive = async () => {
+    setDesktopWorkspaceStatus("");
+    setIsDesktopSettingsBusy(true);
+    try {
+      const response = await updateInstitutionNotebookWorkspace({
+        project_archived: true,
+      });
+      applyDesktopWorkspacePayload(response?.workspace || null);
+      setDesktopWorkspaceStatus("Workspace archived in project settings.");
+    } catch (error) {
+      setDesktopWorkspaceStatus(error?.message || "Unable to archive this workspace right now.");
+    } finally {
+      setIsDesktopSettingsBusy(false);
+    }
+  };
+
+  const handleDesktopWorkspaceDelete = async () => {
+    setDesktopWorkspaceStatus("");
+    setIsDesktopSettingsBusy(true);
+    try {
+      const response = await deleteInstitutionNotebookWorkspace();
+      setDesktopWorkspaceConversationId("");
+      setDesktopWorkspaceShareLink(null);
+      setDesktopShareAccess("only-invited");
+      setDesktopShareInvite("");
+      setDesktopDeleteConfirmText("");
+      setIsDesktopDeleteConfirmOpen(false);
+      setIsDesktopSettingsOpen(false);
+      setDesktopWorkspaceSettings({
+        name: "ElimuLink Notebook",
+        instructions: "",
+        visibility: "institution",
+        permissions: "members-can-view",
+        linkedInstitution: "ElimuLink University",
+        linkedSubgroupId: "",
+        linkedSubgroup: "Not linked",
+        memoryBehavior: "workspace-default",
+      });
+      setDesktopWorkspaceStatus(
+        response?.message || "Workspace metadata deleted. Local notebook notes were not deleted."
+      );
+      void loadNotebookItems({ quiet: true });
+    } catch (error) {
+      setDesktopWorkspaceStatus(error?.message || "Unable to delete this workspace right now.");
+    } finally {
+      setIsDesktopSettingsBusy(false);
+    }
+  };
+
+  const renameDesktopWorkspace = async () => {
+    const nextName = window.prompt("Rename workspace", desktopWorkspaceSettings.name || "ElimuLink Notebook");
+    if (nextName === null) return;
+    const normalized = nextName.trim();
+    if (!normalized) return;
+    setDesktopWorkspaceStatus("");
+    setIsDesktopSettingsBusy(true);
+    try {
+      const response = await updateInstitutionNotebookWorkspace({
+        title: normalized,
+        instructions: desktopWorkspaceSettings.instructions,
+        visibility: desktopWorkspaceSettings.visibility,
+        permissions: desktopWorkspaceSettings.permissions,
+        linked_institution: desktopWorkspaceSettings.linkedInstitution,
+        linked_subgroup: desktopWorkspaceSettings.linkedSubgroup,
+        linked_subgroup_id: desktopWorkspaceSettings.linkedSubgroupId
+          ? Number(desktopWorkspaceSettings.linkedSubgroupId)
+          : null,
+        memory_behavior: desktopWorkspaceSettings.memoryBehavior,
+      });
+      applyDesktopWorkspacePayload(response?.workspace || null);
+      setDesktopWorkspaceStatus("Workspace renamed.");
+    } catch (error) {
+      setDesktopWorkspaceStatus(error?.message || "Unable to rename this workspace right now.");
+    } finally {
+      setIsDesktopSettingsBusy(false);
+    }
+  };
+
+  const moveWorkspaceToProject = () => {
+    setDesktopWorkspaceStatus("Move to workspace is prepared here as a safe frontend-first action.");
+  };
+
   const addAttachment = (files) => {
     if (!files || files.length === 0) return;
     const next = Array.from(files).map((file) => ({ id: makeId(), name: file.name }));
@@ -449,41 +1452,88 @@ export default function NotebookPage({
     ]);
   };
 
-  const renameNoteById = (noteId) => {
+  const renameNoteById = async (noteId) => {
     const target = notes.find((note) => note.id === noteId);
     if (!target) return;
     const nextTitle = window.prompt("Edit note title", target.title || "Untitled Note");
     if (nextTitle === null) return;
     const normalized = nextTitle.trim();
     if (!normalized) return;
-    setNotes((prev) =>
-      prev.map((note) =>
-        note.id === noteId ? { ...note, title: normalized, updatedAt: Date.now() } : note
-      )
-    );
-  };
-
-  const deleteNoteById = (noteId) => {
-    setNotes((prev) => prev.filter((note) => note.id !== noteId));
-  };
-
-  const upsertNoteMeta = (title) => {
-    const cleanTitle = String(title || "").trim() || "Untitled Note";
-    setNotes((prev) => {
-      const existing = prev.find((item) => String(item.title || "").trim().toLowerCase() === cleanTitle.toLowerCase());
-      if (existing) {
-        return prev.map((item) =>
-          item.id === existing.id
-            ? {
-                ...item,
-                title: cleanTitle,
-                updatedAt: Date.now(),
-              }
-            : item
-        );
+    try {
+      const response = await updateInstitutionNotebookItem(noteId, { title: normalized });
+      const nextNote = mapNotebookItem(response?.item);
+      if (!nextNote) throw new Error("Unable to rename this note right now.");
+      setNotes((prev) => prev.map((note) => (note.id === noteId ? nextNote : note)));
+      if (currentNoteId === noteId) {
+        setNoteTitle(nextNote.title);
+        setNoteBody(nextNote.content || "");
       }
-      return [{ id: makeId(), title: cleanTitle, updatedAt: Date.now() }, ...prev];
-    });
+      setSaveMessage("Note renamed.");
+    } catch (error) {
+      setSaveMessage(error?.message || "Unable to rename this note right now.");
+    }
+    setTimeout(() => setSaveMessage(""), 2200);
+  };
+
+  const archiveNoteById = async (noteId) => {
+    const target = notes.find((note) => note.id === noteId);
+    if (!target) return;
+    try {
+      await updateInstitutionNotebookItem(noteId, { archived: true });
+      setNotes((prev) => prev.filter((note) => note.id !== noteId));
+      if (currentNoteId === noteId) {
+        setCurrentNoteId(null);
+        setNoteTitle("Note_ElimuLink_1_2026");
+        setNoteBody("");
+        if (isCompactMobile && !embedded) {
+          setShowMobileLanding(true);
+        }
+      }
+      setSaveMessage(`"${target.title}" archived.`);
+    } catch (error) {
+      setSaveMessage(error?.message || "Unable to archive this note right now.");
+    }
+    setTimeout(() => setSaveMessage(""), 2200);
+  };
+
+  const deleteNoteById = async (noteId) => {
+    try {
+      await deleteInstitutionNotebookItem(noteId);
+      setNotes((prev) => prev.filter((note) => note.id !== noteId));
+      if (currentNoteId === noteId) {
+        setCurrentNoteId(null);
+        setNoteTitle("Note_ElimuLink_1_2026");
+        setNoteBody("");
+        if (isCompactMobile && !embedded) {
+          setShowMobileLanding(true);
+        }
+      }
+      setSaveMessage("Note deleted.");
+    } catch (error) {
+      setSaveMessage(error?.message || "Unable to delete this note right now.");
+    }
+    setTimeout(() => setSaveMessage(""), 2200);
+  };
+
+  const confirmDeleteNoteById = (noteId) => {
+    const target = notes.find((note) => note.id === noteId);
+    if (!target) return;
+    const confirmed = window.confirm(`Delete "${target.title}"? This removes it from the current Notebook list.`);
+    if (!confirmed) return;
+    void deleteNoteById(noteId);
+    setActiveDesktopMoveMenuId(null);
+    setActiveDesktopNoteMenuId(null);
+  };
+
+  const moveNoteById = (noteId, destination) => {
+    const target = notes.find((note) => note.id === noteId);
+    if (!target) return;
+    const nextDestination = String(destination || "").trim();
+    if (!nextDestination) return;
+    setSaveMessage(`"${target.title}" is prepared to move to ${nextDestination}.`);
+    setTimeout(() => setSaveMessage(""), 2200);
+    setActiveDesktopMoveMenuId(null);
+    setActiveDesktopNoteMenuId(null);
   };
 
   const syncEditorTextState = () => {
@@ -543,6 +1593,14 @@ export default function NotebookPage({
     saveSelectionRange();
     syncEditorTextState();
     return true;
+  };
+
+  const handleUndo = () => {
+    runEditorCommand("undo");
+  };
+
+  const handleRedo = () => {
+    runEditorCommand("redo");
   };
 
   const insertTextAtCursor = (text) => {
@@ -792,6 +1850,34 @@ export default function NotebookPage({
     setIsNumberMenuOpen(false);
   };
 
+  const insertChecklistTemplate = () => {
+    insertTextAtCursor("\n- [ ] ");
+  };
+
+  const removeAttachmentById = (attachmentId) => {
+    setAttachments((prev) => prev.filter((item) => item.id !== attachmentId));
+    setSaveMessage("Attachment removed.");
+    setTimeout(() => setSaveMessage(""), 2000);
+  };
+
+  const runAssistInsert = (mode) => {
+    const normalized = String(mode || "").trim().toLowerCase();
+    let text = "\n\nElimuLinkAI: Suggested structure, examples, and key revision points.";
+    if (normalized === "outline") {
+      text = "\n\nOutline\n1. Key idea\n2. Supporting evidence\n3. Example\n4. Revision checkpoint";
+    } else if (normalized === "summary") {
+      text = "\n\nSummary\n- Main concept\n- Important details\n- Revision takeaway";
+    } else if (normalized === "questions") {
+      text = "\n\nStudy Questions\n1. What is the main idea?\n2. Which example supports it?\n3. What should be revised next?";
+    } else if (normalized === "rewrite") {
+      text = "\n\nRewrite clearly:\n- Simplify the explanation\n- Keep the core meaning\n- Add one concrete example";
+    }
+    insertTextAtCursor(text);
+    setIsMobileAssistSheetOpen(false);
+    setSaveMessage("Assist content inserted.");
+    setTimeout(() => setSaveMessage(""), 2000);
+  };
+
   const selectEditorTextRangeByOffsets = (startOffset, endOffset) => {
     const editor = noteBodyRef.current;
     if (!editor) return false;
@@ -914,31 +2000,47 @@ export default function NotebookPage({
     downloadBlob(docContent, `${baseName}.doc`, "application/msword;charset=utf-8");
   };
 
-  const handleSaveNote = () => {
+  const handleSaveNote = async () => {
     const title = String(noteTitle || "").trim() || "Untitled Note";
     const content = syncEditorTextState() || "";
     if (!content.trim()) {
       window.alert("Note is empty.");
       return;
     }
-    const payload = {
-      id: makeId(),
-      title,
-      content,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    upsertNoteMeta(title);
-    let message = "Saved locally.";
-    if (typeof onSaveNote === "function") {
-      try {
-        const result = onSaveNote(payload);
-        if (result && typeof result === "object" && typeof result.message === "string" && result.message.trim()) {
-          message = result.message.trim();
+    setIsNotebookItemSaving(true);
+    let message = "Saved.";
+    try {
+      const response = currentNoteId
+        ? await updateInstitutionNotebookItem(currentNoteId, { title, content })
+        : await createInstitutionNotebookItem({ title, content });
+      const savedNote = mapNotebookItem(response?.item);
+      if (!savedNote) throw new Error("Unable to save this note right now.");
+      setNotes((prev) => [savedNote, ...prev.filter((item) => item.id !== savedNote.id)]);
+      setCurrentNoteId(savedNote.id);
+      setNoteTitle(savedNote.title);
+      setNoteBody(savedNote.content || "");
+
+      const payload = {
+        id: savedNote.id,
+        title: savedNote.title,
+        content: savedNote.content || "",
+        createdAt: savedNote.createdAt || Date.now(),
+        updatedAt: savedNote.updatedAt || Date.now(),
+      };
+      if (typeof onSaveNote === "function") {
+        try {
+          const result = await onSaveNote(payload);
+          if (result && typeof result === "object" && typeof result.message === "string" && result.message.trim()) {
+            message = result.message.trim();
+          }
+        } catch {
+          message = "Saved note, but linked save failed.";
         }
-      } catch {
-        message = "Saved note, but linked save failed.";
       }
+    } catch (error) {
+      message = error?.message || "Unable to save this note right now.";
+    } finally {
+      setIsNotebookItemSaving(false);
     }
     setSaveMessage(message);
     setTimeout(() => setSaveMessage(""), 2000);
@@ -967,6 +2069,1290 @@ export default function NotebookPage({
     }
   };
 
+  if (showNotebookLanding) {
+    return (
+      <MobileFeatureLandingShell
+        featureName="Notebook"
+        featureSubtitle="Notes, drafts, and study structure"
+        featureDescription="Capture class notes, continue active drafts, and open the full notebook only when you need the editor."
+        featureIcon={BookOpen}
+        featureStyle="soft"
+        workspaceLabel={desktopWorkspaceSettings.name || "Notebook"}
+        workspaceHint={desktopWorkspaceSettings.instructions || "Notebook workspace"}
+        workspaceBadge="Institution workspace"
+        hideInstitutionStrip
+        quickActions={[
+          {
+            key: "subgroup",
+            label: "Subgroup",
+            icon: Rows3,
+            onClick: () => {
+              setDesktopWorkspaceStatus("");
+              setDesktopSubgroupQuery(desktopWorkspaceSettings.linkedSubgroup === "Not linked" ? "" : desktopWorkspaceSettings.linkedSubgroup);
+              openNotebookSettings();
+            },
+          },
+          {
+            key: "template",
+            label: "Quick template",
+            icon: Sparkles,
+            onClick: () => createNotebookNote("Lecture Notes"),
+          },
+          {
+            key: "tools",
+            label: "Workspace tools",
+            icon: MoreHorizontal,
+            onClick: openNotebookSettings,
+          },
+        ]}
+        quickActionsStyle="rows"
+        utilityActions={[
+          { key: "rename-workspace", label: "Rename workspace", icon: PencilLine, onClick: renameDesktopWorkspace },
+          { key: "move-workspace", label: "Move to workspace", icon: Rows3, onClick: moveWorkspaceToProject },
+          { key: "archive-workspace", label: "Archive workspace", icon: Archive, onClick: handleDesktopWorkspaceArchive },
+          { key: "delete-workspace", label: "Delete workspace", icon: Trash2, destructive: true, onClick: handleDesktopWorkspaceDelete },
+        ]}
+        shareConfig={{
+          title: "Share Notebook",
+          description: "Invite collaborators, choose access, and keep Notebook sharing calm and mobile-friendly.",
+          emailLabel: "Invite teammate",
+          emailPlaceholder: "name@example.com",
+          accessLabel: "Who can open this",
+          accessOptions: [
+            { value: "only-invited", label: "Only invited people" },
+            { value: "institution", label: "Institution members" },
+            { value: "subgroup-only", label: "Linked subgroup only" },
+          ],
+          defaultAccess: desktopShareAccess,
+          membersTitle: "Owner and members",
+          members: desktopWorkspaceMembers,
+          privacyNote: "Subgroup-only access stays tied to the linked subgroup when one is available.",
+          submitLabel: "Save share access",
+        }}
+        items={notebookLandingItems}
+        listStyle="plain"
+        inputPlaceholder="New note"
+        inputValue={landingInputValue}
+        onInputChange={setLandingInputValue}
+        onInputSubmit={(value) => createNotebookNote(value)}
+        onMenu={onOpenMainMenu || onBack}
+        onShare={handleNotebookShare}
+        onShareSubmit={handleMobileNotebookShareSubmit}
+        onSettings={openNotebookSettings}
+        onNewWork={() => createNotebookNote(landingInputValue)}
+        onStartCall={onOpenLive}
+        onOpenItem={(item) => openNotebookNote(item.id)}
+        emptyStateTitle={
+          isNotebookItemsLoading
+            ? "Loading notebook"
+            : notebookItemsError
+              ? "Notebook unavailable"
+              : "No notebook work yet"
+        }
+        emptyState={
+          isNotebookItemsLoading
+            ? "Fetching your notebook items."
+            : notebookItemsError || "No notebook work yet. Start a new note to begin."
+        }
+        emptyStateActionLabel="Create note"
+        onEmptyStateAction={() => createNotebookNote()}
+      />
+    );
+  }
+
+  if (showNotebookDesktopLanding) {
+    const desktopInstitutionName =
+      desktopWorkspaceSettings.linkedInstitution && desktopWorkspaceSettings.linkedInstitution.trim()
+        ? desktopWorkspaceSettings.linkedInstitution
+        : "ElimuLink University";
+    const desktopInstitutionLine = "Learning together with clarity, structure, and shared academic progress.";
+    return (
+      <div className="min-h-[100dvh] bg-[linear-gradient(180deg,#f8fafc_0%,#f4f7fb_48%,#eef3f9_100%)] px-6 py-6 dark:bg-[linear-gradient(180deg,#06111f_0%,#0a1527_48%,#0c1830_100%)]">
+        <div className="mx-auto flex min-h-[calc(100dvh-3rem)] max-w-7xl flex-col gap-6">
+          <div className="relative flex items-start justify-between gap-6 bg-transparent px-7 py-6">
+            <div className="absolute -left-5 top-1" data-desktop-landing-menu>
+              <button
+                type="button"
+                onClick={() => setIsDesktopLandingMenuOpen((prev) => !prev)}
+                aria-expanded={isDesktopLandingMenuOpen}
+                aria-label="Toggle workspace menu"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)] hover:bg-slate-50 dark:border-white/10 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+              >
+                {isDesktopLandingMenuOpen ? <X size={18} /> : <Menu size={18} />}
+              </button>
+
+              {isDesktopLandingMenuOpen ? (
+                <div className="mt-3 w-64 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_24px_60px_rgba(15,23,42,0.12)] dark:border-white/10 dark:bg-[#0d182b] dark:shadow-[0_24px_60px_rgba(2,8,23,0.45)]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDesktopLandingMenuOpen(false);
+                      setShowDesktopLanding(true);
+                    }}
+                    className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>Workspace home</span>
+                    <ChevronRight size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDesktopLandingMenuOpen(false);
+                      createNotebookNote();
+                    }}
+                    className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>New note</span>
+                    <Plus size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsDesktopLandingMenuOpen(false);
+                      setDesktopWorkspaceStatus("");
+                      setDesktopSubgroupQuery(desktopWorkspaceSettings.linkedSubgroup === "Not linked" ? "" : desktopWorkspaceSettings.linkedSubgroup);
+                      setDesktopSubgroupError("");
+                      setIsDesktopSettingsOpen(true);
+                      await loadDesktopWorkspace({ quiet: true });
+                    }}
+                    className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <span>Workspace settings</span>
+                    <Rows3 size={16} />
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="max-w-3xl">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600 dark:text-slate-300">Institution Workspace</div>
+              <div className="mt-3 flex items-center gap-3">
+                <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-transparent text-slate-700 dark:text-slate-100">
+                  <BookOpen size={22} />
+                </span>
+                <div>
+                  <h1 className="text-3xl font-semibold tracking-[-0.03em] text-slate-950 dark:text-slate-50">Notebook</h1>
+                  <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">
+                    Review saved notebook work, open a note, or start a fresh workspace without dropping into the editor immediately.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 rounded-full bg-white/70 p-1.5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]" data-desktop-utility-menu>
+              <button
+                type="button"
+                onClick={async () => {
+                  setDesktopShareStatus("");
+                  setDesktopSubgroupQuery(desktopWorkspaceSettings.linkedSubgroup === "Not linked" ? "" : desktopWorkspaceSettings.linkedSubgroup);
+                  setDesktopSubgroupError("");
+                  setIsDesktopShareOpen(true);
+                  await loadDesktopWorkspace({ quiet: true });
+                }}
+                className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200/70 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200"
+              >
+                <Copy size={15} />
+                Share
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setDesktopWorkspaceStatus("");
+                  setDesktopSubgroupQuery(desktopWorkspaceSettings.linkedSubgroup === "Not linked" ? "" : desktopWorkspaceSettings.linkedSubgroup);
+                  setDesktopSubgroupError("");
+                  setIsDesktopSettingsOpen(true);
+                  await loadDesktopWorkspace({ quiet: true });
+                }}
+                className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200/70 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200"
+              >
+                <Rows3 size={15} />
+                Settings
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsDesktopUtilityMenuOpen((prev) => !prev)}
+                  aria-expanded={isDesktopUtilityMenuOpen}
+                  aria-label="More workspace actions"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200/70 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200"
+                >
+                  <MoreHorizontal size={16} />
+                </button>
+
+                {isDesktopUtilityMenuOpen ? (
+                  <div className="absolute right-0 top-14 z-30 w-72 rounded-[26px] border border-slate-200/80 bg-white p-2.5 shadow-[0_22px_56px_rgba(15,23,42,0.12)]">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsDesktopUtilityMenuOpen(false);
+                        await renameDesktopWorkspace();
+                      }}
+                      className="flex w-full items-center gap-3 rounded-[18px] px-4 py-3 text-left text-[14px] text-slate-700 transition hover:bg-slate-50"
+                    >
+                      <PencilLine size={16} />
+                      <span>Rename</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDesktopUtilityMenuOpen(false);
+                        moveWorkspaceToProject();
+                      }}
+                      className="flex w-full items-center justify-between gap-3 rounded-[18px] px-4 py-3 text-left text-[14px] text-slate-700 transition hover:bg-slate-50"
+                    >
+                      <span className="flex items-center gap-3">
+                        <Rows3 size={16} />
+                        <span>Move to project / workspace</span>
+                      </span>
+                      <ChevronRight size={15} className="text-slate-400" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsDesktopUtilityMenuOpen(false);
+                        await handleDesktopWorkspaceArchive();
+                      }}
+                      className="mt-1 flex w-full items-center gap-3 rounded-[18px] px-4 py-3 text-left text-[14px] text-slate-700 transition hover:bg-slate-50"
+                    >
+                      <Archive size={16} />
+                      <span>Archive</span>
+                    </button>
+                    <div className="my-2 border-t border-slate-100" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDesktopUtilityMenuOpen(false);
+                        setDesktopDeleteConfirmText("");
+                        setIsDesktopDeleteConfirmOpen(true);
+                      }}
+                      className="flex w-full items-center gap-3 rounded-[18px] px-4 py-3 text-left text-[14px] text-rose-600 transition hover:bg-rose-50"
+                    >
+                      <Trash2 size={16} />
+                      <span>Delete</span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid flex-1 grid-cols-12 gap-6">
+            <section className="col-span-12 rounded-[30px] border border-slate-200/80 bg-white/92 p-6 shadow-[0_20px_50px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[#0d182b]/96 dark:shadow-[0_20px_50px_rgba(2,8,23,0.34)] lg:col-span-8">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-lg font-semibold text-slate-950 dark:text-slate-50">Saved notes</div>
+                  <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">Open any note and continue editing with the existing Notebook flow.</div>
+                </div>
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-300">
+                  {isDesktopWorkspaceLoading ? "Syncing workspace..." : `${notebookLandingItems.length} items`}
+                </div>
+              </div>
+              <div className="mt-6 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    ["Notes", String(notebookLandingItems.length), "Saved entries"],
+                    ["Workspace", desktopWorkspaceSettings.defaultView || "Notebook", "Current mode"],
+                    ["Institution", desktopInstitutionName, "Linked context"],
+                    ["Subgroup", desktopWorkspaceSettings.linkedSubgroup || "Not linked", "Shared study flow"],
+                  ].map(([label, value, sub]) => (
+                    <div key={label} className="rounded-[22px] border border-slate-200/80 bg-white px-4 py-4 dark:border-white/10 dark:bg-[#101c31]">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">{label}</div>
+                      <div className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950 dark:text-slate-50">{value}</div>
+                      <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">{sub}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-[#101c31]">
+                  <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-slate-600 dark:text-slate-300">Writing activity</div>
+                  <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">A clean snapshot of note volume and current study momentum.</div>
+                  <div className="mt-5 flex h-28 items-end gap-3">
+                    {["Ideas", "Drafts", "Revision", "Share"].map((label, index) => (
+                      <div key={label} className="flex flex-1 flex-col items-center gap-2">
+                        <div className="w-full rounded-t-[18px] bg-[linear-gradient(180deg,#2563eb_0%,#14b8a6_100%)]" style={{ height: `${[48, 68, 82, 54][index]}%` }} />
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600 dark:text-slate-400">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                {notebookLandingItems.length ? (
+                  notebookLandingItems.map((item) => (
+                    <div
+                      key={item.id}
+                      data-desktop-note-menu
+                      className="group relative flex items-start justify-between gap-4 border-t border-slate-200/70 bg-transparent px-5 py-5 transition hover:bg-slate-50/75 first:border-t-0"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openNotebookNote(item.id)}
+                        className="min-w-0 flex flex-1 items-start gap-4 text-left focus-visible:outline-none"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-3">
+                            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-transparent text-slate-600">
+                              <BookOpen size={16} />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-base font-semibold text-slate-900">{item.title}</div>
+                              <div className="mt-1 text-sm leading-6 text-slate-500">{item.preview}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+
+                      <div className="relative flex shrink-0 items-start gap-2">
+                        <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Updated {formatTime(item.updatedAt)}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setActiveDesktopMoveMenuId(null);
+                            setActiveDesktopNoteMenuId((prev) => (prev === item.id ? null : item.id));
+                          }}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200 ${
+                            activeDesktopNoteMenuId === item.id ? "bg-white text-slate-700 shadow-[0_8px_18px_rgba(15,23,42,0.08)]" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                          }`}
+                          aria-label="Note actions"
+                        >
+                          <MoreHorizontal size={16} />
+                        </button>
+
+                        {activeDesktopNoteMenuId === item.id ? (
+                          <div className="absolute right-0 top-10 z-20 w-60 rounded-[24px] border border-slate-200/80 bg-white p-2.5 shadow-[0_22px_56px_rgba(15,23,42,0.12)]">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                renameNoteById(item.id);
+                                setActiveDesktopNoteMenuId(null);
+                              }}
+                              className="flex w-full items-center gap-3 rounded-[18px] px-4 py-3 text-left text-[14px] text-slate-700 transition hover:bg-slate-50"
+                            >
+                              <PencilLine size={15} />
+                              <span>Rename</span>
+                            </button>
+
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setActiveDesktopMoveMenuId((prev) => (prev === item.id ? null : item.id));
+                                }}
+                                className="flex w-full items-center justify-between gap-3 rounded-[18px] px-4 py-3 text-left text-[14px] text-slate-700 transition hover:bg-slate-50"
+                              >
+                                <span className="flex items-center gap-3">
+                                  <Rows3 size={15} />
+                                  <span>Move note</span>
+                                </span>
+                                <ChevronRight size={15} />
+                              </button>
+
+                              {activeDesktopMoveMenuId === item.id ? (
+                                <div className="absolute left-[calc(100%+0.5rem)] top-0 w-52 rounded-[24px] border border-slate-200/80 bg-white p-2.5 shadow-[0_22px_56px_rgba(15,23,42,0.12)]">
+                                  {["Assignments", "Subgroup"].map((destination) => (
+                                    <button
+                                      key={destination}
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        moveNoteById(item.id, destination);
+                                      }}
+                                      className="flex w-full items-center gap-3 rounded-[18px] px-4 py-3 text-left text-[14px] text-slate-700 transition hover:bg-slate-50"
+                                    >
+                                      <BookOpen size={15} />
+                                      <span>{destination}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                archiveNoteById(item.id);
+                                setActiveDesktopNoteMenuId(null);
+                              }}
+                              className="mt-1 flex w-full items-center gap-3 rounded-[18px] px-4 py-3 text-left text-[14px] text-slate-700 transition hover:bg-slate-50"
+                            >
+                              <Archive size={15} />
+                              <span>Archive</span>
+                            </button>
+                            <div className="my-2 border-t border-slate-100" />
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                confirmDeleteNoteById(item.id);
+                              }}
+                              className="flex w-full items-center gap-3 rounded-[18px] px-4 py-3 text-left text-[14px] text-rose-600 transition hover:bg-rose-50"
+                            >
+                              <Trash2 size={15} />
+                              <span>Delete</span>
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50/70 px-6 py-10 text-center">
+                    <div className="text-lg font-semibold text-slate-900">No notebook work yet</div>
+                    <div className="mt-2 text-sm text-slate-500">Create your first note to start this workspace.</div>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <aside className="col-span-12 flex flex-col gap-6 lg:col-span-4">
+              <section className="rounded-[26px] border border-slate-200/70 bg-white/90 px-5 py-3.5 shadow-[0_14px_36px_rgba(15,23,42,0.045)] dark:border-white/10 dark:bg-[#0d182b]/96 dark:shadow-[0_14px_36px_rgba(2,8,23,0.34)]">
+                <div className="flex items-start gap-4">
+                  <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-transparent text-sm font-semibold text-slate-700 dark:text-slate-100">
+                    EL
+                  </div>
+                  <div className="min-w-0 pt-0.5">
+                    <div className="text-sm font-semibold text-slate-950 dark:text-slate-50">{desktopInstitutionName}</div>
+                    <div className="mt-0.5 text-sm leading-7 text-slate-700 dark:text-slate-300">{desktopInstitutionLine}</div>
+                  </div>
+                </div>
+              </section>
+
+              <div className="rounded-[30px] border border-slate-200/70 bg-white/92 p-5 shadow-[0_18px_42px_rgba(15,23,42,0.055)] dark:border-white/10 dark:bg-[#0d182b]/96 dark:shadow-[0_18px_42px_rgba(2,8,23,0.34)]">
+                <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/70 p-5 dark:border-white/10 dark:bg-[#101c31]">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-lg font-semibold text-slate-950 dark:text-slate-50">New work</div>
+                      <div className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-300">
+                        Start a fresh note and jump straight into the existing editor. Current note handlers stay unchanged.
+                      </div>
+                    </div>
+                    <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-slate-700 shadow-[0_10px_20px_rgba(15,23,42,0.06)] dark:bg-slate-900 dark:text-slate-100 dark:shadow-[0_10px_20px_rgba(2,8,23,0.3)]">
+                      <Plus size={18} />
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => createNotebookNote()}
+                    className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                  >
+                    <Plus size={16} />
+                    New note
+                  </button>
+                </div>
+
+                <div className="mt-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-lg font-semibold text-slate-950 dark:text-slate-50">Workspace snapshot</div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setDesktopWorkspaceStatus("");
+                        setDesktopSubgroupQuery(desktopWorkspaceSettings.linkedSubgroup === "Not linked" ? "" : desktopWorkspaceSettings.linkedSubgroup);
+                        setDesktopSubgroupError("");
+                        setIsDesktopSettingsOpen(true);
+                        await loadDesktopWorkspace({ quiet: true });
+                      }}
+                      className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
+                    >
+                      Open settings
+                    </button>
+                  </div>
+                  <div className="mt-4 space-y-3 text-sm text-slate-700 dark:text-slate-300">
+                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200/70 dark:bg-[#101c31] dark:ring-white/10">
+                      <span>Visibility</span>
+                      <span className="font-medium text-slate-950 dark:text-slate-50">{desktopWorkspaceSettings.visibility}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200/70 dark:bg-[#101c31] dark:ring-white/10">
+                      <span>Linked institution</span>
+                      <span className="font-medium text-slate-950 dark:text-slate-50">{desktopWorkspaceSettings.linkedInstitution}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200/70 dark:bg-[#101c31] dark:ring-white/10">
+                      <span>Linked subgroup</span>
+                      <span className="font-medium text-right text-slate-950 dark:text-slate-50">
+                        {desktopWorkspaceSettings.linkedSubgroupId
+                          ? `${desktopWorkspaceSettings.linkedSubgroup} (#${desktopWorkspaceSettings.linkedSubgroupId})`
+                          : "Not linked"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200/70 dark:bg-[#101c31] dark:ring-white/10">
+                      <span>Memory behavior</span>
+                      <span className="font-medium text-slate-950 dark:text-slate-50">{desktopWorkspaceSettings.memoryBehavior}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200/70 dark:bg-[#101c31] dark:ring-white/10">
+                      <span>Share access</span>
+                      <span className="font-medium text-slate-950 dark:text-slate-50">
+                        {desktopWorkspaceShareLink ? desktopShareAccess : "Private workspace"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <section className="rounded-[26px] border border-slate-200/70 bg-white/90 px-5 py-4.5 shadow-[0_14px_36px_rgba(15,23,42,0.045)] dark:border-white/10 dark:bg-[#0d182b]/96 dark:shadow-[0_14px_36px_rgba(2,8,23,0.34)]">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-950 dark:text-slate-50">Quick actions</div>
+                    <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">Lightweight Notebook shortcuts for this workspace.</div>
+                  </div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-300">Notebook</div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setDesktopWorkspaceStatus("Choose a subgroup in Workspace Settings to link Notebook to a real academic subgroup.");
+                      setDesktopSubgroupQuery(desktopWorkspaceSettings.linkedSubgroup === "Not linked" ? "" : desktopWorkspaceSettings.linkedSubgroup);
+                      setDesktopSubgroupError("");
+                      setIsDesktopSettingsOpen(true);
+                      await loadDesktopWorkspace({ quiet: true });
+                    }}
+                    className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[#101c31] dark:hover:bg-slate-800"
+                  >
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                      <Rows3 size={16} />
+                    </span>
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-950 dark:text-slate-50">Subgroup</span>
+                      <span className="mt-1 block text-xs text-slate-700 dark:text-slate-300">Link a real subgroup for access control.</span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => createNotebookNote("Lecture Notes")}
+                    className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[#101c31] dark:hover:bg-slate-800"
+                  >
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                      <StickyNote size={16} />
+                    </span>
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-950 dark:text-slate-50">Quick templates</span>
+                      <span className="mt-1 block text-xs text-slate-700 dark:text-slate-300">Start with a ready-to-name lecture note.</span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setDesktopWorkspaceStatus("Workspace tools stay in Settings for now.");
+                      setDesktopSubgroupQuery(desktopWorkspaceSettings.linkedSubgroup === "Not linked" ? "" : desktopWorkspaceSettings.linkedSubgroup);
+                      setDesktopSubgroupError("");
+                      setIsDesktopSettingsOpen(true);
+                      await loadDesktopWorkspace({ quiet: true });
+                    }}
+                    className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[#101c31] dark:hover:bg-slate-800"
+                  >
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                      <Sparkles size={16} />
+                    </span>
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-950 dark:text-slate-50">Workspace tools</span>
+                      <span className="mt-1 block text-xs text-slate-700 dark:text-slate-300">Open archive, memory, and collaboration controls.</span>
+                    </span>
+                  </button>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </div>
+
+        <NotebookWorkspaceModal
+          open={isDesktopShareOpen}
+          title="Share Notebook Workspace"
+          onClose={() => setIsDesktopShareOpen(false)}
+        >
+          <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+            <div className="space-y-5">
+              <label className="block">
+                <div className="mb-2 text-sm font-medium text-slate-700">Email invite</div>
+                <input
+                  value={desktopShareInvite}
+                  onChange={(e) => setDesktopShareInvite(e.target.value)}
+                  placeholder="name@institution.edu"
+                  className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none focus:border-sky-300"
+                />
+              </label>
+
+              <label className="block">
+                <div className="mb-2 text-sm font-medium text-slate-700">Access level</div>
+                <select
+                  value={desktopShareAccess}
+                  onChange={(e) => {
+                    void handleDesktopShareAccessChange(e.target.value);
+                  }}
+                  disabled={isDesktopShareBusy}
+                  className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none focus:border-sky-300"
+                >
+                  <option value="only-invited">Only invited</option>
+                  <option value="anyone-with-link">Anyone with link</option>
+                  <option value="institution-only">Institution only</option>
+                  <option value="subgroup-only">Subgroup only</option>
+                </select>
+              </label>
+
+              {desktopShareAccess === "subgroup-only" ? (
+                <div>
+                  <div className="mb-2 text-sm font-medium text-slate-700">Linked subgroup</div>
+                  <NotebookSubgroupPicker
+                    selectedId={desktopWorkspaceSettings.linkedSubgroupId}
+                    selectedLabel={desktopWorkspaceSettings.linkedSubgroup}
+                    searchValue={desktopSubgroupQuery}
+                    onSearchChange={setDesktopSubgroupQuery}
+                    results={desktopSubgroupResults}
+                    loading={isDesktopSubgroupLoading}
+                    error={desktopSubgroupError}
+                    onSelect={(group) => {
+                      void handleDesktopShareSubgroupSelect(group);
+                    }}
+                    onClear={clearDesktopSubgroupSelection}
+                    helperText="Subgroup-only access uses the real subgroup id under the hood. Select a subgroup here before copying or sharing the link."
+                  />
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleDesktopShareInvite}
+                  disabled={isDesktopShareBusy}
+                  className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  {isDesktopShareBusy ? "Saving..." : "Add invite"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDesktopShareCopyLink}
+                  disabled={isDesktopShareBusy}
+                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Copy link
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900">
+                Privacy note: anyone-with-link, institution-only, invited, and subgroup-only all persist on the real institution share link. Subgroup-only now requires a valid linked subgroup id and only allows the owner or real subgroup members.
+              </div>
+
+              {desktopShareStatus ? <div className="text-sm font-medium text-emerald-700">{desktopShareStatus}</div> : null}
+            </div>
+
+            <div className="space-y-5">
+              <div>
+                <div className="text-sm font-medium text-slate-700">Owner and members</div>
+                <div className="mt-3 space-y-3">
+                  {desktopWorkspaceMembers.map((entry) => (
+                    <div key={entry.key} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-slate-800">{entry.label}</div>
+                        <div className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{entry.role}</div>
+                      </div>
+                      {entry.removable ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleDesktopShareRemoveInvite(entry.label);
+                          }}
+                          disabled={isDesktopShareBusy}
+                          className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          Remove
+                        </button>
+                      ) : (
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Owner</span>
+                      )}
+                    </div>
+                  ))}
+                  {!desktopWorkspaceMembers.some((entry) => entry.removable) ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-4 text-sm text-slate-500">
+                      No invited members yet. Add an email invite to share this workspace with specific people.
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-medium text-slate-700">Quick share targets</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {["Email", "Copy link", "Lecturer group", "Subgroup"].map((target) => (
+                    <button
+                      key={target}
+                      type="button"
+                      onClick={() => setDesktopShareStatus(`${target} is prepared here as a frontend share shortcut.`)}
+                      className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {target}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDesktopShareRemoveAccess}
+                disabled={!desktopWorkspaceShareLink?.id || isDesktopShareBusy}
+                className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700 hover:bg-rose-100"
+              >
+                Remove access link
+              </button>
+            </div>
+          </div>
+        </NotebookWorkspaceModal>
+
+        <NotebookWorkspaceModal
+          open={isDesktopSettingsOpen}
+          title="Notebook Workspace Settings"
+          onClose={() => setIsDesktopSettingsOpen(false)}
+        >
+          <div className="grid gap-6 lg:grid-cols-2">
+            <label className="block">
+              <div className="mb-2 text-sm font-medium text-slate-700">Workspace / project name</div>
+              <input
+                value={desktopWorkspaceSettings.name}
+                onChange={(e) => setDesktopWorkspaceSettings((prev) => ({ ...prev, name: e.target.value }))}
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none focus:border-sky-300"
+              />
+            </label>
+
+            <label className="block">
+              <div className="mb-2 text-sm font-medium text-slate-700">Visibility</div>
+              <select
+                value={desktopWorkspaceSettings.visibility}
+                onChange={(e) => setDesktopWorkspaceSettings((prev) => ({ ...prev, visibility: e.target.value }))}
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none focus:border-sky-300"
+              >
+                <option value="institution">Institution</option>
+                <option value="private">Private</option>
+                <option value="subgroup">Subgroup</option>
+              </select>
+            </label>
+
+            <label className="block lg:col-span-2">
+              <div className="mb-2 text-sm font-medium text-slate-700">Instructions / context</div>
+              <textarea
+                value={desktopWorkspaceSettings.instructions}
+                onChange={(e) => setDesktopWorkspaceSettings((prev) => ({ ...prev, instructions: e.target.value }))}
+                rows={4}
+                placeholder="Add guidance for how this notebook workspace should be used."
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-300"
+              />
+            </label>
+
+            <label className="block">
+              <div className="mb-2 text-sm font-medium text-slate-700">Collaboration permissions</div>
+              <select
+                value={desktopWorkspaceSettings.permissions}
+                onChange={(e) => setDesktopWorkspaceSettings((prev) => ({ ...prev, permissions: e.target.value }))}
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none focus:border-sky-300"
+              >
+                <option value="members-can-view">Members can view</option>
+                <option value="members-can-comment">Members can comment</option>
+                <option value="members-can-edit">Members can edit</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <div className="mb-2 text-sm font-medium text-slate-700">Memory behavior</div>
+              <select
+                value={desktopWorkspaceSettings.memoryBehavior}
+                onChange={(e) => setDesktopWorkspaceSettings((prev) => ({ ...prev, memoryBehavior: e.target.value }))}
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none focus:border-sky-300"
+              >
+                <option value="workspace-default">Workspace default</option>
+                <option value="reference-history">Reference history</option>
+                <option value="minimal-memory">Minimal memory</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <div className="mb-2 text-sm font-medium text-slate-700">Linked institution</div>
+              <input
+                value={desktopWorkspaceSettings.linkedInstitution}
+                onChange={(e) => setDesktopWorkspaceSettings((prev) => ({ ...prev, linkedInstitution: e.target.value }))}
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none focus:border-sky-300"
+              />
+            </label>
+
+            <div className="block">
+              <div className="mb-2 text-sm font-medium text-slate-700">Linked subgroup</div>
+              <NotebookSubgroupPicker
+                selectedId={desktopWorkspaceSettings.linkedSubgroupId}
+                selectedLabel={desktopWorkspaceSettings.linkedSubgroup}
+                searchValue={desktopSubgroupQuery}
+                onSearchChange={setDesktopSubgroupQuery}
+                results={desktopSubgroupResults}
+                loading={isDesktopSubgroupLoading}
+                error={desktopSubgroupError}
+                onSelect={selectDesktopSubgroup}
+                onClear={clearDesktopSubgroupSelection}
+                helperText="Selecting a subgroup stores its real subgroup id for backend enforcement. The label is only shown for readability."
+              />
+            </div>
+
+            <div className="lg:col-span-2 flex flex-wrap items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleDesktopWorkspaceSave}
+                disabled={isDesktopSettingsBusy}
+                className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                {isDesktopSettingsBusy ? "Saving..." : "Save settings"}
+              </button>
+              <button
+                type="button"
+                onClick={handleDesktopWorkspaceArchive}
+                disabled={isDesktopSettingsBusy}
+                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Archive project
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDesktopDeleteConfirmText("");
+                  setIsDesktopDeleteConfirmOpen(true);
+                }}
+                disabled={isDesktopSettingsBusy}
+                className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700 hover:bg-rose-100"
+              >
+                Delete project
+              </button>
+            </div>
+
+            {desktopWorkspaceStatus ? <div className="lg:col-span-2 text-sm font-medium text-emerald-700">{desktopWorkspaceStatus}</div> : null}
+          </div>
+        </NotebookWorkspaceModal>
+
+        <NotebookWorkspaceModal
+          open={isDesktopDeleteConfirmOpen}
+          title="Delete Notebook Workspace"
+          onClose={() => {
+            if (isDesktopSettingsBusy) return;
+            setIsDesktopDeleteConfirmOpen(false);
+            setDesktopDeleteConfirmText("");
+          }}
+        >
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-900">
+              This deletes the persisted Institution Notebook workspace metadata layer only.
+              It removes:
+              workspace settings, linked subgroup selection, archive state, and active share links.
+              It does not delete your current local notebook notes or editor content in this frontend flow.
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600">
+              Type <span className="font-semibold text-slate-900">DELETE</span> to confirm workspace deletion.
+            </div>
+
+            <label className="block">
+              <div className="mb-2 text-sm font-medium text-slate-700">Confirmation</div>
+              <input
+                value={desktopDeleteConfirmText}
+                onChange={(event) => setDesktopDeleteConfirmText(event.target.value)}
+                placeholder="DELETE"
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none focus:border-rose-300"
+              />
+            </label>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleDesktopWorkspaceDelete}
+                disabled={isDesktopSettingsBusy || desktopDeleteConfirmText.trim() !== "DELETE"}
+                className="inline-flex items-center justify-center rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isDesktopSettingsBusy ? "Deleting..." : "Delete workspace metadata"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDesktopDeleteConfirmOpen(false);
+                  setDesktopDeleteConfirmText("");
+                }}
+                disabled={isDesktopSettingsBusy}
+                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </NotebookWorkspaceModal>
+      </div>
+    );
+  }
+
+  if (isCompactMobile && !embedded) {
+    const noteWordCount = String(noteBody || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean).length;
+
+    return (
+      <div className="min-h-[100dvh] bg-slate-50">
+        <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+          <div className="flex items-center justify-between gap-2 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => setShowMobileLanding(true)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              aria-label="Back to notes"
+            >
+              <ChevronLeft size={18} />
+            </button>
+
+            <div className="min-w-0 flex-1 px-1">
+              <input
+                value={noteTitle}
+                onChange={(e) => setNoteTitle(e.target.value)}
+                className="w-full border-0 bg-transparent px-0 text-center text-base font-semibold text-slate-950 outline-none placeholder:text-slate-400"
+                placeholder="Note title"
+              />
+              <div className="mt-0.5 text-center text-[11px] font-medium text-slate-500">
+                {isNotebookItemSaving ? "Saving..." : saveMessage || "Notebook"}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleSaveNote}
+                disabled={isNotebookItemSaving}
+                className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                {isNotebookItemSaving ? "Saving" : "Save"}
+              </button>
+              <button
+                type="button"
+                onClick={handleUndo}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                aria-label="Undo"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                aria-label="Redo"
+              >
+                <ChevronRight size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsMobileInsertSheetOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-white hover:bg-slate-800"
+                aria-label="Insert"
+              >
+                <Plus size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsMobileMoreSheetOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                aria-label="More note actions"
+              >
+                <MoreHorizontal size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 pb-28 pt-4">
+          {attachments.length > 0 ? (
+            <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Attachments</div>
+              <div className="space-y-2">
+                {attachments.map((attachment) => (
+                  <div key={attachment.id} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-800">{attachment.name}</div>
+                      <div className="mt-0.5 text-xs text-slate-500">Image attachment</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachmentById(attachment.id)}
+                      className="inline-flex h-8 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="rounded-[28px] border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)]">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Notebook editor</div>
+                <div className="mt-0.5 text-xs text-slate-500">Focused mobile writing surface</div>
+              </div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                {noteWordCount} words
+              </div>
+            </div>
+
+            <div className="p-4">
+              <div
+                ref={noteBodyRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={syncEditorTextState}
+                onMouseUp={saveSelectionRange}
+                onKeyUp={saveSelectionRange}
+                onFocus={saveSelectionRange}
+                onBlur={saveSelectionRange}
+                style={{
+                  textAlign: editorAlign,
+                  color: penTheme === "custom" ? customPenColor : undefined,
+                  backgroundColor: isEditorShaded ? highlightColor : undefined,
+                }}
+                className={`min-h-[58vh] w-full whitespace-pre-wrap rounded-2xl border ${editorBorderClass} ${pageToneClass} px-4 py-4 text-[15px] outline-none ${lineSpacingClass} ${penTheme === "custom" ? "" : activePen.textClass}`}
+                data-placeholder="Start writing your note here..."
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 pb-[max(env(safe-area-inset-bottom),12px)] pt-3 backdrop-blur">
+          <div className="flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsMobileFormatSheetOpen(true)}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Type size={16} />
+              Aa
+            </button>
+            <button
+              type="button"
+              onClick={insertChecklistTemplate}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <List size={16} />
+              Checklist
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsMobileAssistSheetOpen(true)}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Sparkles size={16} />
+              Assist
+            </button>
+          </div>
+        </div>
+
+        <MobileNotebookSheet open={isMobileFormatSheetOpen} title="Format note" onClose={() => setIsMobileFormatSheetOpen(false)}>
+          <div className="space-y-5">
+            <section>
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Text styles</div>
+              <div className="grid grid-cols-3 gap-2">
+                <button type="button" onClick={() => applyStylePreset("normal")} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-700">Body</button>
+                <button type="button" onClick={() => applyStylePreset("heading")} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-700">Heading</button>
+                <button type="button" onClick={() => applyStylePreset("nospacing")} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-700">No spacing</button>
+              </div>
+            </section>
+
+            <section>
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Quick formatting</div>
+              <div className="grid grid-cols-4 gap-2">
+                <button type="button" onClick={() => runEditorCommand("bold", null, { requireSelection: true, emptySelectionMessage: "Select text to make bold." })} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">Bold</button>
+                <button type="button" onClick={() => runEditorCommand("italic", null, { requireSelection: true, emptySelectionMessage: "Select text to italicize." })} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">Italic</button>
+                <button type="button" onClick={() => runEditorCommand("underline", null, { requireSelection: true, emptySelectionMessage: "Select text to underline." })} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">Underline</button>
+                <button type="button" onClick={() => runEditorCommand("justifyLeft")} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">Left</button>
+                <button type="button" onClick={() => applyBulletList(bulletSymbol, "disc")} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">Bullets</button>
+                <button type="button" onClick={() => applyNumberedList(numberingStyle)} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">Numbering</button>
+                <button type="button" onClick={() => { setEditorAlign("center"); runEditorCommand("justifyCenter"); }} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">Center</button>
+                <button type="button" onClick={() => { setEditorAlign("right"); runEditorCommand("justifyRight"); }} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">Right</button>
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Size and spacing</div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-medium text-slate-600">Font size</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {[14, 16, 18, 22].map((size) => (
+                    <button key={size} type="button" onClick={() => applyFontSize(size)} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">{size}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-medium text-slate-600">Line spacing</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {[
+                    ["tight", "Tight"],
+                    ["normal", "Normal"],
+                    ["wide", "Wide"],
+                  ].map(([value, label]) => (
+                    <button key={value} type="button" onClick={() => setLineSpacing(value)} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">{label}</button>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">More formatting</div>
+              <div className="space-y-2">
+                <button type="button" onClick={() => setIsFontMenuOpen((prev) => !prev)} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Font family</span><span className="text-slate-500">{fontFamily.split(",")[0].replace(/['"]/g, "")}</span></button>
+                {isFontMenuOpen ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-2">
+                    <div className="max-h-48 space-y-1 overflow-y-auto">
+                      {ALL_FONT_OPTIONS.map((font) => (
+                        <button key={font.key} type="button" onClick={() => setFontAndTrack(font.family, font.label)} className="w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-white" style={{ fontFamily: font.family }}>
+                          {font.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <button type="button" onClick={() => fontColorInputRef.current?.click()} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Text color</span><span className="h-4 w-4 rounded-full border border-slate-200" style={{ backgroundColor: fontColor }} /></button>
+                <button type="button" onClick={() => highlightColorInputRef.current?.click()} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Highlight color</span><span className="h-4 w-4 rounded-full border border-slate-200" style={{ backgroundColor: highlightColor }} /></button>
+                <button type="button" onClick={() => runEditorCommand("subscript", null, { requireSelection: true, emptySelectionMessage: "Select text to apply subscript." })} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Subscript</span><Subscript size={16} /></button>
+                <button type="button" onClick={() => runEditorCommand("superscript", null, { requireSelection: true, emptySelectionMessage: "Select text to apply superscript." })} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Superscript</span><Superscript size={16} /></button>
+                <button type="button" onClick={() => setHasEditorBorder((prev) => !prev)} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Editor border</span><span>{hasEditorBorder ? "On" : "Off"}</span></button>
+                <button type="button" onClick={() => setIsEditorShaded((prev) => !prev)} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Shading</span><span>{isEditorShaded ? "On" : "Off"}</span></button>
+                <button type="button" onClick={() => setPageTone((prev) => prev === "plain" ? "warm" : prev === "warm" ? "cool" : "plain")} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Page tone</span><span className="capitalize">{pageTone}</span></button>
+                <button type="button" onClick={() => setPageWidth((prev) => prev === "compact" ? "normal" : prev === "normal" ? "wide" : "compact")} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Page width</span><span className="capitalize">{pageWidth}</span></button>
+                <button type="button" onClick={() => (isFormatPainterArmed ? applyCopiedFormat() : copyCurrentFormat())} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><span>Format painter</span><span>{isFormatPainterArmed ? "Apply" : "Copy"}</span></button>
+              </div>
+            </section>
+          </div>
+        </MobileNotebookSheet>
+
+        <MobileNotebookSheet open={isMobileInsertSheetOpen} title="Insert into note" onClose={() => setIsMobileInsertSheetOpen(false)}>
+          <div className="space-y-2">
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><FileImage size={16} /><span>Upload image</span></button>
+            <button type="button" onClick={() => { setSaveMessage("Camera capture is prepared here for a later safe pass."); setTimeout(() => setSaveMessage(""), 2200); setIsMobileInsertSheetOpen(false); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><BookOpen size={16} /><span>Camera</span></button>
+            <button type="button" onClick={() => { insertChecklistTemplate(); setIsMobileInsertSheetOpen(false); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><List size={16} /><span>Checklist</span></button>
+            <button type="button" onClick={() => { insertTextAtCursor(`\n${new Date().toLocaleString()}`); setIsMobileInsertSheetOpen(false); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Search size={16} /><span>Date and time</span></button>
+            <button type="button" onClick={() => { setIsMobileInsertSheetOpen(false); setSaveMessage("Drawing tools stay available later as a deeper notebook action."); setTimeout(() => setSaveMessage(""), 2200); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Palette size={16} /><span>Drawing tools</span></button>
+            <button type="button" onClick={() => { setIsMobileInsertSheetOpen(false); setIsMobileAssistSheetOpen(true); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Sparkles size={16} /><span>Assist insert</span></button>
+          </div>
+        </MobileNotebookSheet>
+
+        <MobileNotebookSheet open={isMobileAssistSheetOpen} title="Assist with note" onClose={() => setIsMobileAssistSheetOpen(false)}>
+          <div className="space-y-2">
+            <button type="button" onClick={() => runAssistInsert("outline")} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Sparkles size={16} /><span>Generate outline</span></button>
+            <button type="button" onClick={() => runAssistInsert("summary")} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Sparkles size={16} /><span>Summarize note</span></button>
+            <button type="button" onClick={() => runAssistInsert("questions")} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Sparkles size={16} /><span>Create study questions</span></button>
+            <button type="button" onClick={() => runAssistInsert("rewrite")} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Sparkles size={16} /><span>Rewrite clearly</span></button>
+          </div>
+          <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+            Assist remains frontend-light here. It inserts structured note content and does not claim full generation.
+          </div>
+        </MobileNotebookSheet>
+
+        <MobileNotebookSheet open={isMobileMoreSheetOpen} title="More note actions" onClose={() => setIsMobileMoreSheetOpen(false)}>
+          <div className="space-y-5">
+            <section>
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Note actions</div>
+              <div className="space-y-2">
+                <button type="button" onClick={async () => { await handleNotebookShare(); setIsMobileMoreSheetOpen(false); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Copy size={16} /><span>Share note</span></button>
+                <button type="button" onClick={async () => { if (currentNoteId) await renameNoteById(currentNoteId); setIsMobileMoreSheetOpen(false); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><PencilLine size={16} /><span>Rename note</span></button>
+                <button type="button" onClick={() => { if (currentNoteId) moveNoteById(currentNoteId, "Assignments"); setIsMobileMoreSheetOpen(false); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Rows3 size={16} /><span>Move note</span></button>
+                <button type="button" onClick={() => { setIsMobileMoreSheetOpen(false); setIsMobileExportSheetOpen(true); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Copy size={16} /><span>Export / download</span></button>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <div className="font-medium text-slate-800">Note details</div>
+                  <div className="mt-1">Words: {noteWordCount}</div>
+                  <div className="mt-1">Current note: {currentNote?.title || noteTitle || "Untitled Note"}</div>
+                  <div className="mt-1">Updated: {currentNote?.updatedAt ? formatTime(currentNote.updatedAt) : "Not saved yet"}</div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Danger zone</div>
+              <div className="space-y-2">
+                <button type="button" onClick={async () => { if (currentNoteId) await archiveNoteById(currentNoteId); setIsMobileMoreSheetOpen(false); }} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"><Archive size={16} /><span>Archive note</span></button>
+                <button type="button" onClick={async () => { if (currentNoteId) await deleteNoteById(currentNoteId); setIsMobileMoreSheetOpen(false); }} className="flex w-full items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-left text-sm text-rose-700"><Trash2 size={16} /><span>Delete note</span></button>
+              </div>
+            </section>
+          </div>
+        </MobileNotebookSheet>
+
+        <MobileNotebookSheet open={isMobileExportSheetOpen} title="Export note" onClose={() => setIsMobileExportSheetOpen(false)}>
+          <div className="space-y-2">
+            {[
+              ["pdf", "PDF document"],
+              ["doc", "Word document"],
+              ["txt", "Plain text"],
+            ].map(([format, label]) => (
+              <button
+                key={format}
+                type="button"
+                onClick={() => {
+                  setDownloadFormat(format);
+                  setTimeout(() => handleDownloadNote(), 0);
+                  setIsMobileExportSheetOpen(false);
+                  setIsMobileMoreSheetOpen(false);
+                }}
+                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700"
+              >
+                <span>{label}</span>
+                <span className="uppercase text-slate-400">{format}</span>
+              </button>
+            ))}
+          </div>
+        </MobileNotebookSheet>
+
+        <input
+          ref={highlightColorInputRef}
+          type="color"
+          value={highlightColor}
+          onChange={(e) => {
+            const next = e.target.value;
+            setHighlightColor(next);
+            runEditorCommand("hiliteColor", next, {
+              requireSelection: true,
+              emptySelectionMessage: "Select text to apply highlight.",
+            });
+          }}
+          className="sr-only"
+        />
+        <input
+          ref={fontColorInputRef}
+          type="color"
+          value={fontColor}
+          onChange={(e) => {
+            const next = e.target.value;
+            setFontColor(next);
+            runEditorCommand("foreColor", next, {
+              requireSelection: true,
+              emptySelectionMessage: "Select text to apply font color.",
+            });
+          }}
+          className="sr-only"
+        />
+        <input
+          ref={colorInputRef}
+          type="color"
+          value={customPenColor}
+          onChange={(e) => {
+            setCustomPenColor(e.target.value);
+            setPenTheme("custom");
+          }}
+          className="sr-only"
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => addAttachment(e.target.files)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={embedded ? "bg-slate-100" : "min-h-[100dvh] bg-slate-100 p-4 md:p-6"}>
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -974,6 +3360,26 @@ export default function NotebookPage({
           <div className="border-b border-slate-700 bg-slate-950 px-3 py-2 text-white">
             <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
               <div className="inline-flex items-center gap-2 min-w-0">
+                {isCompactMobile && !embedded ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileLanding(true)}
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 text-[11px] font-medium text-slate-200 hover:bg-slate-800"
+                  >
+                    <ChevronLeft size={12} />
+                    Notes
+                  </button>
+                ) : null}
+                {!isCompactMobile && !embedded && enableDesktopLanding ? (
+                  <button
+                    type="button"
+                    onClick={openNotebookDesktopLanding}
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 text-[11px] font-medium text-slate-200 hover:bg-slate-800"
+                  >
+                    <ChevronLeft size={12} />
+                    Workspace
+                  </button>
+                ) : null}
                 <span className="h-7 w-7 rounded-md bg-emerald-500 text-white text-xs font-semibold inline-flex items-center justify-center shrink-0">
                   E
                 </span>
@@ -1029,7 +3435,7 @@ export default function NotebookPage({
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setNotes((prev) => [{ id: makeId(), title: "Untitled Note", updatedAt: Date.now() }, ...prev])}
+                    onClick={() => createNotebookNote()}
                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
                     New
@@ -1037,9 +3443,10 @@ export default function NotebookPage({
                   <button
                     type="button"
                     onClick={handleSaveNote}
+                    disabled={isNotebookItemSaving}
                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    Save
+                    {isNotebookItemSaving ? "Saving..." : "Save"}
                   </button>
                   <select
                     value={downloadFormat}
@@ -1642,7 +4049,7 @@ export default function NotebookPage({
             <div className="space-y-3 p-3">
               <button
                 type="button"
-                onClick={() => setNotes((prev) => [{ id: makeId(), title: "Untitled Note", updatedAt: Date.now() }, ...prev])}
+                onClick={() => createNotebookNote()}
                 className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 <Plus size={16} />
@@ -1650,35 +4057,62 @@ export default function NotebookPage({
               </button>
 
               <div className="space-y-2">
-                {notes.map((note) => (
-                  <div key={note.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-slate-800">{note.title}</p>
-                        <p className="mt-1 text-xs text-slate-500">{formatTime(note.updatedAt)}</p>
-                      </div>
+                {isNotebookItemsLoading ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                    Loading notebook items...
+                  </div>
+                ) : notebookItemsError ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">
+                    {notebookItemsError}
+                  </div>
+                ) : notes.length ? (
+                  notes.map((note) => (
+                    <div
+                      key={note.id}
+                      className={[
+                        "rounded-lg border p-2",
+                        currentNoteId === note.id
+                          ? "border-sky-200 bg-sky-50/80"
+                          : "border-slate-200 bg-slate-50",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openNotebookNote(note.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <p className="truncate text-sm font-medium text-slate-800">{note.title}</p>
+                          <p className="mt-1 text-xs text-slate-500">{formatTime(note.updatedAt)}</p>
+                          <p className="mt-1 text-xs text-slate-500">{note.preview || buildNotePreview(note.content)}</p>
+                        </button>
 
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => renameNoteById(note.id)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-                          title="Edit note title"
-                        >
-                          <PencilLine size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteNoteById(note.id)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-                          title="Delete note"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => renameNoteById(note.id)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                            title="Edit note title"
+                          >
+                            <PencilLine size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteNoteById(note.id)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                            title="Delete note"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+                    No notebook items yet.
                   </div>
-                ))}
+                )}
               </div>
 
               <div className="border-t border-slate-200 pt-3">
@@ -1731,7 +4165,7 @@ export default function NotebookPage({
             <div className="flex flex-col items-center gap-2 p-2">
               <button
                 type="button"
-                onClick={() => setNotes((prev) => [{ id: makeId(), title: "Untitled Note", updatedAt: Date.now() }, ...prev])}
+                onClick={() => createNotebookNote()}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                 title="New Note"
               >

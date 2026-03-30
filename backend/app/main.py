@@ -31,6 +31,8 @@ from .routes.attendance import router as attendance_router
 from .routes.finance import router as finance_router
 from .routes.audit import router as audit_router
 from .routes.auth_verify import router as auth_verify_router
+from .routes.feedback import router as feedback_router
+from .routes.notification_preferences import router as notification_preferences_router
 from .routes.ai import router as ai_router
 from .routes.ai_live_chat import router as ai_live_chat_router
 from .routes.executive_live_chat import router as executive_live_chat_router
@@ -169,6 +171,8 @@ async def startup_log() -> None:
   print(f"[STARTUP] API running | gemini_key_present={gemini_present} | APP_ID={app_id}")
 app.include_router(health_router)
 app.include_router(auth_verify_router)
+app.include_router(feedback_router)
+app.include_router(notification_preferences_router)
 app.include_router(chat_router)
 app.include_router(admin_ai_router)
 app.include_router(admin_analytics_router)

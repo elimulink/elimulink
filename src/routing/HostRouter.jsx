@@ -34,6 +34,9 @@ import { getResolvedHostMode } from './hostMode';
 
 const APP_ID = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const DEBUG_HOST_ROUTER = import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_HOST_ROUTER || '').trim() === '1';
+const DEV_AUTH_BYPASS_ENABLED =
+  import.meta.env.DEV &&
+  String(import.meta.env.VITE_DEV_AUTH_BYPASS || '').trim() === '1';
 const BOOTSTRAP_TIMEOUT_MS = Math.max(getStartupVerifyTimeoutMs() + 15000, 60000);
 const BOOTSTRAP_RETRY_DELAY_MS = 4000;
 const BOOTSTRAP_MAX_TEMP_FAILURES = 3;
@@ -90,6 +93,16 @@ function getModeBaseUrl(mode, currentHostname = window.location.hostname) {
     institution: 'https://institution.elimulink.co.ke',
   };
   return customBaseMap[mode];
+}
+
+function isLocalHostname(hostname = window.location.hostname) {
+  const host = String(hostname || '').toLowerCase();
+  return (
+    host.endsWith('.localhost') ||
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)
+  );
 }
 
 function getModeUrl(mode) {
@@ -331,9 +344,44 @@ export default function HostRouter() {
   const temporaryBootstrapFailureRef = useRef(0);
 
   const hostMode = useMemo(
-    () => getResolvedHostMode(window.location.hostname),
+    () => getResolvedHostMode(window.location.hostname, window.location.pathname),
     [],
   );
+  const devAuthBypassActive = DEV_AUTH_BYPASS_ENABLED && isLocalHostname(window.location.hostname);
+  const devBypassUser = useMemo(
+    () =>
+      devAuthBypassActive
+        ? {
+            uid: `dev-${hostMode}-editor`,
+            email: `dev-${hostMode}@localhost`,
+            displayName: 'Dev Mode',
+            isAnonymous: false,
+            emailVerified: true,
+          }
+        : null,
+    [devAuthBypassActive, hostMode],
+  );
+  const devBypassProfile = useMemo(() => {
+    if (!devAuthBypassActive || !devBypassUser) return null;
+    const role =
+      hostMode === 'institution'
+        ? 'institution_admin'
+        : hostMode === 'student'
+          ? 'student'
+          : 'public_user';
+    return {
+      uid: devBypassUser.uid,
+      email: devBypassUser.email,
+      role,
+      institution_id: hostMode === 'institution' ? 'dev-institution' : null,
+      institutionId: hostMode === 'institution' ? 'dev-institution' : null,
+      app_access: [hostMode],
+      default_app: hostMode,
+      access_mode: 'verified',
+      displayName: devBypassUser.displayName,
+      devAuthBypass: true,
+    };
+  }, [devAuthBypassActive, devBypassUser, hostMode]);
   const {
     lockState,
     clearLock,
@@ -353,6 +401,27 @@ export default function HostRouter() {
     hostLog('[HOST_MODE_ROUTE]', { host: window.location.host, hostMode, pathname });
     hostRouteLogged.current = true;
   }, [hostMode, pathname]);
+
+  useEffect(() => {
+    if (!devAuthBypassActive || !devBypassUser || !devBypassProfile) return;
+    hostDebug('auth_bypass:active', {
+      hostMode,
+      host: window.location.host,
+      uid: devBypassUser.uid,
+    });
+    setUser(devBypassUser);
+    setProfile(devBypassProfile);
+    setAccessAllowed(true);
+    setFlashMessage('');
+    setBootstrapError(null);
+    setBootstrapStatusMessage('');
+    setUsedCachedStartupSession(false);
+    setBackgroundVerifyState('idle');
+    setBackgroundVerifyMessage('');
+    setAuthReady(true);
+    setProfileReady(true);
+    setBootState('ready');
+  }, [devAuthBypassActive, devBypassProfile, devBypassUser, hostMode]);
 
   const modeUrls = useMemo(
     () => ({
@@ -407,6 +476,7 @@ export default function HostRouter() {
   }, []);
 
   useEffect(() => {
+    if (devAuthBypassActive) return undefined;
     if (!auth) {
       setUser(null);
       setAuthReady(true);
@@ -432,13 +502,15 @@ export default function HostRouter() {
         setBootState('guest');
       },
     );
-  }, []);
+  }, [devAuthBypassActive]);
 
   useEffect(() => {
+    if (devAuthBypassActive) return;
     localStorage.setItem('elimulink_host_mode', hostMode);
-  }, [hostMode]);
+  }, [devAuthBypassActive, hostMode]);
 
   useEffect(() => {
+    if (devAuthBypassActive) return undefined;
     let cancelled = false;
     async function loadProfile() {
       const attempt = bootAttemptRef.current + 1;
@@ -642,9 +714,10 @@ export default function HostRouter() {
         bootstrapRetryTimerRef.current = null;
       }
     };
-  }, [authReady, user, hostMode, bootstrapNonce]);
+  }, [authReady, user, hostMode, bootstrapNonce, devAuthBypassActive]);
 
   useEffect(() => {
+    if (devAuthBypassActive) return undefined;
     let cancelled = false;
 
     async function refreshVerificationInBackground() {
@@ -734,9 +807,10 @@ export default function HostRouter() {
         backgroundRetryTimerRef.current = null;
       }
     };
-  }, [authReady, profileReady, bootState, user, hostMode, bootstrapNonce, usedCachedStartupSession]);
+  }, [authReady, profileReady, bootState, user, hostMode, bootstrapNonce, usedCachedStartupSession, devAuthBypassActive]);
 
   useEffect(() => {
+    if (devAuthBypassActive) return undefined;
     if (!authReady || profileReady || bootState !== 'loading') return undefined;
     const timeoutId = window.setTimeout(() => {
       hostDebug('watchdog:triggered', {
@@ -752,7 +826,7 @@ export default function HostRouter() {
       setProfileReady(true);
     }, BOOTSTRAP_TIMEOUT_MS);
     return () => window.clearTimeout(timeoutId);
-  }, [authReady, profileReady, bootState, user?.uid, hostMode, pathname, bootstrapNonce]);
+  }, [authReady, profileReady, bootState, user?.uid, hostMode, pathname, bootstrapNonce, devAuthBypassActive]);
 
   useEffect(() => {
     if (!authReady || !profileReady || handledInitialRedirect.current) return;
@@ -957,6 +1031,11 @@ export default function HostRouter() {
       {flashMessage ? (
         <div className="fixed top-3 left-1/2 z-50 -translate-x-1/2 rounded border border-amber-500/40 bg-amber-900/60 px-4 py-2 text-xs text-amber-100">
           {flashMessage}
+        </div>
+      ) : null}
+      {devAuthBypassActive ? (
+        <div className="fixed top-3 right-3 z-50 rounded-full border border-amber-300/80 bg-amber-50/95 px-3 py-1.5 text-[11px] font-semibold text-amber-900 shadow-[0_12px_26px_rgba(120,53,15,0.12)]">
+          Dev Mode: Auth Bypass Active
         </div>
       ) : null}
       {backgroundVerifyState === 'error' && backgroundVerifyMessage ? (

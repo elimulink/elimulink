@@ -2,18 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   ImagePlus,
-  Keyboard,
+  MessageCircle,
   Mic,
   Monitor,
   MonitorUp,
   PhoneOff,
   RotateCw,
-  Send,
   Square,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
+import LiveSceneHints from "./LiveSceneHints.jsx";
+import LiveTextOverlay from "./LiveTextOverlay.jsx";
+import LiveGuidanceOverlay from "./LiveGuidanceOverlay.jsx";
+import "./live-overlay-v2.css";
 
 export default function LiveVoiceOverlayV2({
   open,
@@ -42,6 +45,14 @@ export default function LiveVoiceOverlayV2({
   onTakeScreenshot,
   onToggleScreenRecording,
   onSubmitTextMessage,
+  sceneHints = [],
+  onSelectSceneHint,
+  textOverlayOpen = false,
+  onOpenTextOverlay,
+  onCloseTextOverlay,
+  onSendTextOverlay,
+  guidanceHighlights = [],
+  cameraModeActive = false,
   onInterrupt,
   onRetryListen,
   onStartVoice,
@@ -49,9 +60,6 @@ export default function LiveVoiceOverlayV2({
 }) {
   const videoRef = useRef(null);
   const [selectedCaptureId, setSelectedCaptureId] = useState(null);
-  const [textComposerOpen, setTextComposerOpen] = useState(false);
-  const [textDraft, setTextDraft] = useState("");
-  const [sendingText, setSendingText] = useState(false);
 
   useEffect(() => {
     if (!open || !cameraEnabled || !cameraStream || !videoRef.current) return;
@@ -73,20 +81,6 @@ export default function LiveVoiceOverlayV2({
   }, [captures, selectedCaptureId]);
 
   if (!open) return null;
-
-  const handleSubmitText = async () => {
-    const normalized = textDraft.trim();
-    if (!normalized || sendingText) return;
-
-    try {
-      setSendingText(true);
-      await onSubmitTextMessage?.(normalized);
-      setTextDraft("");
-      setTextComposerOpen(false);
-    } finally {
-      setSendingText(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-[100] overflow-hidden bg-[#04070f] text-white">
@@ -113,6 +107,10 @@ export default function LiveVoiceOverlayV2({
                 videoRef={videoRef}
                 isSharing={isSharing}
                 shareSurface={shareSurface}
+                sceneHints={sceneHints}
+                onSelectSceneHint={onSelectSceneHint}
+                guidanceHighlights={guidanceHighlights}
+                cameraModeActive={cameraModeActive}
               />
             </div>
 
@@ -159,16 +157,12 @@ export default function LiveVoiceOverlayV2({
 
           <BottomControls
             mode={mode}
-            textComposerOpen={textComposerOpen}
-            textDraft={textDraft}
-            sendingText={sendingText}
-            setTextComposerOpen={setTextComposerOpen}
-            setTextDraft={setTextDraft}
-            onSubmitText={handleSubmitText}
             onPrimaryMic={onPrimaryMic || onStartVoice}
             onInterrupt={onInterrupt}
             onRetryListen={onRetryListen}
             onEnd={onEnd}
+            textOverlayOpen={textOverlayOpen}
+            onOpenTextOverlay={onOpenTextOverlay}
             cameraEnabled={cameraEnabled}
             recordingScreen={recordingScreen}
             isSharing={isSharing}
@@ -184,6 +178,12 @@ export default function LiveVoiceOverlayV2({
           />
         </div>
       </div>
+      <LiveTextOverlay
+        open={textOverlayOpen}
+        onClose={onCloseTextOverlay}
+        onSend={onSendTextOverlay || onSubmitTextMessage}
+        busy={false}
+      />
     </div>
   );
 }
@@ -225,10 +225,23 @@ function Header({ title, subtitle, muted, onToggleMute, onClose }) {
   );
 }
 
-function MainStage({ mode, transcript, responseText, cameraEnabled, videoRef, isSharing, shareSurface }) {
+function MainStage({
+  mode,
+  transcript,
+  responseText,
+  cameraEnabled,
+  videoRef,
+  isSharing,
+  shareSurface,
+  sceneHints,
+  onSelectSceneHint,
+  guidanceHighlights,
+  cameraModeActive,
+}) {
   if (cameraEnabled) {
     return (
       <div className="relative flex min-h-screen flex-1 flex-col overflow-hidden bg-black lg:min-h-[44vh] lg:rounded-[40px] lg:bg-[#0a0f1d] lg:ring-1 lg:ring-white/10 lg:shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+        <div className="el-live-premium-edge-glow" />
         <div className="relative flex-1 overflow-hidden">
           <video
             ref={videoRef}
@@ -236,6 +249,15 @@ function MainStage({ mode, transcript, responseText, cameraEnabled, videoRef, is
             playsInline
             muted
             className="h-full w-full object-cover"
+          />
+          <LiveGuidanceOverlay
+            visible={cameraModeActive}
+            highlights={guidanceHighlights}
+          />
+          <LiveSceneHints
+            visible={cameraModeActive}
+            hints={sceneHints}
+            onSelectHint={onSelectSceneHint}
           />
           <div className="absolute left-4 top-20 rounded-full bg-black/32 px-3 py-1.5 text-xs text-white/88 backdrop-blur lg:top-4">
             Live camera
@@ -253,6 +275,7 @@ function MainStage({ mode, transcript, responseText, cameraEnabled, videoRef, is
 
   return (
     <div className="relative flex min-h-screen flex-1 flex-col items-center justify-center overflow-hidden bg-[#04070f] px-6 py-10 text-center lg:min-h-[44vh] lg:rounded-[40px] lg:bg-[#0a0f1d] lg:ring-1 lg:ring-white/10 lg:shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+      <div className="el-live-premium-edge-glow" />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom,rgba(96,165,250,0.25)_0%,rgba(59,130,246,0.13)_24%,rgba(59,130,246,0.05)_44%,transparent_72%)]" />
       {isSharing ? (
         <div className="absolute left-4 top-32 rounded-full bg-emerald-500/16 px-3 py-1.5 text-xs text-emerald-100 backdrop-blur ring-1 ring-emerald-300/16 lg:left-auto lg:right-4 lg:top-4">
@@ -373,16 +396,12 @@ function CapturePanel({ captures, selectedCaptureId, onSelect, selectedCapture }
 
 function BottomControls({
   mode,
-  textComposerOpen,
-  textDraft,
-  sendingText,
-  setTextComposerOpen,
-  setTextDraft,
-  onSubmitText,
   onPrimaryMic,
   onInterrupt,
   onRetryListen,
   onEnd,
+  textOverlayOpen,
+  onOpenTextOverlay,
   cameraEnabled,
   recordingScreen,
   isSharing,
@@ -426,45 +445,6 @@ function BottomControls({
         />
       </div>
 
-      {textComposerOpen ? (
-        <div className="pointer-events-auto mx-auto flex w-full max-w-lg items-center gap-2 rounded-full bg-[#101828]/88 px-3 py-2.5 shadow-[0_22px_44px_rgba(2,6,23,0.42)] ring-1 ring-white/10 backdrop-blur-xl lg:max-w-xl">
-          <button
-            type="button"
-            onClick={() => setTextComposerOpen(false)}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/8 text-white/80 ring-1 ring-white/10 transition hover:bg-white/12"
-            aria-label="Close text input"
-          >
-            <Keyboard size={18} />
-          </button>
-          <input
-            type="text"
-            value={textDraft}
-            onChange={(event) => setTextDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                onSubmitText();
-              }
-            }}
-            placeholder="Type a message"
-            className="min-w-0 flex-1 bg-transparent px-2 text-sm text-white outline-none placeholder:text-white/45"
-          />
-          <button
-            type="button"
-            onClick={onSubmitText}
-            disabled={!textDraft.trim() || sendingText}
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${
-              textDraft.trim() && !sendingText
-                ? "bg-blue-600 text-white shadow-[0_10px_24px_rgba(59,130,246,0.32)]"
-                : "bg-white/8 text-white/35 ring-1 ring-white/8"
-            }`}
-            aria-label="Send text to live AI"
-          >
-            <Send size={18} />
-          </button>
-        </div>
-      ) : null}
-
       <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-2.5 lg:hidden">
         {showStopReply ? (
           <ActionChip onClick={onInterrupt}>Stop reply</ActionChip>
@@ -476,10 +456,10 @@ function BottomControls({
 
       <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-3 lg:hidden">
         <DockIconButton
-          icon={<Keyboard size={20} />}
-          label="Text"
-          onClick={() => setTextComposerOpen((value) => !value)}
-          active={textComposerOpen}
+          icon={<MessageCircle size={20} />}
+          label="Chat"
+          onClick={onOpenTextOverlay}
+          active={textOverlayOpen}
         />
         <MainMicButton mode={mode} label={micLabel} onClick={onPrimaryMic} />
         <DangerDockButton onClick={onEnd} />
@@ -491,7 +471,7 @@ function BottomControls({
         </ActionChip>
         {showStopReply ? <ActionChip onClick={onInterrupt}>Stop reply</ActionChip> : null}
         {showListenAgain ? <ActionChip onClick={onRetryListen}>Listen again</ActionChip> : null}
-        <ActionChip onClick={() => setTextComposerOpen((value) => !value)}>Text</ActionChip>
+        <ActionChip onClick={onOpenTextOverlay}>{textOverlayOpen ? "Chat open" : "Chat"}</ActionChip>
         <DangerAction onClick={onEnd}>End</DangerAction>
       </div>
     </div>

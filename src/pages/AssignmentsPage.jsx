@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiPost } from "../lib/apiClient";
 import {
+  apiPost,
+  createAssignmentRecord,
+  deleteAssignmentRecord,
+  fetchAssignmentRecord,
+  listAssignments,
+  updateAssignmentRecord,
+} from "../lib/apiClient";
+import AssignmentsDesktopLanding from "./AssignmentsDesktopLanding";
+import MobileFeatureLandingShell from "../shared/feature-landing/MobileFeatureLandingShell";
+import {
+  Archive,
   BookOpen,
+  Copy,
   Upload,
   Wand2,
   Sigma,
@@ -22,6 +33,12 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
+  Menu,
+  MoreHorizontal,
+  Plus,
+  Rows3,
+  Trash2,
+  X,
 } from "lucide-react";
 
 const DESKTOP_TABS = [
@@ -70,11 +87,33 @@ const TOOLS = [
   },
 ];
 
-const DEFAULT_ASSIGNMENTS = [
-  { id: "ASSG-1021", title: "Biology 101: Cell Structure", course: "Biology 101", due: "Fri 5:00 PM", status: "In Progress" },
-  { id: "ASSG-1140", title: "History 202: Essay Outline", course: "History 202", due: "Mon 9:00 AM", status: "Not Started" },
-  { id: "ASSG-1207", title: "CSC 110: Arrays Worksheet", course: "CSC 110", due: "Wed 11:59 PM", status: "Submitted" },
-];
+const MOBILE_TOOL_SECTION_META = {
+  "tools-homework": {
+    title: "Homework Helper",
+    description: "Break the question into guided steps and get a cleaner approach.",
+    toolKey: "homework",
+  },
+  "tools-upload": {
+    title: "Upload & Analyze",
+    description: "Review files, understand the task, and improve the response.",
+    toolKey: "upload",
+  },
+  "tools-writing": {
+    title: "Writing Assistant",
+    description: "Improve clarity, structure, tone, and academic presentation.",
+    toolKey: "writing",
+  },
+  "tools-stem": {
+    title: "STEM Assistant",
+    description: "Work through math or code with explanations instead of shortcuts.",
+    toolKey: "stem",
+  },
+  "tools-essay": {
+    title: "Essay Planner & Draft Builder",
+    description: "Shape the thesis, flow, and outline in one focused place.",
+    toolKey: "essay",
+  },
+};
 
 function Pill({ active, children, onClick }) {
   return (
@@ -224,7 +263,47 @@ function StatusBadge({ status }) {
   );
 }
 
-export default function AssignmentsPage() {
+function AssignmentsWorkspaceModal({ open, title, onClose, children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-slate-950/30 backdrop-blur-[1px]" onClick={onClose} />
+      <div className="absolute inset-x-0 top-0 mx-auto flex min-h-full max-w-3xl items-start justify-center px-4 py-10">
+        <div className="w-full rounded-[30px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.14)]">
+          <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-6 py-5">
+            <div>
+              <div className="text-lg font-semibold text-slate-900">{title}</div>
+              <div className="mt-1 text-sm text-slate-500">Assignments desktop workspace flow.</div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="px-6 py-6">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function AssignmentsPage({ onOpenMainMenu, audience = "institution" }) {
+  const isStudentAudience = audience === "student";
+  const normalizeAssignment = (assignment) => ({
+    id: String(assignment?.id || `ASSG-${Date.now()}`),
+    title: String(assignment?.title || "Untitled Assignment"),
+    description: String(assignment?.description || ""),
+    course: String(assignment?.course || "General"),
+    due: String(assignment?.due || "TBD"),
+    status: String(assignment?.status || "Not Started"),
+    isArchived: Boolean(assignment?.is_archived || assignment?.isArchived),
+    createdAt: assignment?.created_at || assignment?.createdAt || null,
+    updatedAt: assignment?.updated_at || assignment?.updatedAt || null,
+  });
+
   const [tab, setTab] = useState("my");
   const [tool, setTool] = useState("homework");
   const [toolSearch, setToolSearch] = useState("");
@@ -250,9 +329,10 @@ export default function AssignmentsPage() {
     { t: "Writing Assistant", d: "Selected clarity + structure improvements." },
   ]);
 
-  const [assignments, setAssignments] = useState(DEFAULT_ASSIGNMENTS);
+  const [assignments, setAssignments] = useState([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [assignmentsError, setAssignmentsError] = useState("");
+  const [activeAssignment, setActiveAssignment] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState({
     title: "",
@@ -260,9 +340,76 @@ export default function AssignmentsPage() {
     course: "",
     due: "",
   });
+  const [showDesktopLanding, setShowDesktopLanding] = useState(
+    () => !(typeof window !== "undefined" ? window.matchMedia("(max-width: 767px)").matches : false)
+  );
+  const [showMobileLanding, setShowMobileLanding] = useState(
+    () => typeof window !== "undefined" ? window.matchMedia("(max-width: 767px)").matches : false
+  );
+  const [activeMobileSection, setActiveMobileSection] = useState("assignments");
+  const [isMobileSectionMenuOpen, setIsMobileSectionMenuOpen] = useState(false);
+  const [landingInputValue, setLandingInputValue] = useState("");
+  const [isLandingMenuOpen, setIsLandingMenuOpen] = useState(false);
+  const [isLandingShareOpen, setIsLandingShareOpen] = useState(false);
+  const [isLandingSettingsOpen, setIsLandingSettingsOpen] = useState(false);
+  const [isLandingUtilityMenuOpen, setIsLandingUtilityMenuOpen] = useState(false);
+  const [landingAssignmentMenuId, setLandingAssignmentMenuId] = useState(null);
+  const [landingMoveMenuId, setLandingMoveMenuId] = useState(null);
+  const [landingShareInvite, setLandingShareInvite] = useState("");
+  const [landingShareAccess, setLandingShareAccess] = useState("institution-only");
+  const [landingShareStatus, setLandingShareStatus] = useState("");
+  const [landingWorkspaceStatus, setLandingWorkspaceStatus] = useState("");
+  const [landingDeleteOpen, setLandingDeleteOpen] = useState(false);
+  const [landingWorkspaceSettings, setLandingWorkspaceSettings] = useState({
+    name: "Assignments Workspace",
+    description: "Track active coursework, due dates, and AI-supported study tasks.",
+    linkedInstitution: isStudentAudience ? "Your study workspace" : "ElimuLink University",
+    subgroup: "Not linked",
+    defaultView: "my assignments",
+    reminderMode: "due-date reminders",
+    collaboration: "members can view",
+  });
+
+  const mobileSectionItems = useMemo(
+    () => [
+      { key: "assignments", label: "Assignments", icon: ListChecks },
+      { key: "tools", label: "AI Tools", icon: Sparkles },
+      { key: "exam", label: "Exam Prep", icon: GraduationCap },
+      { key: "history", label: "History", icon: PanelRightOpen },
+      { key: "new", label: "New", icon: ClipboardList },
+    ],
+    []
+  );
 
   function logAction(title, detail) {
     setHistory((h) => [{ t: title, d: detail }, ...h].slice(0, 12));
+  }
+
+  function openMobileSection(sectionKey) {
+    setIsMobileSectionMenuOpen(false);
+    if (sectionKey === "new") {
+      setCreateOpen(true);
+      setActiveMobileSection("assignments");
+      return;
+    }
+    setActiveMobileSection(sectionKey);
+    if (sectionKey === "tools" || String(sectionKey).startsWith("tools-")) {
+      setTab("tools");
+      const matchedTool = MOBILE_TOOL_SECTION_META[sectionKey]?.toolKey;
+      if (matchedTool) {
+        setTool(matchedTool);
+      }
+    }
+    if (sectionKey === "exam") {
+      setTab("exam");
+    }
+    if (sectionKey === "history") {
+      setTab("history");
+    }
+    if (sectionKey === "assignments") {
+      setTab("my");
+    }
+    setShowMobileLanding(false);
   }
 
   const [toolBusy, setToolBusy] = useState(false);
@@ -300,15 +447,10 @@ export default function AssignmentsPage() {
     setAssignmentsLoading(true);
     setAssignmentsError("");
     try {
-      const data = await apiPost("/api/assignments/create", { title, description, course, due });
-      const next = {
-        id: data?.id ? String(data.id) : `ASSG-${Date.now()}`,
-        title,
-        course: course || "General",
-        due: due || "TBD",
-        status: "Not Started",
-      };
+      const data = await createAssignmentRecord({ title, description, course, due });
+      const next = normalizeAssignment(data?.assignment || { id: data?.id, title, description, course, due });
       setAssignments((prev) => [next, ...prev]);
+      setActiveAssignment(next);
       logAction("My Assignments", String(data?.message || "Assignment created."));
       setCreateDraft({ title: "", description: "", course: "", due: "" });
       setCreateOpen(false);
@@ -358,6 +500,34 @@ export default function AssignmentsPage() {
   const hideMobilePageHeader = isMobileViewport && tab === "tools" && mobileToolFullscreen;
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadAssignments() {
+      setAssignmentsLoading(true);
+      setAssignmentsError("");
+      try {
+        const data = await listAssignments();
+        if (cancelled) return;
+        const rows = Array.isArray(data?.assignments) ? data.assignments.map(normalizeAssignment) : [];
+        setAssignments(rows);
+      } catch (error) {
+        if (cancelled) return;
+        setAssignments([]);
+        setAssignmentsError(error?.message || "Failed to load assignments.");
+      } finally {
+        if (!cancelled) {
+          setAssignmentsLoading(false);
+        }
+      }
+    }
+
+    loadAssignments();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const media = window.matchMedia("(max-width: 767px)");
     const syncViewport = () => setIsMobileViewport(media.matches);
@@ -374,6 +544,7 @@ export default function AssignmentsPage() {
     if (!isMobileViewport) {
       setMobileToolFullscreen(false);
       setMobileToolsCollapsed(false);
+      setShowMobileLanding(false);
     }
   }, [isMobileViewport]);
 
@@ -396,6 +567,58 @@ export default function AssignmentsPage() {
     };
   }, [hideMobilePageHeader]);
 
+  useEffect(() => {
+    if (isMobileViewport) {
+      setShowDesktopLanding(false);
+    }
+  }, [isMobileViewport]);
+
+  useEffect(() => {
+    const handlePointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest("[data-assignments-landing-menu]")) {
+        setIsLandingMenuOpen(false);
+      }
+      if (!target.closest("[data-assignments-utility-menu]")) {
+        setIsLandingUtilityMenuOpen(false);
+      }
+      if (!target.closest("[data-assignments-row-menu]")) {
+        setLandingAssignmentMenuId(null);
+        setLandingMoveMenuId(null);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      setIsLandingMenuOpen(false);
+      setIsLandingUtilityMenuOpen(false);
+      setLandingAssignmentMenuId(null);
+      setLandingMoveMenuId(null);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  const landingAssignments = useMemo(
+    () =>
+      assignments.map((assignment) => ({
+        ...assignment,
+        preview: `${assignment.course} • Due ${assignment.due} • ${assignment.status}`,
+      })),
+    [assignments]
+  );
+
+  const dueSoonCount = useMemo(
+    () => assignments.filter((assignment) => /(fri|mon|wed|today|tomorrow)/i.test(String(assignment.due || ""))).length,
+    [assignments]
+  );
+
   function selectTool(nextToolKey, { openFullscreenOnMobile = false } = {}) {
     setTool(nextToolKey);
     if (isMobileViewport && openFullscreenOnMobile) {
@@ -404,8 +627,106 @@ export default function AssignmentsPage() {
     }
   }
 
+  function openAssignmentLandingTarget(assignment) {
+    const assignmentId = assignment?.id;
+    if (!assignmentId) return;
+    setAssignmentsLoading(true);
+    setAssignmentsError("");
+    fetchAssignmentRecord(assignmentId)
+      .then((data) => {
+        const next = normalizeAssignment(data?.assignment || assignment);
+        setActiveAssignment(next);
+        logAction("Assignments", `Opened assignment workspace for ${next.title}.`);
+        setTab("my");
+        setShowDesktopLanding(false);
+        setShowMobileLanding(false);
+      })
+      .catch((error) => {
+        setAssignmentsError(error?.message || "Failed to open assignment.");
+      })
+      .finally(() => {
+        setAssignmentsLoading(false);
+      });
+  }
+
+  async function renameAssignmentById(assignmentId) {
+    const target = assignments.find((assignment) => assignment.id === assignmentId);
+    if (!target) return;
+    const nextTitle = window.prompt("Rename assignment", target.title || "Untitled Assignment");
+    if (nextTitle === null) return;
+    const normalized = nextTitle.trim();
+    if (!normalized) return;
+    setAssignmentsLoading(true);
+    setAssignmentsError("");
+    try {
+      const data = await updateAssignmentRecord(assignmentId, { title: normalized });
+      const next = normalizeAssignment(data?.assignment || { ...target, title: normalized });
+      setAssignments((prev) =>
+        prev.map((assignment) => (assignment.id === assignmentId ? next : assignment))
+      );
+      if (activeAssignment?.id === assignmentId) {
+        setActiveAssignment(next);
+      }
+    } catch (error) {
+      setAssignmentsError(error?.message || "Failed to rename assignment.");
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }
+
+  function moveAssignmentById(assignmentId, destination) {
+    const target = assignments.find((assignment) => assignment.id === assignmentId);
+    if (!target) return;
+    logAction("Assignments", `"${target.title}" is prepared to move to ${destination}.`);
+    setLandingMoveMenuId(null);
+    setLandingAssignmentMenuId(null);
+  }
+
+  async function archiveAssignmentById(assignmentId) {
+    const target = assignments.find((assignment) => assignment.id === assignmentId);
+    if (!target) return;
+    setAssignmentsLoading(true);
+    setAssignmentsError("");
+    try {
+      await updateAssignmentRecord(assignmentId, { is_archived: true });
+      setAssignments((prev) => prev.filter((assignment) => assignment.id !== assignmentId));
+      if (activeAssignment?.id === assignmentId) {
+        setActiveAssignment(null);
+      }
+      logAction("Assignments", `Archived "${target.title}".`);
+      setLandingAssignmentMenuId(null);
+    } catch (error) {
+      setAssignmentsError(error?.message || "Failed to archive assignment.");
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }
+
+  async function deleteAssignmentById(assignmentId) {
+    const target = assignments.find((assignment) => assignment.id === assignmentId);
+    if (!target) return;
+    const confirmed = window.confirm(`Delete "${target.title}" from the current assignments list?`);
+    if (!confirmed) return;
+    setAssignmentsLoading(true);
+    setAssignmentsError("");
+    try {
+      await deleteAssignmentRecord(assignmentId);
+      setAssignments((prev) => prev.filter((assignment) => assignment.id !== assignmentId));
+      if (activeAssignment?.id === assignmentId) {
+        setActiveAssignment(null);
+      }
+      setLandingMoveMenuId(null);
+      setLandingAssignmentMenuId(null);
+    } catch (error) {
+      setAssignmentsError(error?.message || "Failed to delete assignment.");
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }
+
   function handleTabChange(nextTab) {
     setTab(nextTab);
+    setShowMobileLanding(false);
     if (nextTab === "exam") {
       setIsExamPrepDialogOpen(true);
       return;
@@ -1061,12 +1382,698 @@ export default function AssignmentsPage() {
     );
   }
 
+  if (!isMobileViewport && showDesktopLanding) {
+    return (
+      <AssignmentsDesktopLanding
+        isLandingMenuOpen={isLandingMenuOpen}
+        setIsLandingMenuOpen={setIsLandingMenuOpen}
+        isLandingShareOpen={isLandingShareOpen}
+        setIsLandingShareOpen={setIsLandingShareOpen}
+        isLandingSettingsOpen={isLandingSettingsOpen}
+        setIsLandingSettingsOpen={setIsLandingSettingsOpen}
+        isLandingUtilityMenuOpen={isLandingUtilityMenuOpen}
+        setIsLandingUtilityMenuOpen={setIsLandingUtilityMenuOpen}
+        landingAssignmentMenuId={landingAssignmentMenuId}
+        setLandingAssignmentMenuId={setLandingAssignmentMenuId}
+        landingMoveMenuId={landingMoveMenuId}
+        setLandingMoveMenuId={setLandingMoveMenuId}
+        landingShareInvite={landingShareInvite}
+        setLandingShareInvite={setLandingShareInvite}
+        landingShareAccess={landingShareAccess}
+        setLandingShareAccess={setLandingShareAccess}
+        landingShareStatus={landingShareStatus}
+        setLandingShareStatus={setLandingShareStatus}
+        landingWorkspaceStatus={landingWorkspaceStatus}
+        setLandingWorkspaceStatus={setLandingWorkspaceStatus}
+        landingDeleteOpen={landingDeleteOpen}
+        setLandingDeleteOpen={setLandingDeleteOpen}
+        landingWorkspaceSettings={landingWorkspaceSettings}
+        setLandingWorkspaceSettings={setLandingWorkspaceSettings}
+        landingAssignments={landingAssignments}
+        assignmentsLoading={assignmentsLoading}
+        dueSoonCount={dueSoonCount}
+        onOpenAssignment={openAssignmentLandingTarget}
+        onCreateAssignment={() => {
+          setCreateOpen(true);
+          setShowDesktopLanding(false);
+        }}
+        onSubmissionTracker={() => {
+          setTab("my");
+          setShowDesktopLanding(false);
+        }}
+        onTemplate={() => {
+          setCreateDraft((prev) => ({ ...prev, title: "Essay Planning Draft" }));
+          setCreateOpen(true);
+          setShowDesktopLanding(false);
+        }}
+        onSubgroupShortcut={() => {
+          setLandingWorkspaceStatus("Subgroup routing is prepared here as a safe frontend-first assignments shortcut.");
+          setIsLandingSettingsOpen(true);
+        }}
+        onRenameWorkspace={() => {
+          const nextName = window.prompt("Rename assignments workspace", landingWorkspaceSettings.name);
+          if (!nextName) return;
+          const normalized = nextName.trim();
+          if (!normalized) return;
+          setLandingWorkspaceSettings((prev) => ({ ...prev, name: normalized }));
+          setLandingWorkspaceStatus("Assignments workspace renamed.");
+        }}
+        onMoveWorkspace={() => {
+          setLandingWorkspaceStatus("Move to workspace is prepared here as a safe frontend-first action.");
+        }}
+        onArchiveWorkspace={() => {
+          setLandingWorkspaceStatus("Archive is prepared here as a safe frontend-first assignments action.");
+        }}
+        onRenameAssignment={renameAssignmentById}
+        onMoveAssignment={moveAssignmentById}
+        onArchiveAssignment={archiveAssignmentById}
+        onDeleteAssignment={deleteAssignmentById}
+      />
+    );
+  }
+
+  if (isMobileViewport && showMobileLanding) {
+    return (
+      <MobileFeatureLandingShell
+        featureName="Assignments"
+        featureSubtitle="Active coursework and guided study help"
+        featureDescription={isStudentAudience ? "Review your due work, open AI study tools, and start a fresh draft without crowding the mobile workspace." : "Review due work, jump into assignment tools, and start a fresh draft without dropping directly into the full workspace."}
+        featureIcon={ClipboardList}
+        featureStyle="soft"
+        workspaceLabel={landingWorkspaceSettings.name}
+        workspaceHint={landingWorkspaceSettings.description}
+        workspaceBadge={isStudentAudience ? "Student workspace" : "Institution workspace"}
+        hideInstitutionStrip
+        quickActions={[
+          { key: "new", label: "New assignment", icon: ClipboardList, onClick: () => openMobileSection("new") },
+          { key: "tracker", label: "Assignments", icon: ListChecks, onClick: () => openMobileSection("assignments") },
+          { key: "exam", label: "Exam prep", icon: GraduationCap, onClick: () => openMobileSection("exam") },
+          { key: "tools", label: "AI tools", icon: Sparkles, onClick: () => openMobileSection("tools") },
+        ]}
+        quickActionsStyle="rows"
+        utilityActions={[
+          {
+            key: "rename-workspace",
+            label: "Rename workspace",
+            icon: PenLine,
+            onClick: () => {
+              const nextName = window.prompt("Rename assignments workspace", landingWorkspaceSettings.name);
+              if (!nextName) return;
+              const normalized = nextName.trim();
+              if (!normalized) return;
+              setLandingWorkspaceSettings((prev) => ({ ...prev, name: normalized }));
+              setLandingWorkspaceStatus("Assignments workspace renamed.");
+            },
+          },
+          {
+            key: "workspace-tools",
+            label: "Workspace tools",
+            icon: Rows3,
+            onClick: () => {
+              openMobileSection("tools");
+            },
+          },
+          {
+            key: "archive-workspace",
+            label: "Archive workspace",
+            icon: Archive,
+            onClick: () => {
+              setLandingWorkspaceStatus("Archive is prepared here as a safe frontend-first assignments action.");
+              openMobileSection("assignments");
+            },
+          },
+          {
+            key: "delete-workspace",
+            label: "Delete workspace",
+            icon: Trash2,
+            destructive: true,
+            onClick: () => {
+              setLandingWorkspaceStatus("Delete stays protected in the full assignments workspace.");
+              openMobileSection("assignments");
+            },
+          },
+        ]}
+        shareConfig={{
+          title: "Share Assignments",
+          description: "Invite a collaborator or adjust access for this assignments workspace from a clean mobile share surface.",
+          emailLabel: "Invite by email",
+          emailPlaceholder: "teacher@example.com",
+          accessLabel: "Access level",
+          accessOptions: [
+            { value: "institution-only", label: isStudentAudience ? "Private" : "Institution only" },
+            { value: "members-can-view", label: "Members can view" },
+            { value: "members-can-edit", label: "Members can edit" },
+          ],
+          defaultAccess: landingShareAccess,
+          membersTitle: "Workspace owner",
+          members: [{ key: "owner", label: "Assignments workspace", role: "Owner" }],
+          privacyNote: "Assignments sharing remains frontend-first in this pass, but the share flow is now a real mobile surface.",
+          submitLabel: "Save share setup",
+        }}
+        items={landingAssignments.map((assignment) => ({
+          id: assignment.id,
+          title: assignment.title,
+          preview: assignment.preview,
+          meta: assignment.status,
+          actions: [
+            { key: "share", label: "Share", icon: Copy, onClick: () => { setLandingShareStatus(`Sharing for "${assignment.title}" is prepared here as a safe frontend-first action.`); } },
+            { key: "open", label: "Open assignment", icon: ClipboardList, onClick: () => openAssignmentLandingTarget(assignment) },
+            { key: "rename", label: "Rename", icon: PenLine, onClick: () => renameAssignmentById(assignment.id) },
+            { key: "move", label: "Move", icon: Rows3, onClick: () => moveAssignmentById(assignment.id, "Coursework") },
+            { key: "archive", label: "Archive", icon: Archive, onClick: () => archiveAssignmentById(assignment.id) },
+            { key: "delete", label: "Delete", icon: Trash2, destructive: true, onClick: () => deleteAssignmentById(assignment.id) },
+          ],
+        }))}
+        listStyle="plain"
+        inputPlaceholder="New assignment title"
+        inputValue={landingInputValue}
+        onInputChange={setLandingInputValue}
+        onInputSubmit={(value) => {
+          setCreateDraft((prev) => ({ ...prev, title: value }));
+          openMobileSection("new");
+          setLandingInputValue("");
+        }}
+        onMenu={onOpenMainMenu || (() => {
+          setTab("my");
+          setShowMobileLanding(false);
+        })}
+        onShare={() => {
+          setLandingWorkspaceStatus("Share is prepared here as a safe frontend-first Assignments action.");
+          setShowMobileLanding(false);
+        }}
+        onShareSubmit={async ({ email, access }) => {
+          setLandingShareInvite(email);
+          setLandingShareAccess(access);
+          setLandingShareStatus(email ? `Assignments sharing prepared for ${email}.` : `Assignments access saved as ${access}.`);
+          return { status: email ? `Assignments sharing prepared for ${email}.` : `Assignments access saved as ${access}.` };
+        }}
+        onSettings={() => {
+          openMobileSection("tools");
+        }}
+        onNewWork={() => {
+          openMobileSection("new");
+        }}
+        onStartCall={() => {
+          openMobileSection("tools");
+        }}
+        onOpenItem={() => openMobileSection("assignments")}
+        emptyStateTitle="No assignments yet"
+        emptyState="Create a new assignment or jump into the tracker when coursework arrives."
+        emptyStateActionLabel="Create assignment"
+        onEmptyStateAction={() => {
+          openMobileSection("new");
+        }}
+      />
+    );
+  }
+
+  if (isMobileViewport) {
+    return (
+      <div className="relative w-full min-h-[100dvh] overflow-x-hidden bg-[radial-gradient(circle_at_top,#162846_0%,#10192f_58%,#0b1220_100%)] px-5 pb-28 pt-5 text-white">
+        <div className="space-y-5">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Assignments</div>
+            <div className="mt-2 text-[30px] font-semibold leading-[1.08] text-white">
+              {activeMobileSection === "assignments" ? "My Assignments" : null}
+              {activeMobileSection === "tools" ? "AI Tools" : null}
+              {activeMobileSection === "exam" ? "Exam Prep" : null}
+              {activeMobileSection === "history" ? "Guidance & History" : null}
+              {MOBILE_TOOL_SECTION_META[activeMobileSection]?.title || null}
+            </div>
+            <div className="mt-2 max-w-[34ch] text-[15px] leading-7 text-slate-300">
+              {activeMobileSection === "assignments" ? "Track deadlines and progress without the extra dashboard blocks." : null}
+              {activeMobileSection === "tools" ? "Open the assignment help tools in one cleaner section." : null}
+              {activeMobileSection === "exam" ? "Keep revision planning and practice in one focused view." : null}
+              {activeMobileSection === "history" ? "Review recent actions and academic-safe guidance in one place." : null}
+              {MOBILE_TOOL_SECTION_META[activeMobileSection]?.description || null}
+            </div>
+          </div>
+
+          {assignmentsLoading ? <div className="text-sm font-medium text-slate-400">Saving assignment...</div> : null}
+          {assignmentsError ? <div className="text-sm font-medium text-rose-300">{assignmentsError}</div> : null}
+          {toolError ? <div className="text-sm font-medium text-rose-300">{toolError}</div> : null}
+          {toolResponse ? <div className="text-sm font-medium text-emerald-300">{toolResponse}</div> : null}
+
+          {activeMobileSection === "assignments" ? (
+            <div className="space-y-5">
+              <button
+                type="button"
+                onClick={() => setCreateOpen(true)}
+                className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(90deg,#2563eb,#14b8a6)] px-5 py-3 text-sm font-semibold text-white"
+              >
+                <ClipboardList size={16} />
+                New assignment
+              </button>
+
+              <div className="space-y-4">
+                {assignments.map((a) => (
+                  <div key={a.id} className="space-y-1">
+                    <div className="text-lg font-semibold text-white">{a.title}</div>
+                    <div className="text-sm text-slate-300">{a.course} • Due {a.due}</div>
+                    <div className="pt-1">
+                      <StatusBadge status={a.status} />
+                    </div>
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTab("tools");
+                          setActiveMobileSection("tools-homework");
+                          setTool("homework");
+                          logAction("AI Tools", `Opened tools for: ${a.title}`);
+                        }}
+                        className="text-sm font-medium text-sky-300"
+                      >
+                        Open tools
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {assignments.length === 0 ? (
+                  <div className="text-[15px] leading-7 text-slate-300">
+                    No assignments yet. Create a new assignment to begin.
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "tools" ? (
+            <div className="space-y-6">
+              <div>
+                <label className="relative block">
+                  <Search size={14} className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={toolSearch}
+                    onChange={(e) => setToolSearch(e.target.value)}
+                    placeholder="Search tools..."
+                    className="w-full border-0 bg-transparent py-2 pl-7 pr-0 text-[15px] text-white outline-none placeholder:text-slate-400"
+                  />
+                </label>
+              </div>
+              <div className="space-y-5">
+                {filteredTools.map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => openMobileSection(`tools-${t.key}`)}
+                    className="block w-full text-left"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/[0.06] text-white">
+                        <t.icon size={18} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-base font-semibold text-white">{t.label}</span>
+                        <span className="mt-1 block text-sm leading-6 text-slate-300">{t.description}</span>
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "tools-homework" ? (
+            <div className="space-y-6">
+              <button
+                type="button"
+                onClick={() => openMobileSection("tools")}
+                className="inline-flex items-center gap-2 text-sm font-medium text-sky-300"
+              >
+                <ArrowLeft size={16} />
+                Back to AI tools
+              </button>
+              <Textarea
+                label="Paste the homework question"
+                value={homeworkQuestion}
+                onChange={setHomeworkQuestion}
+                placeholder="Example: Explain the role of mitochondria in energy production..."
+                rows={6}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  runAssignmentAI(
+                    "Homework Helper",
+                    { tool: "homework", prompt: homeworkQuestion },
+                    {
+                      onSuccess: (message) => {
+                        setHomeworkPlan([
+                          "Restate the problem clearly (what is being asked).",
+                          "List known facts from your notes.",
+                          "Solve step-by-step and explain each step.",
+                          `AI: ${message}`,
+                        ]);
+                      },
+                    }
+                  );
+                }}
+                disabled={toolBusy}
+                className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(90deg,#2563eb,#14b8a6)] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Lightbulb size={16} />
+                {toolBusy ? "Working..." : "Generate plan"}
+              </button>
+              <div className="space-y-3">
+                {homeworkPlan.map((item, index) => (
+                  <div key={index} className="text-[15px] leading-7 text-slate-200">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "tools-upload" ? (
+            <div className="space-y-6">
+              <button
+                type="button"
+                onClick={() => openMobileSection("tools")}
+                className="inline-flex items-center gap-2 text-sm font-medium text-sky-300"
+              >
+                <ArrowLeft size={16} />
+                Back to AI tools
+              </button>
+              <div className="space-y-4">
+                <div className="text-[15px] leading-7 text-slate-300">
+                  Add the files you want reviewed, then guide the analysis clearly.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const name = `Question_${Math.floor(Math.random() * 999)}.jpg`;
+                    setFiles((f) => [name, ...f]);
+                    logAction("Upload & Analyze", `Added file: ${name}`);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.06] px-4 py-2 text-sm font-medium text-white"
+                >
+                  <FileText size={16} />
+                  Add sample file
+                </button>
+                {files.length ? (
+                  <div className="space-y-2">
+                    {files.map((name) => (
+                      <div key={name} className="text-[15px] leading-7 text-slate-200">
+                        {name}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[15px] leading-7 text-slate-400">No uploads yet.</div>
+                )}
+              </div>
+              <Textarea
+                label="What should the analysis focus on?"
+                value={uploadPrompt}
+                onChange={setUploadPrompt}
+                placeholder="Example: Explain what it tests, show the steps, then improve the final answer."
+                rows={5}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  runAssignmentAI("Upload & Analyze", {
+                    tool: "upload",
+                    prompt: uploadPrompt,
+                    files,
+                  });
+                }}
+                disabled={toolBusy}
+                className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(90deg,#2563eb,#14b8a6)] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Sparkles size={16} />
+                {toolBusy ? "Working..." : "Analyze"}
+              </button>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "tools-writing" ? (
+            <div className="space-y-6">
+              <button
+                type="button"
+                onClick={() => openMobileSection("tools")}
+                className="inline-flex items-center gap-2 text-sm font-medium text-sky-300"
+              >
+                <ArrowLeft size={16} />
+                Back to AI tools
+              </button>
+              <Input
+                label="Goal"
+                value={writingGoal}
+                onChange={setWritingGoal}
+                placeholder="Example: Improve clarity and academic tone."
+              />
+              <Textarea
+                label="Paste your draft"
+                value={writingText}
+                onChange={setWritingText}
+                placeholder="Paste a paragraph or essay..."
+                rows={8}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  runAssignmentAI("Writing Assistant", {
+                    tool: "writing",
+                    goal: writingGoal,
+                    prompt: writingText,
+                  });
+                }}
+                disabled={toolBusy}
+                className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(90deg,#2563eb,#14b8a6)] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Sparkles size={16} />
+                {toolBusy ? "Working..." : "Improve"}
+              </button>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "tools-stem" ? (
+            <div className="space-y-6">
+              <button
+                type="button"
+                onClick={() => openMobileSection("tools")}
+                className="inline-flex items-center gap-2 text-sm font-medium text-sky-300"
+              >
+                <ArrowLeft size={16} />
+                Back to AI tools
+              </button>
+              <div className="flex flex-wrap gap-3">
+                {["math", "code"].map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setStemMode(mode)}
+                    className={[
+                      "rounded-full px-4 py-2 text-sm font-medium transition",
+                      stemMode === mode
+                        ? "bg-white text-slate-950"
+                        : "border border-white/12 bg-white/[0.04] text-slate-200",
+                    ].join(" ")}
+                  >
+                    {mode === "math" ? "Math" : "Code"}
+                  </button>
+                ))}
+              </div>
+              <Textarea
+                label="Problem"
+                value={stemText}
+                onChange={setStemText}
+                placeholder="Paste the equation, coding issue, or STEM problem..."
+                rows={7}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  runAssignmentAI("STEM Assistant", {
+                    tool: "stem",
+                    mode: stemMode,
+                    prompt: stemText,
+                  });
+                }}
+                disabled={toolBusy}
+                className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(90deg,#2563eb,#14b8a6)] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Sparkles size={16} />
+                {toolBusy ? "Working..." : "Solve with steps"}
+              </button>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "tools-essay" ? (
+            <div className="space-y-6">
+              <button
+                type="button"
+                onClick={() => openMobileSection("tools")}
+                className="inline-flex items-center gap-2 text-sm font-medium text-sky-300"
+              >
+                <ArrowLeft size={16} />
+                Back to AI tools
+              </button>
+              <Input
+                label="Essay topic"
+                value={essayTopic}
+                onChange={setEssayTopic}
+                placeholder="Example: The impact of renewable energy on economic growth."
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  runAssignmentAI(
+                    "Essay Planner & Draft Builder",
+                    { tool: "essay", prompt: essayTopic },
+                    {
+                      onSuccess: (message) => {
+                        setEssayOutline((current) => [...current.slice(0, 4), `AI: ${message}`]);
+                      },
+                    }
+                  );
+                }}
+                disabled={toolBusy}
+                className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(90deg,#2563eb,#14b8a6)] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Sparkles size={16} />
+                {toolBusy ? "Working..." : "Build outline"}
+              </button>
+              <div className="space-y-3">
+                {essayOutline.map((item, index) => (
+                  <div key={index} className="text-[15px] leading-7 text-slate-200">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "exam" ? (
+            <div className="space-y-6">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Course</div>
+                <div className="mt-2 text-[16px] text-white">{examCourse}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Weeks</div>
+                <div className="mt-2 text-[16px] text-white">{weeks}</div>
+              </div>
+              <div className="space-y-3">
+                {["MCQ", "Short Answer", "Essay"].map((x) => (
+                  <button
+                    key={x}
+                    onClick={() => {
+                      runAssignmentAI("Exam Prep", {
+                        tool: "exam_practice",
+                        format: x,
+                        course: examCourse,
+                      });
+                    }}
+                    className="block text-left text-[15px] font-medium text-white"
+                  >
+                    {x}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  runAssignmentAI("Exam Prep", {
+                    tool: "exam_prep",
+                    course: examCourse,
+                    weeks,
+                  });
+                }}
+                className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(90deg,#2563eb,#14b8a6)] px-5 py-3 text-sm font-semibold text-white"
+              >
+                <Sparkles size={16} />
+                {toolBusy ? "Working..." : "Generate plan"}
+              </button>
+            </div>
+          ) : null}
+
+          {activeMobileSection === "history" ? (
+            <div className="space-y-6">
+              <div className="text-[15px] leading-7 text-slate-300">
+                Prefer explanations and steps over shortcuts. Use Writing Assistant for clarity and citations.
+              </div>
+              <div className="space-y-4">
+                {history.map((h, i) => (
+                  <div key={i}>
+                    <div className="text-sm font-semibold text-white">{h.t}</div>
+                    <div className="mt-1 text-sm leading-6 text-slate-300">{h.d}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {isMobileSectionMenuOpen ? (
+          <>
+            <button
+              type="button"
+              className="fixed inset-0 z-40 bg-slate-950/32 backdrop-blur-[2px]"
+              aria-label="Close sections menu"
+              onClick={() => setIsMobileSectionMenuOpen(false)}
+            />
+            <div className="fixed bottom-24 right-5 z-50 flex flex-col items-end gap-3">
+              {mobileSectionItems.map((item, index) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => openMobileSection(item.key)}
+                    className="inline-flex items-center gap-3 rounded-full bg-emerald-700 px-5 py-3 text-[15px] font-medium text-white shadow-[0_16px_34px_rgba(0,0,0,0.3)] transition hover:bg-emerald-600"
+                    style={{ marginRight: `${(mobileSectionItems.length - index - 1) * 12}px` }}
+                  >
+                    <Icon size={18} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={() => setIsMobileSectionMenuOpen((value) => !value)}
+          className="fixed bottom-6 right-5 z-50 inline-flex h-16 w-16 items-center justify-center rounded-[22px] bg-emerald-700 text-white shadow-[0_18px_34px_rgba(0,0,0,0.34)] transition hover:bg-emerald-600"
+          aria-label={isMobileSectionMenuOpen ? "Close sections menu" : "Open sections menu"}
+        >
+          {isMobileSectionMenuOpen ? <X size={26} /> : <Plus size={28} />}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full bg-slate-100 p-4 md:p-6 h-[100dvh] overflow-hidden flex flex-col md:min-h-[100dvh] md:h-auto md:overflow-visible">
       {!hideMobilePageHeader ? (
         <div className="shrink-0 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
-            <div className="text-xl font-extrabold text-slate-900">Assignments</div>
+            <div className="flex items-center gap-3">
+              {!isMobileViewport ? (
+                <button
+                  type="button"
+                  onClick={() => setShowDesktopLanding(true)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <ArrowLeft size={12} />
+                  Workspace
+                </button>
+              ) : null}
+              <div className="text-xl font-extrabold text-slate-900">Assignments</div>
+              {isMobileViewport ? (
+                <button
+                  type="button"
+                  onClick={() => setShowMobileLanding(true)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Landing
+                </button>
+              ) : null}
+            </div>
             <div className="text-sm text-slate-600">
               Guidance-first tools: explanations, structure, and learning support.
             </div>

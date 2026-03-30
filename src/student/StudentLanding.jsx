@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   Bell,
@@ -40,6 +40,11 @@ import {
 } from "lucide-react";
 import { auth } from "../lib/firebase";
 import { logoutFamilySession } from "../auth/familySession";
+import {
+  clearRegisteredPasskeys,
+  getSecureUnlockCapabilities,
+  registerPasskey,
+} from "../auth/secureLock";
 import { apiUrl } from "../lib/apiUrl";
 import { getStoredPreferences, getStoredProfile } from "../lib/userSettings";
 import AttachmentChipsTray from "../shared/chat-media/AttachmentChipsTray.jsx";
@@ -61,12 +66,15 @@ import { isImageGenerationPrompt } from "../shared/image-generation/imageGenerat
 import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
 import imageAPI from "../services/imageAPI.js";
+import DesktopSettingsLauncher from "../shared/settings/DesktopSettingsLauncher.jsx";
+import DesktopSettingsWorkspace from "../shared/settings/DesktopSettingsWorkspace.jsx";
 import SettingsPage from "../pages/SettingsPage";
 import NotebookPage from "../pages/NotebookPage";
 import SubgroupRoom from "../pages/SubgroupRoom";
 import CoursesDashboard from "../pages/CoursesDashboard";
 import AssignmentsPage from "../pages/AssignmentsPage";
 import ResultsPage from "../pages/ResultsPage";
+import InstitutionFeesPage from "../pages/InstitutionFeesPage";
 
 const MAIN_ITEMS = [
   { key: "newchat", label: "NewChat", icon: LayoutGrid },
@@ -232,14 +240,14 @@ function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "") {
 
 function StatCard({ title, value, subtitle }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-white border border-slate-200/90 shadow-sm px-4 py-3 min-h-[92px]">
+    <div className="flex items-center justify-between rounded-xl bg-white border border-slate-200/90 shadow-sm px-3.5 py-2.5 min-h-[74px]">
       <div>
         <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{title}</div>
-        <div className="mt-1 text-xl leading-tight font-bold text-slate-900 break-words">{value}</div>
-        {subtitle ? <div className="text-[12px] text-slate-500 mt-0.5">{subtitle}</div> : null}
+        <div className="mt-0.5 text-lg leading-tight font-bold text-slate-900 break-words">{value}</div>
+        {subtitle ? <div className="text-[11px] text-slate-500 mt-0.5">{subtitle}</div> : null}
       </div>
       <div className="text-slate-400 shrink-0 ml-3">
-        <BarChart3 size={18} />
+        <BarChart3 size={16} />
       </div>
     </div>
   );
@@ -407,9 +415,10 @@ function Bubble({
   );
 }
 
-function SidebarButton({ active, label, onClick, collapsed, icon: Icon }) {
+function SidebarButton({ active, label, onClick, collapsed, icon: Icon, buttonRef = null }) {
   return (
     <button
+      ref={buttonRef}
       onClick={onClick}
       className={[
         "w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
@@ -427,6 +436,10 @@ function SidebarButton({ active, label, onClick, collapsed, icon: Icon }) {
 function SectionLabel({ collapsed, children }) {
   if (collapsed) return null;
   return <div className="px-3 pt-2 text-[11px] font-semibold tracking-wider text-slate-500">{children}</div>;
+}
+
+function isDesktopSettingsViewport() {
+  return typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
 }
 
 export default function StudentLanding() {
@@ -456,6 +469,11 @@ export default function StudentLanding() {
   const [isNewChatMenuOpen, setIsNewChatMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationsMenuOpen, setIsNotificationsMenuOpen] = useState(false);
+  const [isDesktopSettingsLauncherOpen, setIsDesktopSettingsLauncherOpen] = useState(false);
+  const [selectedDesktopSettingsSection, setSelectedDesktopSettingsSection] = useState("general");
+  const [useDesktopSettingsWorkspace, setUseDesktopSettingsWorkspace] = useState(false);
+  const [desktopSettingsReturnView, setDesktopSettingsReturnView] = useState("newchat");
+  const [desktopSecurityVersion, setDesktopSecurityVersion] = useState(0);
   const [globalSearch, setGlobalSearch] = useState("");
   const [notifications, setNotifications] = useState(() => [
     {
@@ -492,6 +510,7 @@ export default function StudentLanding() {
   const recognitionRef = useRef(null);
   const attachmentMenuRef = useRef(null);
   const newChatMenuRef = useRef(null);
+  const desktopSettingsTriggerRef = useRef(null);
   const profileMenuRef = useRef(null);
   const notificationsMenuRef = useRef(null);
   const globalSearchInputRef = useRef(null);
@@ -674,12 +693,110 @@ export default function StudentLanding() {
   const hasConversation = messages.length > 0;
   const canSend = input.trim().length > 0 || attachments.length > 0;
   const unreadNotifications = notifications.filter((item) => !item.read).length;
+  const desktopSettingsUser = useMemo(
+    () => ({
+      ...user,
+      uid: firebaseUser?.uid || null,
+      email: firebaseUser?.email || user?.email || "",
+      displayName: firebaseUser?.displayName || user?.name || "",
+      providerData: firebaseUser?.providerData || [],
+    }),
+    [firebaseUser?.displayName, firebaseUser?.email, firebaseUser?.providerData, firebaseUser?.uid, user],
+  );
+  const desktopSecurityCapabilities = useMemo(
+    () => getSecureUnlockCapabilities(auth?.currentUser || desktopSettingsUser || null),
+    [desktopSecurityVersion, desktopSettingsUser],
+  );
+  const desktopSharedLinksItems = useMemo(() => {
+    const seen = new Set();
+    return (Array.isArray(chats) ? chats : [])
+      .filter((chat) => chat?.shareId && chat?.shareUrl && !chat?.isSharedView)
+      .filter((chat) => {
+        const shareKey = String(chat.shareId || "");
+        if (!shareKey || seen.has(shareKey)) return false;
+        seen.add(shareKey);
+        return true;
+      })
+      .map((chat) => ({
+        id: String(chat.shareId || chat.id || ""),
+        conversationId: String(chat.conversationId || ""),
+        chatId: String(chat.id || ""),
+        name: String(chat.title || "Shared conversation"),
+        type: "Conversation",
+        dateShared: chat.updatedAt || Date.now(),
+        url: String(chat.shareUrl || ""),
+        canDelete: false,
+      }));
+  }, [chats]);
+  const desktopPersonalizationHistoryItems = useMemo(
+    () =>
+      (Array.isArray(chats) ? chats : [])
+        .filter((chat) => !chat?.isSharedView)
+        .slice(0, 8)
+        .map((chat) => ({
+          id: String(chat.id || ""),
+          title: String(chat.title || "Conversation"),
+          updatedAt: chat.updatedAt || Date.now(),
+          messageCount: Array.isArray(chat.messages) ? chat.messages.length : 0,
+        })),
+    [chats],
+  );
+  const desktopArchivedChatsItems = useMemo(
+    () =>
+      (Array.isArray(chats) ? chats : [])
+        .filter((chat) => Boolean(chat?.archivedAt || chat?.isArchived || chat?.hiddenAt || chat?.isHidden))
+        .map((chat) => {
+          const lastAssistantText = Array.isArray(chat.messages)
+            ? [...chat.messages]
+                .reverse()
+                .find((message) => typeof message?.text === "string" && message.text.trim())
+            : null;
+          return {
+            id: String(chat.id || chat.conversationId || ""),
+            chatId: String(chat.id || ""),
+            conversationId: String(chat.conversationId || ""),
+            title: String(chat.title || "Archived conversation"),
+            preview: String(lastAssistantText?.text || "Conversation preview unavailable.").slice(0, 120),
+            dateArchived: chat.archivedAt || chat.hiddenAt || chat.updatedAt || Date.now(),
+            canOpen: true,
+            canRestore: true,
+            canDelete: false,
+          };
+        }),
+    [chats],
+  );
   const profileInitials = initialsOf(user.name);
   const isMobile = useMemo(
     () => (typeof window !== "undefined" ? window.matchMedia("(max-width: 768px)").matches : false),
     []
   );
   const universityTitle = `ElimuLink • ${settingsProfile?.department || settingsProfile?.organization || "University"}`;
+
+  const handleDesktopArchivedChatOpen = useCallback((item) => {
+    const nextChatId = String(item?.chatId || item?.id || "");
+    if (!nextChatId) return;
+    setActiveChatId(nextChatId);
+    setUseDesktopSettingsWorkspace(false);
+  }, []);
+
+  const handleDesktopArchivedChatRestore = useCallback(async (item) => {
+    const nextChatId = String(item?.chatId || item?.id || "");
+    if (!nextChatId) return;
+    setChats((current) =>
+      current.map((chat) =>
+        String(chat.id || "") === nextChatId
+          ? {
+              ...chat,
+              archivedAt: null,
+              hiddenAt: null,
+              isArchived: false,
+              isHidden: false,
+              updatedAt: Date.now(),
+            }
+          : chat,
+      ),
+    );
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -702,10 +819,90 @@ export default function StudentLanding() {
     );
   }
 
-  function openSettingsPanel() {
+  function openSettingsPanel(options = {}) {
+    const { skipLauncher = false, anchorEl = null } = options;
     setIsProfileMenuOpen(false);
     setIsNotificationsMenuOpen(false);
+    if (!skipLauncher && isDesktopSettingsViewport()) {
+      if (anchorEl) {
+        desktopSettingsTriggerRef.current = anchorEl;
+      }
+      setIsMoreOpen(false);
+      setIsMorePopupOpen(false);
+      setIsDesktopSettingsLauncherOpen(true);
+      return;
+    }
+    setIsDesktopSettingsLauncherOpen(false);
+    if (!skipLauncher || !isDesktopSettingsViewport()) {
+      setUseDesktopSettingsWorkspace(false);
+    }
     setActive("settings");
+  }
+
+  function handleDesktopSettingsSectionSelect(sectionId) {
+    setDesktopSettingsReturnView(active === SETTINGS_ITEM.key ? desktopSettingsReturnView : active);
+    setSelectedDesktopSettingsSection(sectionId);
+    setUseDesktopSettingsWorkspace(true);
+    setIsDesktopSettingsLauncherOpen(false);
+    openSettingsPanel({ skipLauncher: true });
+  }
+
+  async function handleDesktopSecurityAddPasskey() {
+    const activeUser = auth?.currentUser || null;
+    if (!activeUser) {
+      window.alert("Sign in again before setting up a passkey.");
+      return;
+    }
+    try {
+      await registerPasskey(activeUser, { label: "This device" });
+      setDesktopSecurityVersion((value) => value + 1);
+    } catch (error) {
+      window.alert(String(error?.message || error || "Passkey setup failed."));
+    }
+  }
+
+  function handleDesktopSecurityRemovePasskey() {
+    const activeUser = auth?.currentUser || null;
+    if (!activeUser?.uid) {
+      window.alert("No passkey is registered for this account on this device.");
+      return;
+    }
+    clearRegisteredPasskeys(activeUser.uid);
+    setDesktopSecurityVersion((value) => value + 1);
+  }
+
+  function handleDesktopSecurityChangePassword() {
+    window.alert("Password change will use email verification flow.");
+  }
+
+  async function handleDesktopSecurityLogoutCurrentDevice() {
+    await logoutFamilySession({
+      clearKeys: ["activeDepartmentId", "activeDepartmentName", "elimulink_admin_token"],
+    }).catch(() => {});
+    window.location.replace("/login?returnTo=%2Fstudent");
+  }
+
+  function handleDesktopSecurityLogoutAllDevices() {
+    window.alert("Log out all devices can be wired later.");
+  }
+
+  function handleDesktopAccountChangeEmail({ newEmail }) {
+    return {
+      status: "verification-ready",
+      message: `Verification is required before switching this account to ${newEmail}. Connect the real verification send step here.`,
+    };
+  }
+
+  function handleDesktopAccountManageSubscription() {
+    window.alert("Subscription management can be connected to billing later.");
+  }
+
+  function handleDesktopAccountManagePayment() {
+    window.alert("Payment management can be connected later.");
+  }
+
+  function handleDesktopAccountDelete() {
+    window.alert("Account deletion remains protected until the full flow is connected.");
   }
 
   function toggleNotificationsMenu() {
@@ -1128,7 +1325,59 @@ export default function StudentLanding() {
     };
   }, [active]);
 
+  useEffect(() => {
+    if (active !== SETTINGS_ITEM.key) {
+      setIsDesktopSettingsLauncherOpen(false);
+    }
+  }, [active]);
+
   if (active === "settings") {
+    if (useDesktopSettingsWorkspace && isDesktopSettingsViewport()) {
+      return (
+        <DesktopSettingsWorkspace
+          user={desktopSettingsUser}
+          activeSection={selectedDesktopSettingsSection}
+          onSelectSection={setSelectedDesktopSettingsSection}
+          onClose={() => {
+            setUseDesktopSettingsWorkspace(false);
+            setActive(desktopSettingsReturnView || "newchat");
+          }}
+          generalProps={{ user: desktopSettingsUser }}
+          personalizationProps={{
+            historyItems: desktopPersonalizationHistoryItems,
+          }}
+          securityProps={{
+            capabilities: {
+              ...desktopSecurityCapabilities,
+              provider: desktopSecurityCapabilities?.federatedProvider,
+              hasPasskey: desktopSecurityCapabilities?.passkey,
+              passkeyRegistered: desktopSecurityCapabilities?.passkey,
+            },
+            onAddPasskey: handleDesktopSecurityAddPasskey,
+            onRemovePasskey: handleDesktopSecurityRemovePasskey,
+            onChangePassword: handleDesktopSecurityChangePassword,
+            onLogoutCurrentDevice: handleDesktopSecurityLogoutCurrentDevice,
+            onLogoutAllDevices: handleDesktopSecurityLogoutAllDevices,
+          }}
+          accountProps={{
+            user: desktopSettingsUser,
+            currentPlan: "Education",
+            onChangeEmail: handleDesktopAccountChangeEmail,
+            onManageSubscription: handleDesktopAccountManageSubscription,
+            onManagePayment: handleDesktopAccountManagePayment,
+            onDeleteAccount: handleDesktopAccountDelete,
+          }}
+          dataControlsProps={{
+            sharedLinksItems: desktopSharedLinksItems,
+            sharedLinksMode: desktopSharedLinksItems.length ? "partial" : "preview",
+            archivedChatsItems: desktopArchivedChatsItems,
+            archivedChatsMode: desktopArchivedChatsItems.length ? "partial" : "preview",
+            onOpenArchivedChat: handleDesktopArchivedChatOpen,
+            onRestoreArchivedChat: handleDesktopArchivedChatRestore,
+          }}
+        />
+      );
+    }
     return (
       <SettingsPage
         user={{
@@ -1139,12 +1388,18 @@ export default function StudentLanding() {
           providerData: firebaseUser?.providerData || [],
         }}
         onBack={() => setActive("newchat")}
+        launcherSectionId={selectedDesktopSettingsSection}
       />
     );
   }
 
   if (active === "notebook") {
-    return <NotebookPage onBack={() => setActive("newchat")} />;
+    return (
+      <NotebookPage
+        onBack={() => setActive("newchat")}
+        onOpenLive={() => setVoiceOpen(true)}
+      />
+    );
   }
 
   if (active === "subgroups") {
@@ -1152,15 +1407,19 @@ export default function StudentLanding() {
   }
 
   if (active === "courses") {
-    return <CoursesDashboard onBack={() => setActive("newchat")} />;
+    return <CoursesDashboard onBack={() => setActive("newchat")} audience="student" />;
   }
 
   if (active === "assignments") {
-    return <AssignmentsPage />;
+    return <AssignmentsPage audience="student" />;
   }
 
   if (active === "results") {
-    return <ResultsPage />;
+    return <ResultsPage audience="student" />;
+  }
+
+  if (active === "fees") {
+    return <InstitutionFeesPage onBack={() => setActive("newchat")} audience="student" />;
   }
 
   return (
@@ -1487,14 +1746,14 @@ export default function StudentLanding() {
 
                     <div className="mt-3 space-y-1">
                       <button
-                        onClick={openSettingsPanel}
+                        onClick={() => openSettingsPanel()}
                         className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                       >
                         <IdCard size={16} />
                         Profile & Account
                       </button>
                       <button
-                        onClick={openSettingsPanel}
+                        onClick={() => openSettingsPanel({ anchorEl: desktopSettingsTriggerRef.current })}
                         className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                       >
                         <Settings size={16} />
@@ -1529,14 +1788,14 @@ export default function StudentLanding() {
                   </div>
 
                   <button
-                    onClick={openSettingsPanel}
+                    onClick={() => openSettingsPanel()}
                     className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                   >
                     <IdCard size={15} />
                     Profile & Account
                   </button>
                   <button
-                    onClick={openSettingsPanel}
+                    onClick={() => openSettingsPanel({ anchorEl: desktopSettingsTriggerRef.current })}
                     className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                   >
                     <Settings size={15} />
@@ -1942,13 +2201,22 @@ export default function StudentLanding() {
                   />
                 ))}
 
-                <SidebarButton
-                  label={SETTINGS_ITEM.label}
-                  icon={SETTINGS_ITEM.icon}
-                  active={active === SETTINGS_ITEM.key}
-                  collapsed={!isSidebarOpen}
-                  onClick={() => handleNavClick(SETTINGS_ITEM.key)}
-                />
+                <div className="relative">
+                  <SidebarButton
+                    buttonRef={desktopSettingsTriggerRef}
+                    label={SETTINGS_ITEM.label}
+                    icon={SETTINGS_ITEM.icon}
+                    active={active === SETTINGS_ITEM.key || isDesktopSettingsLauncherOpen}
+                    collapsed={!isSidebarOpen}
+                    onClick={() => openSettingsPanel({ anchorEl: desktopSettingsTriggerRef.current })}
+                  />
+                  <DesktopSettingsLauncher
+                    open={isDesktopSettingsLauncherOpen}
+                    anchorRef={desktopSettingsTriggerRef}
+                    onClose={() => setIsDesktopSettingsLauncherOpen(false)}
+                    onSelectSection={handleDesktopSettingsSectionSelect}
+                  />
+                </div>
 
                 <button
                   onClick={() => {
@@ -2177,7 +2445,7 @@ export default function StudentLanding() {
                         sendMessage(input);
                       }
                     }}
-                    className="w-full resize-none border-none bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"
+                    className="composer-plain-input w-full resize-none border-none bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"
                     placeholder="Type your message..."
                   />
                 </div>
@@ -2351,7 +2619,7 @@ export default function StudentLanding() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") sendMessage(input);
                     }}
-                    className="w-full outline-none text-[15px] text-slate-800 bg-transparent placeholder:text-slate-400"
+                    className="composer-plain-input w-full outline-none text-[15px] text-slate-800 bg-transparent placeholder:text-slate-400"
                     placeholder="Type your message..."
                   />
 

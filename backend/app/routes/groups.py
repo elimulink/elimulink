@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..auth import CurrentUser, get_current_user
@@ -29,6 +30,41 @@ def ensure_user(db: Session, user_id: str, name: str | None) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.get("")
+def list_groups(
+    q: str = Query(default="", max_length=120),
+    limit: int = Query(default=20, ge=1, le=100),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    search = str(q or "").strip()
+    query = (
+        db.query(Group)
+        .outerjoin(GroupMember, GroupMember.group_id == Group.id)
+        .filter(
+            or_(
+                Group.admin_id == user.uid,
+                GroupMember.user_id == user.uid,
+            )
+        )
+        .distinct()
+    )
+    if search:
+        query = query.filter(Group.name.ilike(f"%{search}%"))
+
+    groups = query.order_by(Group.name.asc()).limit(limit).all()
+    return {
+        "groups": [
+            {
+                "id": group.id,
+                "name": group.name,
+                "is_admin": group.admin_id == user.uid,
+            }
+            for group in groups
+        ]
+    }
 
 
 @router.post("/create")

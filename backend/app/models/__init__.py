@@ -9,7 +9,10 @@ from .academics import AcademicRecord
 from .finance import StudentFinance
 from .attendance import AttendanceRecord
 from .announcement import Announcement
+from .assignment import AssignmentRecord
 from .ai_log import AiRequestLog
+from .feedback import BugReport
+from .notification_preferences import UserNotificationPreference
 from .research import Conversation, Message, Source, MessageSource, ShareLink, ShareLinkMessage
 
 __all__ = [
@@ -29,7 +32,10 @@ __all__ = [
     "StudentFinance",
     "AttendanceRecord",
     "Announcement",
+    "AssignmentRecord",
     "AiRequestLog",
+    "BugReport",
+    "UserNotificationPreference",
     "Conversation",
     "Message",
     "Source",
