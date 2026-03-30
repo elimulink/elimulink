@@ -656,7 +656,6 @@ class ArchiveConversationRequest(BaseModel):
 
 @router.post("/conversations")
 def create_conversation(body: CreateConversationRequest) -> dict[str, Any]:
-    ensure_institution_research_schema(engine)
     with SessionLocal() as db:
         conversation = Conversation(
             id=make_id("conv"),
