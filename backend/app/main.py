@@ -164,29 +164,32 @@ async def startup_log() -> None:
     except Exception as exc:  # noqa: BLE001
       print(f"[STARTUP] Base metadata ensure failed: {exc}")
 
-  async def background_maintenance() -> None:
-    run_migrations_value = (os.getenv("RUN_MIGRATIONS") or "").strip().lower()
-    should_run_migrations = run_migrations_value not in {"", "0", "false", "no", "off"}
-    if should_run_migrations:
+  if not is_production:
+    async def background_maintenance() -> None:
+      run_migrations_value = (os.getenv("RUN_MIGRATIONS") or "").strip().lower()
+      should_run_migrations = run_migrations_value not in {"", "0", "false", "no", "off"}
+      if should_run_migrations:
+        try:
+          from alembic import command
+          from alembic.config import Config
+
+          base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+          alembic_cfg = Config(os.path.join(base_dir, "alembic.ini"))
+          await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+          print("[STARTUP] Alembic migrations applied")
+        except Exception as exc:  # noqa: BLE001
+          print(f"[STARTUP] Alembic migration failed: {exc}")
       try:
-        from alembic import command
-        from alembic.config import Config
-
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        alembic_cfg = Config(os.path.join(base_dir, "alembic.ini"))
-        await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
-        print("[STARTUP] Alembic migrations applied")
+        await asyncio.to_thread(ensure_institution_research_schema, engine)
+        print("[STARTUP] Institution research schema verified")
       except Exception as exc:  # noqa: BLE001
-        print(f"[STARTUP] Alembic migration failed: {exc}")
-    try:
-      await asyncio.to_thread(ensure_institution_research_schema, engine)
-      print("[STARTUP] Institution research schema verified")
-    except Exception as exc:  # noqa: BLE001
-      print(f"[STARTUP] Institution research schema repair failed: {exc}")
+        print(f"[STARTUP] Institution research schema repair failed: {exc}")
 
-  maintenance_task = asyncio.create_task(background_maintenance())
-  _startup_tasks.add(maintenance_task)
-  maintenance_task.add_done_callback(_startup_tasks.discard)
+    maintenance_task = asyncio.create_task(background_maintenance())
+    _startup_tasks.add(maintenance_task)
+    maintenance_task.add_done_callback(_startup_tasks.discard)
+  else:
+    print("[STARTUP] Production web boot skipping migration/schema maintenance")
   print(f"[STARTUP] API running | gemini_key_present={gemini_present} | APP_ID={app_id}")
 app.include_router(health_router)
 app.include_router(auth_verify_router)
