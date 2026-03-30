@@ -12,11 +12,22 @@ def _compiled_column_type_sql(engine: Engine, table_name: str, column_name: str)
     raise KeyError(f"Column {table_name}.{column_name} not found")
 
 
+def _compiled_column_type_sql_from_inspector(inspector, dialect, table_name: str, column_name: str) -> str:
+    for column in inspector.get_columns(table_name):
+        if column["name"] == column_name:
+            return column["type"].compile(dialect=dialect)
+    raise KeyError(f"Column {table_name}.{column_name} not found")
+
+
 def ensure_institution_research_schema(engine: Engine) -> None:
     with engine.begin() as conn:
         dialect = conn.dialect.name
 
         if dialect == "postgresql":
+            inspector = inspect(conn)
+            conversation_id_type = _compiled_column_type_sql_from_inspector(
+                inspector, conn.dialect, "conversations", "id"
+            )
             conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS family VARCHAR DEFAULT 'ai'"))
             conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS app VARCHAR DEFAULT 'institution'"))
             conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS title VARCHAR DEFAULT 'New conversation'"))
@@ -136,7 +147,7 @@ def ensure_institution_research_schema(engine: Engine) -> None:
                     f"""
                     CREATE TABLE IF NOT EXISTS notebook_items (
                         id VARCHAR PRIMARY KEY,
-                        conversation_id {_compiled_column_type_sql(engine, "conversations", "id")} NOT NULL REFERENCES conversations(id),
+                        conversation_id {conversation_id_type} NOT NULL REFERENCES conversations(id),
                         owner_uid VARCHAR NOT NULL,
                         title VARCHAR NOT NULL DEFAULT 'Untitled Note',
                         content TEXT NOT NULL DEFAULT '',
@@ -148,6 +159,42 @@ def ensure_institution_research_schema(engine: Engine) -> None:
                     """
                 )
             )
+            inspector = inspect(conn)
+            table_names = set(inspector.get_table_names())
+            if "notebook_items" in table_names:
+                notebook_conversation_type = _compiled_column_type_sql_from_inspector(
+                    inspector, conn.dialect, "notebook_items", "conversation_id"
+                )
+                if notebook_conversation_type != conversation_id_type:
+                    for fk in inspector.get_foreign_keys("notebook_items"):
+                        constrained = fk.get("constrained_columns") or []
+                        if constrained == ["conversation_id"] and fk.get("name"):
+                            conn.execute(
+                                text(
+                                    f'ALTER TABLE notebook_items DROP CONSTRAINT IF EXISTS "{fk["name"]}"'
+                                )
+                            )
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE notebook_items ALTER COLUMN conversation_id TYPE {conversation_id_type} USING conversation_id::{conversation_id_type}"
+                        )
+                    )
+                    inspector = inspect(conn)
+                has_notebook_fk = any(
+                    (fk.get("constrained_columns") or []) == ["conversation_id"]
+                    and fk.get("referred_table") == "conversations"
+                    for fk in inspector.get_foreign_keys("notebook_items")
+                )
+                if not has_notebook_fk:
+                    conn.execute(
+                        text(
+                            """
+                            ALTER TABLE notebook_items
+                            ADD CONSTRAINT notebook_items_conversation_id_fkey
+                            FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+                            """
+                        )
+                    )
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notebook_items_conversation_id ON notebook_items (conversation_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notebook_items_owner_uid ON notebook_items (owner_uid)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notebook_items_is_archived ON notebook_items (is_archived)"))
