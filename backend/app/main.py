@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime
 import time
@@ -48,10 +49,9 @@ from .utils import err_response
 
 _env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
 load_dotenv(_env_path)
-init_firebase_admin()
 
 app = FastAPI(title="ElimuLink API (FastAPI)")
-Base.metadata.create_all(bind=engine)
+_startup_tasks: set[asyncio.Task] = set()
 
 default_origins = [
     "https://elimulink-app-ai.web.app",
@@ -141,6 +141,7 @@ async def startup_log() -> None:
   app_id = os.getenv("APP_ID") or os.getenv("VITE_APP_ID") or "unset"
   gemini_present = bool(os.getenv("GEMINI_API_KEY"))
   env = (os.getenv("APP_ENV") or os.getenv("ENV") or "").strip().lower()
+  is_production = env == "production"
   if env != "production":
     try:
       from urllib.parse import urlparse
@@ -150,24 +151,42 @@ async def startup_log() -> None:
       print(f"[STARTUP] DATABASE_URL host={safe_host}")
     except Exception:
       print("[STARTUP] DATABASE_URL host=unknown")
-  run_migrations_value = (os.getenv("RUN_MIGRATIONS") or "").strip().lower()
-  should_run_migrations = run_migrations_value != "0"
-  if should_run_migrations:
-    try:
-      from alembic import command
-      from alembic.config import Config
-
-      base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-      alembic_cfg = Config(os.path.join(base_dir, "alembic.ini"))
-      command.upgrade(alembic_cfg, "head")
-      print("[STARTUP] Alembic migrations applied")
-    except Exception as exc:  # noqa: BLE001
-      print(f"[STARTUP] Alembic migration failed: {exc}")
   try:
-    ensure_institution_research_schema(engine)
-    print("[STARTUP] Institution research schema verified")
+    await asyncio.to_thread(init_firebase_admin)
+    print("[STARTUP] Firebase Admin initialized")
   except Exception as exc:  # noqa: BLE001
-    print(f"[STARTUP] Institution research schema repair failed: {exc}")
+    print(f"[STARTUP] Firebase Admin init deferred: {exc}")
+
+  if not is_production:
+    try:
+      await asyncio.to_thread(Base.metadata.create_all, bind=engine)
+      print("[STARTUP] Base metadata ensured")
+    except Exception as exc:  # noqa: BLE001
+      print(f"[STARTUP] Base metadata ensure failed: {exc}")
+
+  async def background_maintenance() -> None:
+    run_migrations_value = (os.getenv("RUN_MIGRATIONS") or "").strip().lower()
+    should_run_migrations = run_migrations_value not in {"", "0", "false", "no", "off"}
+    if should_run_migrations:
+      try:
+        from alembic import command
+        from alembic.config import Config
+
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        alembic_cfg = Config(os.path.join(base_dir, "alembic.ini"))
+        await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+        print("[STARTUP] Alembic migrations applied")
+      except Exception as exc:  # noqa: BLE001
+        print(f"[STARTUP] Alembic migration failed: {exc}")
+    try:
+      await asyncio.to_thread(ensure_institution_research_schema, engine)
+      print("[STARTUP] Institution research schema verified")
+    except Exception as exc:  # noqa: BLE001
+      print(f"[STARTUP] Institution research schema repair failed: {exc}")
+
+  maintenance_task = asyncio.create_task(background_maintenance())
+  _startup_tasks.add(maintenance_task)
+  maintenance_task.add_done_callback(_startup_tasks.discard)
   print(f"[STARTUP] API running | gemini_key_present={gemini_present} | APP_ID={app_id}")
 app.include_router(health_router)
 app.include_router(auth_verify_router)
