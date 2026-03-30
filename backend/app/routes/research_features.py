@@ -49,6 +49,10 @@ def make_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
+def make_conversation_id() -> str:
+    return str(uuid4())
+
+
 def ok(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, **payload}
 
@@ -452,7 +456,7 @@ def get_or_create_notebook_workspace(db: Session, user: CurrentUser) -> Conversa
         return conversation
 
     conversation = Conversation(
-        id=make_id("conv"),
+        id=make_conversation_id(),
         family="ai",
         app="institution",
         title="ElimuLink Notebook",
@@ -658,7 +662,7 @@ class ArchiveConversationRequest(BaseModel):
 def create_conversation(body: CreateConversationRequest) -> dict[str, Any]:
     with SessionLocal() as db:
         conversation = Conversation(
-            id=make_id("conv"),
+            id=make_conversation_id(),
             family="ai",
             app="institution",
             title=body.title,
