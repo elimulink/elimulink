@@ -2,6 +2,17 @@ function safeString(value) {
   return String(value || "").trim();
 }
 
+function isMeaningfulSource(source) {
+  const url = safeString(source?.url || source?.link || source?.href);
+  const domain = safeString(source?.domain || source?.provider || domainFromUrl(url));
+  const title = safeString(source?.title || source?.label);
+  const snippet = safeString(source?.snippet || source?.text || source?.summary || source?.description);
+
+  if (!url && !domain && !title && !snippet) return false;
+  if (!url && !domain && /^source\s*\d+$/i.test(title)) return false;
+  return Boolean(url || domain || title || snippet);
+}
+
 function toBase64Url(raw) {
   const utf8 = encodeURIComponent(raw).replace(/%([0-9A-F]{2})/g, (_, hex) =>
     String.fromCharCode(parseInt(hex, 16))
@@ -41,6 +52,7 @@ export function normalizeResearchSources(input = {}) {
       : [];
 
   const fromDirect = directSources
+    .filter(isMeaningfulSource)
     .map((source, index) => {
       const url = safeString(source?.url || source?.link || source?.href);
       const domain = safeString(source?.domain || source?.provider || domainFromUrl(url));
@@ -53,6 +65,7 @@ export function normalizeResearchSources(input = {}) {
         domain,
         snippet,
         url,
+        faviconUrl: safeString(source?.favicon_url || source?.faviconUrl || source?.favicon || ""),
       };
     })
     .filter(Boolean);
@@ -71,6 +84,7 @@ export function normalizeResearchSources(input = {}) {
         domain,
         snippet,
         url,
+        faviconUrl: safeString(item?.faviconUrl || item?.favicon_url || ""),
       };
     })
     .filter(Boolean);

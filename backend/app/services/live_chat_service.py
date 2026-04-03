@@ -20,6 +20,7 @@ def _fail(code: str, message: str, status_code: int = 500) -> None:
 
 
 def _build_system_prompt(family: str, app: str, context: dict[str, Any] | None) -> str:
+    context_mode = str((context or {}).get("mode") or "").strip()
     base = (
         "You are ElimuLink Live, a spoken AI assistant. "
         "Reply naturally for voice conversation. "
@@ -27,6 +28,11 @@ def _build_system_prompt(family: str, app: str, context: dict[str, Any] | None) 
         "If visual context is available, use it. "
         "If the user asks what to tap or focus on, answer step by step."
     )
+    if context_mode == "live-scene-suggestions":
+        base += (
+            " For live-scene-suggestions mode, return 4 short, useful, non-repetitive "
+            "camera-aware suggestion chips, one per line only, with no numbering."
+        )
     family_hint = f" Family: {family}. App: {app}."
     context_hint = ""
     if context:

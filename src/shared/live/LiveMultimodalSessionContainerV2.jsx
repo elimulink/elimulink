@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import LiveVoiceOverlayV2 from "./LiveVoiceOverlayV2.jsx";
 import ScreenShareIndicator from "./ScreenShareIndicator.jsx";
 import RecordingPreviewCard from "./RecordingPreviewCard.jsx";
@@ -42,6 +42,14 @@ export default function LiveMultimodalSessionContainerV2({
   const voiceSettings = useMemo(() => loadVoiceSettings(settingsUid), [settingsUid]);
   const [toastMessage, setToastMessage] = useState("");
   const [textOverlayOpen, setTextOverlayOpen] = useState(false);
+  const [backendSceneHints, setBackendSceneHints] = useState([]);
+  const askAIRef = useRef(onAskAI);
+  const photoUploadInputRef = useRef(null);
+  const hintRequestKeyRef = useRef("");
+
+  useEffect(() => {
+    askAIRef.current = onAskAI;
+  }, [onAskAI]);
 
   const liveVoice = useLiveVoiceSession({
     language,
@@ -49,7 +57,7 @@ export default function LiveMultimodalSessionContainerV2({
     onAskVision: async ({ imageDataUrl, prompt }) =>
       analyzeVisualContext({ imageDataUrl, prompt, family, app }),
     onUserTurn: async ({ text, context }) => {
-      const result = await onAskAI?.({ text, context, family, app });
+      const result = await askAIRef.current?.({ text, context, family, app });
       if (typeof result === "string") return { text: result };
       return result || { text: "I heard you." };
     },
@@ -100,6 +108,28 @@ export default function LiveMultimodalSessionContainerV2({
     await liveVoice.highlightLatestCapture("Analyze this camera image and highlight the important area.");
   };
 
+  const handleUploadPhoto = () => {
+    photoUploadInputRef.current?.click();
+  };
+
+  const handlePhotoFileSelect = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    const capture = await liveVoice.uploadPhoto?.(file);
+    if (!capture) return;
+    const guidedCapture = await liveVoice.highlightLatestCapture(
+      "Analyze this uploaded photo and point out the most important details."
+    );
+    const visualSummary = String(guidedCapture?.answer || "").trim();
+    await liveVoice.submitTextMessage?.(
+      visualSummary
+        ? `Explain this uploaded photo clearly and tell me what to focus on. Vision summary: ${visualSummary}`
+        : `Explain this uploaded photo clearly, mention important visible details, and tell me what to focus on: ${capture.title || "Uploaded photo"}`
+    );
+  };
+
   const handleTakeScreenshot = async () => {
     const capture = await liveVoice.takeScreenshot();
     if (!capture) return;
@@ -132,7 +162,85 @@ export default function LiveMultimodalSessionContainerV2({
     ];
   }, [cameraActive]);
 
-  const sceneHints = liveVisionHints.length ? liveVisionHints : fallbackSceneHints;
+  useEffect(() => {
+    if (!open || app !== "institution" || !cameraActive || textOverlayOpen || liveVoice.mode !== "idle") {
+      setBackendSceneHints([]);
+      hintRequestKeyRef.current = "";
+      return;
+    }
+
+    if (liveVoice.transcript || liveVoice.responseText || liveVisionHints.length) {
+      setBackendSceneHints([]);
+      hintRequestKeyRef.current = "";
+      return;
+    }
+
+    const recentCaptureKey = liveVoice.captures
+      .slice(-2)
+      .map((item) => `${item.type}:${item.title}:${item.answer || ""}`)
+      .join("|");
+    const requestKey = `${liveVoice.cameraFacingMode}:${recentCaptureKey}`;
+    if (hintRequestKeyRef.current === requestKey && backendSceneHints.length) {
+      return;
+    }
+    hintRequestKeyRef.current = requestKey;
+
+    let ignore = false;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const result = await askAIRef.current?.({
+          text:
+            "Generate 4 short, natural live-camera suggestion chips for a student using AI vision right now. Return one suggestion per line only, no numbering, each under 6 words.",
+          context: {
+            mode: "live-scene-suggestions",
+            cameraEnabled: liveVoice.cameraEnabled,
+            cameraFacingMode: liveVoice.cameraFacingMode,
+            captures: liveVoice.captures.slice(-3).map((item) => ({
+              type: item.type,
+              title: item.title,
+              answer: item.answer || "",
+            })),
+          },
+          family,
+          app,
+        });
+        if (ignore) return;
+        const lines = String(result?.text || result || "")
+          .split(/\r?\n/)
+          .map((line) => line.replace(/^[\s\d\-•.)]+/, "").trim())
+          .filter((line) => line && line.length <= 52)
+          .slice(0, 4);
+        setBackendSceneHints(lines.map((label, index) => ({ id: `ai-hint-${index}-${label}`, label })));
+      } catch {
+        if (!ignore) setBackendSceneHints([]);
+      }
+    }, 450);
+
+    return () => {
+      ignore = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    app,
+    cameraActive,
+    family,
+    liveVisionHints.length,
+    backendSceneHints.length,
+    liveVoice.cameraEnabled,
+    liveVoice.cameraFacingMode,
+    liveVoice.captures,
+    liveVoice.mode,
+    liveVoice.responseText,
+    liveVoice.transcript,
+    open,
+    textOverlayOpen,
+  ]);
+
+  const sceneHints = liveVisionHints.length
+    ? liveVisionHints
+    : backendSceneHints.length
+    ? backendSceneHints
+    : fallbackSceneHints;
 
   const liveGuidanceHighlights = useMemo(
     () => normalizeGuidanceHighlights(latestGuidedCapture),
@@ -172,6 +280,13 @@ export default function LiveMultimodalSessionContainerV2({
           />
         </div>
       ) : null}
+      <input
+        ref={photoUploadInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handlePhotoFileSelect}
+      />
       <LiveVoiceOverlayV2
         open={liveVoice.open}
         onClose={handleClose}
@@ -189,6 +304,7 @@ export default function LiveMultimodalSessionContainerV2({
         shareSurface={liveVoice.shareSurface}
         screenShareSupported={liveVoice.screenShareSupported}
         screenRecordingSupported={liveVoice.screenRecordingSupported}
+        cameraFacingMode={liveVoice.cameraFacingMode}
         onStartScreenShare={liveVoice.startScreenShare}
         onStopScreenShare={liveVoice.stopScreenShare}
         onToggleMute={liveVoice.toggleMute}
@@ -196,6 +312,7 @@ export default function LiveMultimodalSessionContainerV2({
         onToggleCamera={liveVoice.toggleCamera}
         onSwitchCamera={liveVoice.switchCamera}
         onTakePhoto={handleTakePhoto}
+        onUploadPhoto={handleUploadPhoto}
         onTakeScreenshot={handleTakeScreenshot}
         onToggleScreenRecording={liveVoice.toggleScreenRecording}
         onSubmitTextMessage={liveVoice.submitTextMessage}
@@ -207,6 +324,7 @@ export default function LiveMultimodalSessionContainerV2({
         onSendTextOverlay={handleSendTextOverlay}
         guidanceHighlights={liveGuidanceHighlights}
         cameraModeActive={cameraActive}
+        appMode={app}
         onInterrupt={liveVoice.interrupt}
         onRetryListen={liveVoice.retryListen}
         onStartVoice={liveVoice.startVoice}

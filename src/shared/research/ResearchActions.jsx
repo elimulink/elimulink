@@ -5,6 +5,15 @@ import ShareChatButton from "./ShareChatButton";
 import ShareChatModal from "./ShareChatModal";
 import { createShareChatLink } from "./researchUtils";
 
+function hasRenderableSource(source) {
+  return Boolean(
+    String(source?.url || "").trim() ||
+      String(source?.domain || "").trim() ||
+      String(source?.title || "").trim() ||
+      String(source?.snippet || "").trim()
+  );
+}
+
 export default function ResearchActions({
   sources = [],
   sharePayload = null,
@@ -25,7 +34,14 @@ export default function ResearchActions({
   const [activeChipIndex, setActiveChipIndex] = useState(-1);
   const [localShareUrl, setLocalShareUrl] = useState("");
 
-  const visibleChips = useMemo(() => sources.slice(0, 4), [sources]);
+  const validSources = useMemo(
+    () => (Array.isArray(sources) ? sources.filter(hasRenderableSource) : []),
+    [sources]
+  );
+  const visibleChips = useMemo(() => validSources.slice(0, 3), [validSources]);
+  const overflowCount = Math.max(0, validSources.length - visibleChips.length);
+  const firstSourceCountLabel =
+    overflowCount > 0 ? `+${overflowCount}` : validSources.length > 1 ? `${validSources.length}` : "";
 
   const handleCreateLink = async () => {
     if (disableShare) return;
@@ -59,6 +75,9 @@ export default function ResearchActions({
               <CitationChip
                 key={source.id ?? index}
                 label={source.domain || source.title || `Source ${index + 1}`}
+                faviconUrl={source.faviconUrl || source.favicon_url || ""}
+                indexLabel={`[${index + 1}]`}
+                countLabel={index === 0 ? firstSourceCountLabel : ""}
                 active={activeChipIndex === index && drawerOpen}
                 onClick={() => handleOpenSources(index)}
               />
@@ -71,13 +90,13 @@ export default function ResearchActions({
             {shareLoading ? "Sharing..." : "Share"}
           </ShareChatButton>
 
-          {sources.length > 0 ? (
+          {validSources.length > 0 ? (
             <button
               type="button"
               onClick={() => handleOpenSources(-1)}
               className="rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10 dark:hover:text-white"
             >
-              Sources
+              {validSources.length === 1 ? "1 Source" : `${validSources.length} Sources`}
             </button>
           ) : null}
         </div>
@@ -86,7 +105,7 @@ export default function ResearchActions({
       <SourcesDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        sources={sources}
+        sources={validSources}
         loading={sourcesLoading}
         error={sourcesError}
       />

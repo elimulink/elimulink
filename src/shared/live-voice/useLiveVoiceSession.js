@@ -8,6 +8,15 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
   const mediaRecorderRef = useRef(null);
   const recordingChunksRef = useRef([]);
   const objectUrlsRef = useRef(new Set());
+  const liveContextRef = useRef({
+    captures: [],
+    cameraEnabled: false,
+    cameraFacingMode: "environment",
+    recordingScreen: false,
+    screenSharing: false,
+    shareSurface: "unknown",
+    latestVisualCaptureType: "",
+  });
   const isMountedRef = useRef(true);
 
   const [open, setOpen] = useState(false);
@@ -15,6 +24,7 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
   const [recordedBlob, setRecordedBlob] = useState(null);
   const [recordedUrl, setRecordedUrl] = useState("");
   const [captures, setCaptures] = useState([]);
+  const [uploadedPhotoCapture, setUploadedPhotoCapture] = useState(null);
   const [visionPrompt, setVisionPrompt] = useState("");
   const [sessionError, setSessionError] = useState("");
 
@@ -54,13 +64,7 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
     autoRestartListening: true,
     onUserTurn,
     settingsUid,
-    context: {
-      captures,
-      cameraEnabled: false,
-      recordingScreen,
-      screenSharing,
-      shareSurface,
-    },
+    context: liveContextRef.current,
   });
 
   const {
@@ -112,6 +116,23 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
       /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || ""),
     []
   );
+
+  useEffect(() => {
+    const latestCapture = captures[captures.length - 1] || null;
+    liveContextRef.current.captures = captures.slice(-6).map((item) => ({
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      answer: item.answer || "",
+      createdAt: item.createdAt,
+    }));
+    liveContextRef.current.cameraEnabled = cameraEnabled;
+    liveContextRef.current.cameraFacingMode = cameraFacing;
+    liveContextRef.current.recordingScreen = recordingScreen;
+    liveContextRef.current.screenSharing = screenSharing;
+    liveContextRef.current.shareSurface = shareSurface;
+    liveContextRef.current.latestVisualCaptureType = latestCapture?.type || "";
+  }, [cameraEnabled, cameraFacing, captures, recordingScreen, screenSharing, shareSurface]);
 
   const registerObjectUrl = useCallback((url) => {
     if (!url) return;
@@ -174,6 +195,7 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
     setRecordedBlob(null);
     setRecordedUrl("");
     setCaptures([]);
+    setUploadedPhotoCapture(null);
     clearScreenCaptures();
     clearCameraCaptures();
     setVisionPrompt("");
@@ -251,41 +273,99 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
       if (!stream) return null;
     }
 
+    clearCameraCaptures();
+    setUploadedPhotoCapture(null);
     const capture = await takeSharedScreenshot();
     if (capture?.previewUrl) {
       addCapture(capture);
     }
     return capture;
-  }, [addCapture, beginScreenShare, screenSharing, takeSharedScreenshot]);
+  }, [addCapture, beginScreenShare, clearCameraCaptures, screenSharing, takeSharedScreenshot]);
 
   const takePhoto = useCallback(async () => {
     if (!cameraEnabled) {
       const stream = await enableCamera();
       if (!stream) return null;
     }
+    clearScreenCaptures();
+    setUploadedPhotoCapture(null);
     const capture = await capturePhoto();
     if (capture?.previewUrl) {
       addCapture(capture);
     }
     return capture;
-  }, [addCapture, cameraEnabled, capturePhoto, enableCamera]);
+  }, [addCapture, cameraEnabled, capturePhoto, clearScreenCaptures, enableCamera]);
+
+  const uploadPhoto = useCallback(
+    (file) =>
+      new Promise((resolve) => {
+        if (!file || !String(file.type || "").startsWith("image/")) {
+          setSessionError("Please choose a valid image file.");
+          resolve(null);
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = String(reader.result || "");
+          if (!dataUrl) {
+            setSessionError("Could not read that photo.");
+            resolve(null);
+            return;
+          }
+
+          const captureId = `upload-${Date.now()}`;
+          const finalizeCapture = (width = 0, height = 0) => {
+            clearScreenCaptures();
+            clearCameraCaptures();
+            const capture = {
+              id: captureId,
+              type: "uploaded-photo",
+              title: file.name || "Uploaded photo",
+              previewUrl: dataUrl,
+              rawDataUrl: dataUrl,
+              width,
+              height,
+              createdAt: Date.now(),
+            };
+
+            setUploadedPhotoCapture(capture);
+            addCapture(capture);
+            resolve(capture);
+          };
+
+          const image = new Image();
+          image.onload = () => finalizeCapture(image.naturalWidth || 0, image.naturalHeight || 0);
+          image.onerror = () => finalizeCapture(0, 0);
+          image.src = dataUrl;
+        };
+        reader.onerror = () => {
+          setSessionError("Could not read that photo.");
+          resolve(null);
+        };
+        reader.readAsDataURL(file);
+      }),
+    [addCapture, clearCameraCaptures, clearScreenCaptures]
+  );
 
   const highlightLatestCapture = useCallback(
     async (prompt) => {
       let result = null;
-      if (screenSharing || rawCapture?.rawDataUrl) {
+      if (rawPhoto?.rawDataUrl || uploadedPhotoCapture?.rawDataUrl) {
+        const photoSource = rawPhoto?.rawDataUrl ? "camera photo" : "uploaded photo";
+        result = await autoHighlightPhoto({
+          prompt:
+            prompt ||
+            visionPrompt ||
+            `Highlight the important object or area in this ${photoSource}.`,
+          sourceCapture: rawPhoto?.rawDataUrl ? null : uploadedPhotoCapture,
+        });
+      } else if (screenSharing || rawCapture?.rawDataUrl) {
         result = await autoHighlightScreenshot({
           prompt:
             prompt ||
             visionPrompt ||
             "Show clearly what the user should tap or focus on next in this screenshot.",
-        });
-      } else if (rawPhoto?.rawDataUrl) {
-        result = await autoHighlightPhoto({
-          prompt:
-            prompt ||
-            visionPrompt ||
-            "Highlight the important object or area in this camera photo.",
         });
       }
       if (result?.previewUrl) {
@@ -300,6 +380,7 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
       rawCapture?.rawDataUrl,
       rawPhoto?.rawDataUrl,
       screenSharing,
+      uploadedPhotoCapture?.rawDataUrl,
       visionPrompt,
     ]
   );
@@ -517,6 +598,7 @@ export default function useLiveVoiceSession({ language = "en-US", onUserTurn, on
     toggleMute,
     toggleCamera,
     switchCamera,
+    uploadPhoto,
     toggleTorch,
     startScreenShare,
     stopScreenShare: endScreenShare,

@@ -85,7 +85,7 @@ export default function VoiceAudioSettingsPanel({
   const speedLabel = useMemo(() => `${Number(settings.speechRate || 1).toFixed(2)}x`, [settings.speechRate]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
         <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Voice & Audio</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
@@ -97,7 +97,7 @@ export default function VoiceAudioSettingsPanel({
         <div className="rounded-2xl bg-red-500/95 px-4 py-3 text-sm text-white">{activePreviewError}</div>
       ) : null}
 
-      <div className={`grid gap-3 ${compact ? "" : "md:grid-cols-2"}`}>
+      <div className={`grid gap-2.5 ${compact ? "" : "md:grid-cols-2"}`}>
         {VOICE_OPTIONS.map((voice) => {
           const active = settings.voiceId === voice.id;
           const previewing = activePreviewingVoiceId === voice.id;
@@ -105,10 +105,10 @@ export default function VoiceAudioSettingsPanel({
           return (
             <div
               key={voice.id}
-              className={`rounded-[26px] p-4 ring-1 transition ${
+              className={`rounded-[22px] border p-4 transition ${
                 active
-                  ? "bg-sky-50 ring-sky-300 shadow-[0_12px_30px_rgba(14,165,233,0.10)] dark:bg-sky-500/10 dark:ring-sky-400/60"
-                  : "bg-slate-50/95 ring-slate-200 dark:bg-slate-950 dark:ring-slate-800"
+                  ? "border-sky-200 bg-sky-50/90 shadow-[0_10px_24px_rgba(14,165,233,0.08)] dark:border-sky-400/25 dark:bg-sky-500/[0.08]"
+                  : "border-slate-200/90 bg-slate-50/70 dark:border-white/10 dark:bg-white/[0.03]"
               }`}
             >
               <div className="flex items-start justify-between gap-4">
@@ -135,7 +135,7 @@ export default function VoiceAudioSettingsPanel({
                 <button
                   type="button"
                   onClick={() => handlePreviewVoice(voice)}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-transparent bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-800 dark:border-sky-400/20 dark:bg-sky-500/15 dark:text-sky-100 dark:hover:bg-sky-500/20"
                 >
                   {previewing ? <Volume2 size={14} /> : <Play size={14} />}
                   {previewing ? "Playing..." : "Preview"}
@@ -146,8 +146,8 @@ export default function VoiceAudioSettingsPanel({
         })}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950">
+      <div className="grid gap-2.5 md:grid-cols-2">
+        <div className="rounded-[20px] border border-slate-200/90 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Captions</div>
@@ -164,7 +164,7 @@ export default function VoiceAudioSettingsPanel({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950">
+        <div className="rounded-[20px] border border-slate-200/90 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Auto-play AI replies</div>
@@ -182,7 +182,7 @@ export default function VoiceAudioSettingsPanel({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950">
+      <div className="rounded-[20px] border border-slate-200/90 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Speech speed</div>
@@ -190,7 +190,7 @@ export default function VoiceAudioSettingsPanel({
               Control how quickly AI speaks in previews, playback, and live mode.
             </div>
           </div>
-          <div className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700">
+          <div className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-white/[0.04] dark:text-slate-100 dark:ring-white/10">
             {speedLabel}
           </div>
         </div>
@@ -223,14 +223,14 @@ function Toggle({ checked, onChange }) {
       onClick={() => onChange(!checked)}
       className={[
         "relative h-6 w-11 rounded-full transition",
-        checked ? "bg-slate-900 dark:bg-slate-100" : "bg-slate-300 dark:bg-slate-700",
+        checked ? "bg-slate-900 dark:bg-sky-500/70" : "bg-slate-300 dark:bg-white/10",
       ].join(" ")}
       aria-pressed={checked}
     >
       <span
         className={[
           "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition",
-          checked ? "left-5 dark:bg-slate-900" : "left-0.5",
+          checked ? "left-5 dark:bg-white" : "left-0.5",
         ].join(" ")}
       />
     </button>

@@ -8,7 +8,10 @@ export default function ImageSearchResults({
   onPreview,
   onReuse,
 }) {
-  if (!results.length) return null;
+  const displayResults = (Array.isArray(results) ? results : []).filter(
+    (result) => result?.thumbnail && result?.link
+  );
+  if (!displayResults.length) return null;
 
   return (
     <div className="image-search-results">
@@ -19,11 +22,11 @@ export default function ImageSearchResults({
             {query ? `Image results for "${query}"` : "Image results"}
           </div>
         </div>
-        <div className="image-search-results-count">{results.length} results</div>
+        <div className="image-search-results-count">{displayResults.length} results</div>
       </div>
 
       <div className="image-search-results-grid">
-        {results.map((result) => (
+        {displayResults.map((result) => (
           <article key={result.id || result.link} className="image-search-card">
             <button
               type="button"

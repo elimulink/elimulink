@@ -19,7 +19,16 @@ const imageAPI = {
       provider: data.provider || data?.data?.provider || '',
       model: data.model || data?.data?.model || '',
     };
-  }
+  },
+  getLatestImageFromMessages: (messages = []) => {
+    const items = Array.isArray(messages) ? messages : [];
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const message = items[index] || {};
+      const imageUrl = message.imageUrl || (message.type === "image" ? message.content : "");
+      if (typeof imageUrl === "string" && imageUrl.trim()) return imageUrl;
+    }
+    return "";
+  },
 };
 
 export default imageAPI;

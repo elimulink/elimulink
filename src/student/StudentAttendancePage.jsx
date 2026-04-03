@@ -169,25 +169,25 @@ function AttendanceByUnit() {
 function FloatingSectionPicker({ open, items, activeSection, onToggle, onSelect, mobile = false }) {
   return (
     <div className={mobile ? "fixed bottom-6 right-5 z-30" : "fixed bottom-8 left-8 z-30"}>
-      <div className="flex flex-col items-end gap-3">
+      <div className="flex flex-col items-start gap-3">
         {open ? (
-          <div className="rounded-[28px] border border-slate-200/80 bg-white/96 p-3 shadow-[0_18px_44px_rgba(15,23,42,0.12)] dark:border-white/10 dark:bg-[#0d182b]/96 dark:shadow-[0_18px_44px_rgba(2,8,23,0.42)]">
-            <div className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-300">Sections</div>
-            <div className="space-y-2">
+          <div className="mb-1 flex flex-col items-start gap-3">
+            <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-300">Sections</div>
+            <div className="flex flex-col items-start gap-3">
               {items.map((item) => (
                 <button
                   key={item.key}
                   type="button"
                   onClick={() => onSelect(item.key)}
                   className={[
-                    "flex min-w-[180px] items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-medium transition",
+                    "inline-flex min-w-[118px] items-center justify-center rounded-full px-5 py-4 text-center text-[14px] font-semibold shadow-[0_14px_34px_rgba(5,150,105,0.22)] transition",
                     activeSection === item.key
-                      ? "bg-slate-950 text-white dark:bg-slate-100 dark:text-slate-900"
-                      : "bg-slate-50 text-slate-700 hover:bg-slate-100 dark:bg-[#101c31] dark:text-slate-100 dark:hover:bg-slate-800",
+                      ? "bg-emerald-800 text-white"
+                      : "bg-emerald-700 text-white hover:bg-emerald-600",
                   ].join(" ")}
+                  style={!mobile ? { marginLeft: `${items.findIndex((entry) => entry.key === item.key) * 14}px` } : undefined}
                 >
                   <span>{item.label}</span>
-                  <span className="text-[11px] uppercase tracking-[0.12em] opacity-70">Open</span>
                 </button>
               ))}
             </div>

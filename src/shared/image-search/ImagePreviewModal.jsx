@@ -15,7 +15,8 @@ export default function ImagePreviewModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [result, onClose]);
 
-  if (!result) return null;
+  const imageUrl = result?.image || result?.thumbnail || "";
+  if (!result || !imageUrl) return null;
 
   return (
     <div className="image-search-modal-backdrop" onClick={onClose}>
@@ -38,7 +39,7 @@ export default function ImagePreviewModal({
           </button>
         </div>
         <div className="image-search-modal-body">
-          <img src={result.image || result.thumbnail} alt={result.title} className="image-search-modal-image" />
+          <img src={imageUrl} alt={result.title || "Image preview"} className="image-search-modal-image" />
         </div>
       </div>
     </div>

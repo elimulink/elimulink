@@ -98,13 +98,19 @@
 
 .elu-audio-settings {
   margin-top: 8px;
-  padding: 14px;
-  border-radius: 20px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
+  padding: 12px;
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.1);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+}
+
+html.dark .elu-audio-settings {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.58);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
 }
 
 .elu-audio-settings__header {
@@ -121,12 +127,22 @@
   color: #0f172a;
 }
 
+html.dark .elu-audio-settings__title {
+  color: #f8fafc;
+}
+
 .elu-audio-settings__subtitle,
 .elu-audio-settings__hint,
 .elu-audio-empty-state {
   font-size: 12px;
   line-height: 1.45;
   color: #64748b;
+}
+
+html.dark .elu-audio-settings__subtitle,
+html.dark .elu-audio-settings__hint,
+html.dark .elu-audio-empty-state {
+  color: #94a3b8;
 }
 
 .elu-audio-settings__section + .elu-audio-settings__section {
@@ -241,12 +257,22 @@
   font-weight: 700;
 }
 
+html.dark .elu-audio-done-inline {
+  color: #bfdbfe;
+}
+
 .elu-audio-done {
   width: 100%;
   height: 40px;
-  margin-top: 14px;
-  border-radius: 12px;
+  margin-top: 12px;
+  border-radius: 16px;
   background: rgba(12, 94, 168, 0.1);
+}
+
+html.dark .elu-audio-done {
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(14, 165, 233, 0.16);
+  color: #dbeafe;
 }
 
 @media (max-width: 768px) {
@@ -263,7 +289,7 @@
 
   .elu-audio-settings {
     margin-top: 10px;
-    border-radius: 18px;
+    border-radius: 22px;
   }
 
   .elu-audio-settings__header {

@@ -36,7 +36,6 @@ import {
   Mic,
   MicOff,
   Search,
-  Share2,
   ThumbsDown,
   ThumbsUp,
   Trash2,
@@ -67,7 +66,15 @@ import LiveMultimodalSessionContainerV2 from "../shared/live/LiveMultimodalSessi
 import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
 import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
 import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
-import { isImageGenerationPrompt } from "../shared/image-generation/imageGenerationIntent.js";
+import {
+  isImageEditFollowUpPrompt,
+  isImageGenerationPrompt,
+} from "../shared/image-generation/imageGenerationIntent.js";
+import {
+  extractLinksFromText,
+  formatExtractedLinksMessage,
+  isLinkExtractionPrompt,
+} from "../shared/link-extraction/linkExtraction.js";
 import {
   archiveAllInstitutionConversations,
   createInstitutionConversation,
@@ -83,7 +90,9 @@ import {
 } from "../lib/researchApi";
 import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
+import ResponseBlockRenderer from "../shared/assistant-blocks/ResponseBlockRenderer.jsx";
 import imageAPI from "../services/imageAPI.js";
+import { analyzeVisualContext } from "../lib/visionApi.js";
 import DesktopSettingsLauncher from "../shared/settings/DesktopSettingsLauncher.jsx";
 import DesktopSettingsWorkspace from "../shared/settings/DesktopSettingsWorkspace.jsx";
 import SettingsPage from "./SettingsPage";
@@ -297,6 +306,14 @@ const COMPOSER_TOOL_PRESETS = [
   { key: "explore_apps", label: "Explore apps", prompt: "Recommend useful academic apps for this task..." },
 ];
 
+const INSTITUTION_CHAT_MODEL_OPTIONS = [
+  {
+    key: "elimulink-institution-ai",
+    label: "ElimuLink AI",
+    description: "Current Institution chat model",
+  },
+];
+
 const EMPTY_ACADEMIC_CONTEXT = Object.freeze({
   course: "",
   topic: "",
@@ -448,6 +465,15 @@ function autoResizeTextarea(el, maxHeight = 176) {
   const nextHeight = Math.min(Math.max(el.scrollHeight, 44), maxHeight);
   el.style.height = `${nextHeight}px`;
   el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  el.style.scrollbarGutter = "stable";
+}
+
+function formatVoiceSessionDuration(durationMs) {
+  const totalSeconds = Math.max(0, Math.round(Number(durationMs || 0) / 1000));
+  if (totalSeconds < 60) return `${Math.max(1, totalSeconds)}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
 function detectAcademicContext(message, previousContext = EMPTY_ACADEMIC_CONTEXT) {
@@ -600,6 +626,36 @@ function formatTimeAgo(timestamp) {
   return `${Math.floor(delta / 86_400_000)}d ago`;
 }
 
+function MobileComposerToolCard({ icon, label, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex min-h-[100px] flex-col items-center justify-center gap-2 rounded-[24px] bg-slate-100/80 px-3 py-4 text-slate-800 ring-1 ring-slate-200/70 transition active:scale-[0.98] dark:bg-white/6 dark:text-slate-100 dark:ring-white/10"
+    >
+      <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/70 text-slate-700 dark:bg-white/8 dark:text-slate-100">
+        {icon}
+      </span>
+      <span className="text-[12px] font-medium">{label}</span>
+    </button>
+  );
+}
+
+function MobileComposerToolRow({ icon, label, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-[20px] px-3 py-3 text-left text-[14px] font-medium text-slate-800 transition active:scale-[0.99] hover:bg-white/80 dark:text-slate-100 dark:hover:bg-white/5"
+    >
+      <span className="grid h-10 w-10 place-items-center rounded-2xl bg-white/80 text-slate-700 dark:bg-white/8 dark:text-slate-100">
+        {icon}
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function PlaceholderPanel({ title, bullets = [] }) {
   return (
     <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
@@ -627,6 +683,96 @@ function PlaceholderPanel({ title, bullets = [] }) {
 function isErrorText(text) {
   const value = String(text || "").toLowerCase();
   return value.includes("failed to reach ai service") || value.includes("error (");
+}
+
+function isLongAssistantResponse(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  const codeFenceCount = (value.match(/```/g) || []).length;
+  const nonCodeText = value.replace(/```[\s\S]*?```/g, "").trim();
+  const lineCount = value.split(/\r?\n/).filter((line) => line.trim()).length;
+  const paragraphCount = value.split(/\n{2,}/).filter((part) => part.trim()).length;
+  const listItemCount = (value.match(/^\s*(?:[-*•]|\d+[.)])\s+/gm) || []).length;
+  const headingCount = (value.match(/^#{1,4}\s+\S+/gm) || []).length;
+
+  const isMostlyCode =
+    codeFenceCount >= 2 &&
+    nonCodeText.length < 220 &&
+    value.replace(/```/g, "").length > nonCodeText.length * 2;
+  if (isMostlyCode) return false;
+
+  if (value.length >= 1800) return true;
+  if (lineCount >= 24) return true;
+  if (paragraphCount >= 7 && value.length >= 900) return true;
+  if ((headingCount >= 2 || listItemCount >= 8) && value.length >= 900) return true;
+  return false;
+}
+
+function getSuggestedAssistantActions(text, imageUrl = "", { showStudyTools = true, isError = false } = {}) {
+  if (!showStudyTools || isError) return [];
+  const value = String(text || "").trim();
+  if (!value) return [];
+  if (imageUrl) return [];
+
+  const lower = value.toLowerCase();
+  const lineCount = value.split(/\r?\n/).filter((line) => line.trim()).length;
+  const paragraphCount = value.split(/\n{2,}/).filter((part) => part.trim()).length;
+  const listItemCount = (value.match(/^\s*(?:[-*•]|\d+[.)])\s+/gm) || []).length;
+  const codeFenceCount = (value.match(/```/g) || []).length;
+  const nonCodeText = value.replace(/```[\s\S]*?```/g, "").trim();
+  const isMostlyCode =
+    codeFenceCount >= 2 &&
+    nonCodeText.length < 220 &&
+    value.replace(/```/g, "").length > nonCodeText.length * 2;
+  const isVeryShort = value.length < 180 && lineCount <= 3;
+  const isSimpleAck = /^(yes|no|okay|ok|sure|done|noted|thanks|thank you)[.!]?\s*$/i.test(value);
+  const hasActionFlowEnding =
+    /\b(next steps?|recommended actions?|action plan|to continue|choose one action)\b/i.test(lower) &&
+    listItemCount >= 2;
+  const isStatusLike =
+    /^(success|done|completed|confirmed|status|warning|error|note)\s*[:\-]/i.test(value) ||
+    /^(here is the generated image|here is the edited image)\.?$/i.test(value);
+
+  if (isMostlyCode || isVeryShort || isSimpleAck || hasActionFlowEnding || isStatusLike) return [];
+
+  const isAcademic =
+    /\b(explain|define|compare|summarize|assignment|exam|research|lecture|theory|method|framework|policy|workflow|results|attendance|fees|department|institution|concept|diagram|process|structure|analysis)\b/.test(lower) ||
+    value.length > 320 ||
+    listItemCount >= 3 ||
+    paragraphCount >= 3;
+  if (!isAcademic) return [];
+
+  const chips = [];
+  const addChip = (chip) => {
+    if (chips.some((item) => item.key === chip.key)) return;
+    chips.push(chip);
+  };
+
+  if (value.length >= 700 || paragraphCount >= 4 || listItemCount >= 6 || lineCount >= 14) {
+    addChip({ key: "summary", label: "Summarize this" });
+  }
+
+  if (/\b(explain|definition|concept|theory|topic|lecture|lesson|chapter|assignment|research|study|revision)\b/.test(lower) || paragraphCount >= 3 || listItemCount >= 3) {
+    addChip({ key: "notes", label: "Turn into notes" });
+  }
+
+  if (/\b(technical|complex|theory|formula|equation|architecture|framework|methodology|algorithm|scientific|explain)\b/.test(lower) || value.length >= 500) {
+    addChip({ key: "simpler", label: "Explain simpler" });
+  }
+
+  if (/\b(step|process|procedure|how to|method|implementation|diagram|structure|architecture|system|cycle|flow|pipeline|digestive|circuit|network)\b/.test(lower)) {
+    addChip({ key: "diagram", label: "Make diagram" });
+  }
+
+  if (/\b(exam|revision|study|learning|concept|topic|lecture|memorize|key terms|definitions)\b/.test(lower)) {
+    addChip({ key: "flashcards", label: "Generate flashcards" });
+  }
+
+  if (/\b(policy|memo|letter|proposal|report|announcement|email|draft|professional|formal|rewrite|statement)\b/.test(lower)) {
+    addChip({ key: "formal", label: "Rewrite formally" });
+  }
+
+  return chips.slice(0, 4);
 }
 
 function Bubble({
@@ -657,7 +803,6 @@ function Bubble({
   reaction = null,
   onLike,
   onDislike,
-  onShare,
   onRetryMessage,
   onSimplify,
   onDetailed,
@@ -665,6 +810,8 @@ function Bubble({
   onNotesTool,
   onFlashcardsTool,
   onSimplerTool,
+  onDiagramTool,
+  onRewriteFormalTool,
   showStudyTools = true,
 }) {
   const isUser = role === "user";
@@ -679,12 +826,23 @@ function Bubble({
     isUser ? String(text || "") : ""
   );
   const [isTypingAnim, setIsTypingAnim] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const typingFrameRef = useRef(null);
   const showActionRow = !streaming && !isTypingAnim && (Boolean(reaction) || isMoreOpen);
-  const assistantParagraphs = String(isUser ? text || "" : renderedAssistantText || "")
-    .split(/\n{2,}/)
-    .map((part) => part.trim())
-    .filter(Boolean);
+  const canCollapseResponse =
+    !isUser && !streaming && !isTypingAnim && !imageUrl && isLongAssistantResponse(renderedAssistantText);
+  const suggestedActions = useMemo(
+    () =>
+      getSuggestedAssistantActions(text, imageUrl, {
+        showStudyTools,
+        isError,
+      }),
+    [imageUrl, isError, showStudyTools, text]
+  );
+
+  useEffect(() => {
+    setIsExpanded(false);
+  }, [text, imageUrl]);
 
   useEffect(() => {
     if (isUser) return;
@@ -732,73 +890,22 @@ function Bubble({
     };
   }, [isUser, text, streaming]);
 
-  function renderAssistantBlock(block, index) {
-    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
-    const isBulletLike =
-      lines.length > 1 &&
-      lines.every((line) => /^([-*•]|\d+\.)\s+/.test(line));
-
-    if (isBulletLike) {
-      return (
-        <ul key={`blk-${index}`} className="list-disc pl-5 space-y-1.5">
-          {lines.map((line, i) => (
-            <li key={`li-${index}-${i}`}>{line.replace(/^([-*•]|\d+\.)\s+/, "")}</li>
-          ))}
-        </ul>
-      );
-    }
-    return (
-      <p key={`blk-${index}`} className="leading-[1.72]">
-        {block}
-      </p>
-    );
-  }
-
   return (
-    <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`group flex w-full ${isUser ? "justify-end" : "justify-start"}`}>
         <div
         className={[
-          isUser ? "max-w-[96%] md:max-w-[88%] text-[15px]" : "max-w-[98.5%] -ml-1 md:max-w-[88%] text-[15px]",
           isUser
-            ? "user-msg-bubble rounded-2xl px-4 py-3 md:px-4.5 md:py-3.5 bg-sky-500 text-white rounded-br-md shadow-sm"
-            : "assistant-msg-surface px-0.5 py-1 md:py-1.5 text-slate-900 dark:text-slate-100",
+            ? "max-w-[88%] md:max-w-[72%] text-[15px]"
+            : "max-w-[98%] md:max-w-[82%] text-[15px]",
+          isUser
+            ? "user-msg-bubble rounded-[20px] rounded-br-lg border border-sky-100/80 bg-sky-50/95 px-4 py-2.5 text-slate-900 shadow-[0_4px_14px_rgba(15,23,42,0.06)] md:px-4 md:py-3"
+            : "assistant-msg-surface bg-transparent px-0 py-0.5 text-slate-900 dark:text-slate-100",
         ].join(" ")}
       >
         {isUser ? (
           <div className="leading-relaxed">{text}</div>
         ) : (
           <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 text-slate-800 md:leading-[1.78] dark:text-slate-100">
-            {imageUrl ? (
-              <div className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/90 p-2 shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
-                <button
-                  type="button"
-                  onClick={() => onGeneratedImagePreview?.(imageUrl)}
-                  className="block w-full overflow-hidden rounded-[18px]"
-                >
-                  <img
-                    src={imageUrl}
-                    alt={text || "Generated image"}
-                    className="max-h-[360px] w-full rounded-[18px] object-cover"
-                  />
-                </button>
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onGeneratedImagePreview?.(imageUrl)}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:hover:bg-white/[0.08]"
-                  >
-                    Preview
-                  </button>
-                  <a
-                    href={imageUrl}
-                    download="elimulink-generated-image.png"
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:hover:bg-white/[0.08]"
-                  >
-                    Download
-                  </a>
-                </div>
-              </div>
-            ) : null}
             {imageSearchResults.length ? (
               <ImageSearchResults
                 query={imageSearchQuery}
@@ -807,8 +914,25 @@ function Bubble({
                 onReuse={onImageReuse}
               />
             ) : null}
-            {assistantParagraphs.length ? (
-              assistantParagraphs.map((block, idx) => renderAssistantBlock(block, idx))
+            {String(renderedAssistantText || imageUrl || "").trim() ? (
+              <div
+                className={[
+                  "relative",
+                  canCollapseResponse && !isExpanded ? "max-h-[520px] overflow-hidden" : "",
+                ].join(" ")}
+              >
+                <ResponseBlockRenderer
+                  text={renderedAssistantText}
+                  imageUrl={imageUrl}
+                  sources={researchSources}
+                  onGeneratedImagePreview={onGeneratedImagePreview}
+                />
+                {canCollapseResponse && !isExpanded ? (
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-white dark:to-[#020617]">
+                    <div className="absolute inset-x-0 bottom-0 h-px bg-slate-200/80 dark:bg-white/10" />
+                  </div>
+                ) : null}
+              </div>
             ) : streaming ? (
               <div className="inline-flex items-center gap-1.5 text-slate-400 dark:text-slate-300">
                 <span className="typing-dot" />
@@ -862,14 +986,6 @@ function Bubble({
               title="Dislike"
             >
               <ThumbsDown size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={onShare}
-              className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
-              title="Share"
-            >
-              <Share2 size={14} />
             </button>
             <div className="relative">
               <button
@@ -941,6 +1057,20 @@ function Bubble({
             </div>
           ) : null}
 
+          {canCollapseResponse ? (
+            <button
+              type="button"
+              onClick={() => setIsExpanded((prev) => !prev)}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-slate-200/80 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+            >
+              {isExpanded ? "Collapse response" : "Expand full response"}
+              <ChevronDown
+                size={13}
+                className={["transition-transform duration-200", isExpanded ? "rotate-180" : ""].join(" ")}
+              />
+            </button>
+          ) : null}
+
           {!isUser && !streaming && !isTypingAnim && String(text || "").trim() ? (
             <ResearchActionsContainer
               family="ai"
@@ -961,41 +1091,27 @@ function Bubble({
             />
           ) : null}
 
-          {!isUser && showStudyTools && !streaming && !isTypingAnim && String(text || "").trim() ? (
+          {!isUser && !streaming && !isTypingAnim && suggestedActions.length > 0 ? (
             <div className="mt-2.5 border-t border-slate-200/70 pt-2.5 dark:border-slate-700/80">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                onClick={onSummarizeTool}
-                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Summarize this
-              </button>
-              <button
-                type="button"
-                onClick={onNotesTool}
-                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Turn into notes
-              </button>
-              <button
-                type="button"
-                onClick={onFlashcardsTool}
-                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Generate flashcards
-              </button>
-              <button
-                type="button"
-                onClick={onSimplerTool}
-                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Explain simpler
-              </button>
-            </div>
-            <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-300">
-              Next step: choose a study action above to continue with this answer.
-            </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {suggestedActions.map((action) => (
+                  <button
+                    key={action.key}
+                    type="button"
+                    onClick={() => {
+                      if (action.key === "summary") onSummarizeTool?.();
+                      if (action.key === "notes") onNotesTool?.();
+                      if (action.key === "flashcards") onFlashcardsTool?.();
+                      if (action.key === "simpler") onSimplerTool?.();
+                      if (action.key === "diagram") onDiagramTool?.();
+                      if (action.key === "formal") onRewriteFormalTool?.();
+                    }}
+                    className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
           </div>
         ) : null}
 
@@ -1150,6 +1266,7 @@ export default function NewChatLanding({
   const [isMorePopupOpen, setIsMorePopupOpen] = useState(false);
   const [isAttachOpen, setIsAttachOpen] = useState(false);
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifAnchor, setNotifAnchor] = useState(null);
@@ -1161,11 +1278,13 @@ export default function NewChatLanding({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingText, setSpeakingText] = useState("");
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voiceFeedbackCard, setVoiceFeedbackCard] = useState({ open: false, durationLabel: "" });
   const [lastPrompt, setLastPrompt] = useState("");
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
   const [feedbackByMessage, setFeedbackByMessage] = useState({});
   const [feedbackToast, setFeedbackToast] = useState({ open: false, text: "" });
   const [isChatScrolling, setIsChatScrolling] = useState(false);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [chatScrollProgress, setChatScrollProgress] = useState(0);
   const [chatScrollLabel, setChatScrollLabel] = useState("Today");
   const [contextByChat, setContextByChat] = useState({});
@@ -1176,9 +1295,14 @@ export default function NewChatLanding({
   const [virtualizationTick, setVirtualizationTick] = useState(0);
   const [selectedStarter, setSelectedStarter] = useState(null);
   const [starterSuggestions, setStarterSuggestions] = useState([]);
+  const [mobileSuggestionIndex, setMobileSuggestionIndex] = useState(0);
+  const [selectedChatModelKey, setSelectedChatModelKey] = useState(
+    INSTITUTION_CHAT_MODEL_OPTIONS[0]?.key || "elimulink-institution-ai",
+  );
   const [currentUid, setCurrentUid] = useState(auth.currentUser?.uid || null);
   const recognitionRef = useRef(null);
   const mobileAttachmentMenuRef = useRef(null);
+  const mobileModelMenuRef = useRef(null);
   const desktopAttachmentMenuRef = useRef(null);
   const newChatMenuRef = useRef(null);
   const desktopSettingsTriggerRef = useRef(null);
@@ -1193,6 +1317,8 @@ export default function NewChatLanding({
   const mobilePromptInputRef = useRef(null);
   const desktopPromptInputRef = useRef(null);
   const lastSpokenRef = useRef({ text: "", at: 0 });
+  const voiceSessionStartedAtRef = useRef(0);
+  const voiceFeedbackTimerRef = useRef(null);
   const renderCountRef = useRef(0);
   const previousUidRef = useRef(auth.currentUser?.uid || null);
   const scrollHideTimerRef = useRef(null);
@@ -1211,6 +1337,7 @@ export default function NewChatLanding({
     previewItem,
     editorItem,
     toastItem,
+    mediaNotice,
     addFiles: addCapturedFiles,
     removeMedia,
     applyEditedMedia,
@@ -1220,6 +1347,7 @@ export default function NewChatLanding({
     closePreview,
     closeEditor,
     dismissToast,
+    dismissMediaNotice,
     handlePaste,
   } = useCapturedMedia();
   const [aiEditItem, setAiEditItem] = useState(null);
@@ -1361,6 +1489,28 @@ export default function NewChatLanding({
     document.addEventListener("mousedown", onDocumentMouseDown);
     return () => document.removeEventListener("mousedown", onDocumentMouseDown);
   }, [isAttachOpen]);
+
+  useEffect(() => {
+    if (!isModelMenuOpen) return;
+    const onDocumentMouseDown = (event) => {
+      if (mobileModelMenuRef.current?.contains(event.target)) return;
+      setIsModelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocumentMouseDown);
+    return () => document.removeEventListener("mousedown", onDocumentMouseDown);
+  }, [isModelMenuOpen]);
+
+  useEffect(() => {
+    setMobileSuggestionIndex(0);
+  }, [activeChatId, selectedStarter, starterSuggestions.length]);
+
+  useEffect(() => {
+    if (!showMobileRotatingSuggestion || mobileSuggestionPool.length <= 1) return;
+    const id = window.setInterval(() => {
+      setMobileSuggestionIndex((current) => (current + 1) % mobileSuggestionPool.length);
+    }, 5200);
+    return () => window.clearInterval(id);
+  }, [mobileSuggestionPool.length, showMobileRotatingSuggestion]);
 
   useEffect(() => {
     if (!isProfileMenuOpen && !isNotificationsMenuOpen) return;
@@ -1645,9 +1795,40 @@ export default function NewChatLanding({
   const activeAcademicContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
   const activeContextLabel = contextLabel(activeAcademicContext);
   const hasConversation = messages.length > 0;
+  const hasStreamingAssistantReply = messages.some((message) => Boolean(message?.streaming));
   const canSend = input.trim().length > 0 || attachments.length > 0;
   const hasText = input.trim().length > 0;
   const hasStarterSuggestions = !hasConversation && starterSuggestions.length > 0;
+  const activeChatModel =
+    INSTITUTION_CHAT_MODEL_OPTIONS.find((model) => model.key === selectedChatModelKey) ||
+    INSTITUTION_CHAT_MODEL_OPTIONS[0];
+  const mobileSuggestionPool = useMemo(() => {
+    const pool = starterSuggestions.length
+      ? starterSuggestions
+      : starterSet.flatMap((starter) => (Array.isArray(starter.suggestions) ? starter.suggestions.slice(0, 2) : []));
+    return Array.from(new Set(pool.map((item) => String(item || "").trim()).filter(Boolean))).slice(0, 12);
+  }, [starterSet, starterSuggestions]);
+  const showMobileRotatingSuggestion =
+    active === "newchat" &&
+    mobileSuggestionPool.length > 0 &&
+    !hasText &&
+    !hasStreamingAssistantReply &&
+    !isAttachOpen &&
+    !isModelMenuOpen &&
+    !isMobileDrawerOpen &&
+    !voiceOpen;
+  const activeMobileSuggestion =
+    mobileSuggestionPool.length > 0
+      ? mobileSuggestionPool[mobileSuggestionIndex % mobileSuggestionPool.length]
+      : "";
+  const showMobileEntryGlow =
+    active === "newchat" &&
+    messages.length === 0 &&
+    !hasText &&
+    !isAttachOpen &&
+    !isModelMenuOpen &&
+    !isMobileDrawerOpen &&
+    !voiceOpen;
   const unreadNotifications = notifications.filter((item) => !item.read).length;
   const desktopSettingsUser = useMemo(
     () => ({
@@ -2003,6 +2184,11 @@ export default function NewChatLanding({
 
   const handleComposerInputChange = (value, target) => {
     setInput(value);
+    setIsModelMenuOpen(false);
+    if (value.trim()) {
+      setIsAttachOpen(false);
+      setIsToolsPanelOpen(false);
+    }
     requestAnimationFrame(() => {
       if (target) {
         const maxHeight = Number(target.dataset?.maxheight || 176);
@@ -2014,6 +2200,7 @@ export default function NewChatLanding({
   };
 
   const scrollToBottom = (behavior = "smooth") => {
+    setShowJumpToLatest(false);
     messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
     if (mobileMessagesRef.current) {
       mobileMessagesRef.current.scrollTo({ top: mobileMessagesRef.current.scrollHeight, behavior });
@@ -2073,6 +2260,7 @@ export default function NewChatLanding({
     return () => {
       if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current);
       if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current);
+      if (voiceFeedbackTimerRef.current) clearTimeout(voiceFeedbackTimerRef.current);
     };
   }, []);
 
@@ -2581,6 +2769,50 @@ export default function NewChatLanding({
     openPreview(item);
   }
 
+  function readAttachmentFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Could not read this image attachment."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function buildVisionAttachmentSummary(imageAttachments, userPrompt) {
+    const validImages = (Array.isArray(imageAttachments) ? imageAttachments : [])
+      .filter((item) => item?.isImage && item?.file)
+      .slice(0, 10);
+    if (!validImages.length) return "";
+
+    const promptText = String(userPrompt || "").trim();
+    const visionPrompt = promptText
+      ? `Inspect this image carefully for this user request: ${promptText}. Describe the visible content, readable text, diagrams, and any details needed to answer.`
+      : "Describe this image clearly. Include readable text, diagrams, objects, and important visual details.";
+
+    const summaries = await Promise.all(
+      validImages.map(async (item, index) => {
+        try {
+          const imageDataUrl = await readAttachmentFileAsDataUrl(item.file);
+          const visualResult = await analyzeVisualContext({
+            imageDataUrl,
+            prompt: visionPrompt,
+            family: "ai",
+            app: storageScope,
+          });
+          const answer = String(visualResult?.answer || "").trim();
+          if (!answer) return "";
+          return `Image ${index + 1}${item?.name ? ` (${item.name})` : ""}: ${answer}`;
+        } catch {
+          return "";
+        }
+      })
+    );
+
+    const cleanSummaries = summaries.map((item) => String(item || "").trim()).filter(Boolean);
+    if (!cleanSummaries.length) return "";
+    return `\n\nImage analysis:\n${cleanSummaries.join("\n\n")}`;
+  }
+
   async function handleAiEditApply({ imageUrl, file, text, previousItem }) {
     if (previousItem?.id && attachments.some((entry) => entry.id === previousItem.id) && file) {
       await applyEditedMedia(previousItem.id, file);
@@ -2606,6 +2838,7 @@ export default function NewChatLanding({
   }
 
   function toggleAttachmentPanel() {
+    setIsModelMenuOpen(false);
     setIsAttachOpen((prev) => {
       const next = !prev;
       if (!next) setIsToolsPanelOpen(false);
@@ -2613,9 +2846,16 @@ export default function NewChatLanding({
     });
   }
 
+  function toggleModelMenu() {
+    setIsAttachOpen(false);
+    setIsToolsPanelOpen(false);
+    setIsModelMenuOpen((value) => !value);
+  }
+
   function applyToolPreset(prompt) {
     setIsAttachOpen(false);
     setIsToolsPanelOpen(false);
+    setIsModelMenuOpen(false);
     setInput(prompt);
     requestAnimationFrame(() => focusPromptInput());
   }
@@ -2624,11 +2864,15 @@ export default function NewChatLanding({
     setSelectedStarter(starter.key);
     setInput(starter.prefill);
     setStarterSuggestions(starter.suggestions);
+    setIsModelMenuOpen(false);
     requestAnimationFrame(() => focusPromptInput());
   }
 
   function applySuggestion(suggestion) {
     setInput(suggestion);
+    setIsAttachOpen(false);
+    setIsToolsPanelOpen(false);
+    setIsModelMenuOpen(false);
     requestAnimationFrame(() => focusPromptInput());
   }
 
@@ -2683,7 +2927,12 @@ export default function NewChatLanding({
       setIsAttachOpen(false);
       setIsToolsPanelOpen(false);
     }
+    if (isModelMenuOpen) {
+      setIsModelMenuOpen(false);
+    }
     const mode = el === desktopMessagesRef.current ? "desktop" : "mobile";
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowJumpToLatest(distanceFromBottom > 180);
     const max = Math.max(1, el.scrollHeight - el.clientHeight);
     const progress = Math.min(1, Math.max(0, el.scrollTop / max));
     if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current);
@@ -2723,6 +2972,50 @@ export default function NewChatLanding({
     const files = event.target.files;
     addFiles(files, attachmentSourceRef.current || "file");
     event.target.value = "";
+  }
+
+  function dismissVoiceFeedbackCard() {
+    if (voiceFeedbackTimerRef.current) {
+      clearTimeout(voiceFeedbackTimerRef.current);
+      voiceFeedbackTimerRef.current = null;
+    }
+    setVoiceFeedbackCard({ open: false, durationLabel: "" });
+  }
+
+  function openLiveVoiceSession() {
+    dismissVoiceFeedbackCard();
+    voiceSessionStartedAtRef.current = Date.now();
+    setVoiceOpen(true);
+  }
+
+  function closeLiveVoiceSession() {
+    setVoiceOpen(false);
+    const durationMs = voiceSessionStartedAtRef.current
+      ? Date.now() - voiceSessionStartedAtRef.current
+      : 0;
+    voiceSessionStartedAtRef.current = 0;
+    if (voiceFeedbackTimerRef.current) {
+      clearTimeout(voiceFeedbackTimerRef.current);
+    }
+    setVoiceFeedbackCard({
+      open: true,
+      durationLabel: formatVoiceSessionDuration(durationMs),
+    });
+    voiceFeedbackTimerRef.current = setTimeout(() => {
+      setVoiceFeedbackCard({ open: false, durationLabel: "" });
+      voiceFeedbackTimerRef.current = null;
+    }, 6500);
+  }
+
+  function submitVoiceSessionRating(reaction) {
+    dismissVoiceFeedbackCard();
+    setFeedbackToast({
+      open: true,
+      text:
+        reaction === "like"
+          ? "Thanks for rating the voice chat."
+          : "Thanks. We'll keep improving voice chat.",
+    });
   }
 
   function toggleMic() {
@@ -2971,21 +3264,37 @@ export default function NewChatLanding({
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
+    const shouldExtractLinks = isLinkExtractionPrompt(clean);
     const shouldGenerateImage =
-      pendingAttachments.length === 0 && isImageGenerationPrompt(clean);
-    const imageSearchQuery =
-      !shouldGenerateImage && pendingAttachments.length === 0
-        ? getImageSearchQuery(clean)
-        : "";
+      !shouldExtractLinks &&
+      pendingAttachments.length === 0 &&
+      isImageGenerationPrompt(clean);
+    const shouldEditLatestImage =
+      !shouldExtractLinks &&
+      pendingAttachments.length === 0 &&
+      !shouldGenerateImage &&
+      isImageEditFollowUpPrompt(clean);
+    const latestImageUrl = shouldEditLatestImage
+      ? imageAPI.getLatestImageFromMessages(messages)
+      : "";
+    const imageSearchQuery = getImageSearchQuery(clean, {
+      hasAttachments: pendingAttachments.length > 0,
+      shouldGenerateImage,
+      shouldEditImage: shouldEditLatestImage,
+    });
 
     const attachSummary =
       pendingAttachments.length > 0
         ? `\n\nAttachments:\n${pendingAttachments.map((a) => `- ${a.name}`).join("\n")}`
         : "";
     const messageText = `${clean || "Sent attachments"}${attachSummary}`;
+    const imageVisionContext = shouldExtractLinks
+      ? ""
+      : await buildVisionAttachmentSummary(pendingAttachments, clean);
+    const assistantRequestText = `${messageText}${imageVisionContext}`;
     const currentContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
-    const detectedContext = detectAcademicContext(messageText, currentContext);
-    const mergedContext = mergeAcademicContext(currentContext, detectedContext, messageText);
+    const detectedContext = detectAcademicContext(assistantRequestText, currentContext);
+    const mergedContext = mergeAcademicContext(currentContext, detectedContext, assistantRequestText);
     if (activeChat?.id) {
       setContextByChat((prev) => ({ ...prev, [activeChat.id]: mergedContext }));
     }
@@ -3000,6 +3309,66 @@ export default function NewChatLanding({
     setSelectedStarter(null);
     setStarterSuggestions([]);
     requestAnimationFrame(() => scrollToBottom("smooth"));
+
+    if (shouldExtractLinks) {
+      const firstImageAttachment = pendingAttachments.find((item) => item?.isImage && item?.file);
+      try {
+        let sourceText = clean;
+        let sourceLabel = "your message";
+
+        if (firstImageAttachment?.file) {
+          const imageDataUrl = await readAttachmentFileAsDataUrl(firstImageAttachment.file);
+          const visualResult = await analyzeVisualContext({
+            imageDataUrl,
+            prompt:
+              "Read every visible URL/link from this image or document screenshot. Preserve the text exactly and include wrapped or broken links in plain text only.",
+            family: "ai",
+            app: storageScope,
+          });
+          sourceText = `${String(visualResult?.answer || "")}\n${clean}`.trim();
+          sourceLabel = firstImageAttachment.name || "the uploaded image";
+        }
+
+        const extraction = extractLinksFromText(sourceText);
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: formatExtractedLinksMessage({
+                links: extraction.links,
+                uncertain: extraction.uncertain,
+                sourceLabel,
+              }),
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || "Extract links"
+        );
+      } catch (error) {
+        const fallback = extractLinksFromText(clean);
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: fallback.links.length
+                ? formatExtractedLinksMessage({
+                    links: fallback.links,
+                    uncertain: fallback.uncertain,
+                    sourceLabel: "your message",
+                  })
+                : String(error?.message || "I couldn't extract links from that upload right now."),
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || "Extract links"
+        );
+      }
+      return;
+    }
 
     if (shouldGenerateImage) {
       try {
@@ -3030,6 +3399,59 @@ export default function NewChatLanding({
             },
           ],
           clean || untitledChatBase
+        );
+      }
+      return;
+    }
+
+    if (shouldEditLatestImage) {
+      if (!latestImageUrl) {
+        updateActiveChatMessages(
+          (chatMessages) => [
+            ...chatMessages,
+            {
+              role: "assistant",
+              text: "Please generate or upload an image first, then tell me how you want it edited.",
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || untitledChatBase
+        );
+        return;
+      }
+
+      try {
+        const result = await imageAPI.editImage({
+          imageDataUrl: latestImageUrl,
+          prompt: clean,
+        });
+        updateActiveChatMessages(
+          (chatMessages) => [
+            ...chatMessages,
+            {
+              role: "assistant",
+              text: result.text || "Here is the edited image.",
+              imageUrl: result.image,
+              type: "image",
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          "Edited image"
+        );
+      } catch (error) {
+        updateActiveChatMessages(
+          (chatMessages) => [
+            ...chatMessages,
+            {
+              role: "assistant",
+              text: String(error?.message || "Image editing is unavailable right now."),
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          "Edited image"
         );
       }
       return;
@@ -3087,7 +3509,7 @@ export default function NewChatLanding({
       if (shouldUseInstitutionResearchFlow) {
         const fullReply = await fetchAssistantReplyFull({
           token,
-          messageText,
+          messageText: assistantRequestText,
           academicContext: mergedContext,
         });
         const assistantText = String(fullReply?.text || "Response received.");
@@ -3116,7 +3538,7 @@ export default function NewChatLanding({
 
       const streamResult = await streamAssistantReply({
         token,
-        messageText,
+        messageText: assistantRequestText,
         streamId,
         academicContext: mergedContext,
       });
@@ -3124,7 +3546,7 @@ export default function NewChatLanding({
 
       const fallback = await fetchAssistantReplyFull({
         token,
-        messageText,
+        messageText: assistantRequestText,
         academicContext: mergedContext,
       });
         finalizeStreamingAssistant(streamId, fallback.text, { sources: fallback.sources || [] });
@@ -3506,7 +3928,7 @@ export default function NewChatLanding({
       <NotebookPage
         onBack={() => syncActiveView("newchat", "push")}
         onOpenMainMenu={() => setIsMobileDrawerOpen(true)}
-        onOpenLive={() => setVoiceOpen(true)}
+        onOpenLive={openLiveVoiceSession}
         enableDesktopLanding
       />
     );
@@ -3765,8 +4187,8 @@ export default function NewChatLanding({
       ) : null}
 
       {!isAdminShellEmbed ? (
-      <div className="hidden md:block w-full px-4 md:px-5 pt-1.5 pb-0.5 shrink-0 relative z-20">
-          <div className="surface-elevated h-12 rounded-xl border border-slate-200/85 bg-slate-50/95 shadow-[0_6px_16px_rgba(15,23,42,0.05)] px-2.5 md:px-3 flex items-center gap-2 dark:border-white/[0.06] dark:bg-slate-900/88 dark:shadow-[0_10px_24px_rgba(0,0,0,0.24)]">
+      <div className="hidden md:block w-full px-4 md:px-5 pt-0 pb-0.5 shrink-0 relative z-20">
+          <div className="h-12 bg-transparent px-2.5 md:px-3 flex items-center gap-2">
           <button
             className="md:hidden h-9 w-9 rounded-lg bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
             onClick={() => setIsMobileDrawerOpen(true)}
@@ -3775,26 +4197,12 @@ export default function NewChatLanding({
             <Menu size={16} className="mx-auto text-slate-700" />
           </button>
 
-          <div className="hidden md:flex items-center gap-2 shrink-0">
-            <button
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-              title="Home"
-            >
-              <span className="h-6 w-6 rounded-md bg-emerald-500 text-white text-xs font-semibold inline-flex items-center justify-center">
-                E
-              </span>
-              <ChevronDown size={14} className="text-slate-500" />
-            </button>
-            <button
-              className="h-8 w-8 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 inline-flex items-center justify-center dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-              title="Calendar"
-              onClick={() => handleNavClick("calendar")}
-            >
-              <CalendarDays size={14} />
-            </button>
-          </div>
-
-          <div className="hidden md:flex flex-1 min-w-0 items-center justify-center">
+          <div
+            className={[
+              "hidden md:flex flex-1 min-w-0 items-center justify-start transition-[padding] duration-300 ease-out",
+              isSidebarOpen ? "pl-[288px]" : "pl-[98px]",
+            ].join(" ")}
+          >
             <div className="relative w-full max-w-[640px]">
               <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -4260,7 +4668,7 @@ export default function NewChatLanding({
       <div
         className={[
           "w-full flex-1 min-h-0 overflow-hidden",
-          isAdminShellEmbed ? "px-0 py-0" : "px-4 md:px-5 pt-1.5 pb-4",
+          isAdminShellEmbed ? "px-0 py-0" : "px-4 md:px-5 pt-0 pb-4",
         ].join(" ")}
       >
         <div className={["h-full min-h-0", isAdminShellEmbed ? "" : "md:flex md:gap-4"].join(" ")}>
@@ -4277,11 +4685,11 @@ export default function NewChatLanding({
               "transition-all duration-300 ease-out",
             ].join(" ")}
           >
-            <div className="relative px-3 py-3 bg-slate-50/95 border-b border-slate-200/70 flex items-center">
+            <div className="relative flex items-center border-b border-slate-200/70 bg-slate-50/95 px-3 py-3 dark:border-white/10 dark:bg-slate-900/95">
               {isSidebarOpen ? (
                 <div className="flex items-center gap-2">
                   <div className="relative h-7 w-7 rounded-xl bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_20px_rgba(99,102,241,0.22)]" />
-                  <div className="text-[15px] font-semibold text-slate-800">Workspace</div>
+                  <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-100">Workspace</div>
                 </div>
               ) : (
                 <div className="h-6 w-6 rounded-lg bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500" />
@@ -4643,7 +5051,6 @@ export default function NewChatLanding({
                       reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
                       onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
                       onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
-                      onShare={() => shareAssistantMessage(m.text)}
                       onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
                       onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
                       onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
@@ -4651,6 +5058,8 @@ export default function NewChatLanding({
                       onNotesTool={() => sendMessage(`Turn this answer into clean study notes:\n\n${m.text}`)}
                       onFlashcardsTool={() => sendMessage(`Generate revision flashcards (Q/A) from this answer:\n\n${m.text}`)}
                       onSimplerTool={() => sendMessage(`Explain this answer in simpler student-friendly language:\n\n${m.text}`)}
+                      onDiagramTool={() => sendMessage(`Create a clear diagram from this explanation:\n\n${m.text}`)}
+                      onRewriteFormalTool={() => sendMessage(`Rewrite this in a polished formal academic/institutional tone:\n\n${m.text}`)}
                       showStudyTools={!isEmbeddedAdminChat}
                     />
                   </div>
@@ -4662,139 +5071,131 @@ export default function NewChatLanding({
               <div
                 ref={mobileComposerRef}
                 className={[
-                  "fixed left-0 right-0 bottom-0 z-50 bg-[linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,0.9)_28%,rgba(255,255,255,0.98)_100%)] backdrop-blur-2xl px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:static md:z-auto dark:bg-[linear-gradient(180deg,rgba(2,6,23,0),rgba(2,6,23,0.88)_28%,rgba(2,6,23,0.97)_100%)]",
+                  "fixed left-0 right-0 bottom-0 z-50 bg-[linear-gradient(180deg,rgba(255,255,255,0),rgba(248,250,252,0.92)_36%,rgba(248,250,252,0.98)_100%)] px-4 pt-2 pb-[calc(14px+env(safe-area-inset-bottom))] md:static md:z-auto dark:bg-[linear-gradient(180deg,rgba(2,6,23,0),rgba(2,6,23,0.9)_36%,rgba(2,6,23,0.98)_100%)]",
                   isMobileDrawerOpen ? "pointer-events-none opacity-0" : "opacity-100",
                 ].join(" ")}
                 style={{ bottom: `${kbHeight}px` }}
               >
-                <div className="max-w-xl mx-auto space-y-2">
-                  {hasStarterSuggestions ? (
-                    <div className="rounded-[24px] border border-sky-100/70 bg-white shadow-[0_14px_30px_rgba(14,30,63,0.07)] p-2.5 dark:border-slate-700 dark:bg-slate-900/96">
-                      <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-sky-700/80 uppercase dark:text-slate-400">
-                        Suggested prompts
-                      </div>
-                      <div className="space-y-1.5">
-                        {starterSuggestions.map((suggestion) => (
-                          <button
-                            key={suggestion}
-                            onClick={() => applySuggestion(suggestion)}
-                            className="w-full text-left rounded-2xl border border-transparent px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:border-sky-100/80 dark:text-slate-100 dark:hover:border-slate-700 dark:hover:bg-slate-800"
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
-                      </div>
+                <div ref={mobileAttachmentMenuRef} className="relative max-w-xl mx-auto space-y-2">
+                  {showMobileEntryGlow ? (
+                    <>
+                      <div className="pointer-events-none fixed left-0 top-[14%] z-[48] h-[62vh] w-7 rounded-r-full bg-[linear-gradient(180deg,rgba(168,85,247,0.0),rgba(168,85,247,0.35),rgba(14,165,233,0.28),rgba(168,85,247,0.0))] blur-[10px] opacity-90 elu-mobile-entry-glow" />
+                      <div className="pointer-events-none fixed right-0 top-[14%] z-[48] h-[62vh] w-7 rounded-l-full bg-[linear-gradient(180deg,rgba(251,146,60,0.0),rgba(251,146,60,0.36),rgba(14,165,233,0.24),rgba(251,146,60,0.0))] blur-[10px] opacity-90 elu-mobile-entry-glow" />
+                    </>
+                  ) : null}
+
+                  {showMobileRotatingSuggestion && activeMobileSuggestion ? (
+                    <div className="px-1">
+                      <button
+                        key={activeMobileSuggestion}
+                        type="button"
+                        onClick={() => applySuggestion(activeMobileSuggestion)}
+                        className="elu-rotating-suggestion-chip inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200/80 bg-white/92 px-3.5 py-2 text-left text-[13px] text-slate-700 shadow-[0_12px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/90 dark:text-slate-100"
+                      >
+                        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-600 dark:text-sky-300">
+                          Try
+                        </span>
+                        <span className="truncate">{activeMobileSuggestion}</span>
+                      </button>
                     </div>
                   ) : null}
 
-                  <div className="surface-elevated rounded-[34px] border border-sky-100/55 bg-white/92 backdrop-blur-2xl px-2.5 py-2.5 shadow-[0_18px_34px_rgba(14,30,63,0.1)] dark:border-white/[0.05] dark:bg-slate-950/72 dark:shadow-[0_20px_40px_rgba(0,0,0,0.36)]">
+                  <div className="flex items-center justify-center">
+                    <div ref={mobileModelMenuRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={toggleModelMenu}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/70 bg-slate-100/90 px-3.5 py-1.5 text-[12px] font-semibold text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.08)] backdrop-blur-xl transition active:scale-[0.98] dark:border-white/10 dark:bg-white/8 dark:text-slate-100"
+                        aria-expanded={isModelMenuOpen}
+                      >
+                        <span className="max-w-[140px] truncate">{activeChatModel?.label || "ElimuLink AI"}</span>
+                        <ChevronDown size={14} />
+                      </button>
+
+                      <div
+                        className={[
+                          "absolute left-1/2 bottom-[calc(100%+10px)] z-[70] w-64 -translate-x-1/2 rounded-[24px] border border-slate-200/80 bg-white/96 p-2 shadow-[0_20px_44px_rgba(15,23,42,0.16)] backdrop-blur-xl transition duration-150 dark:border-white/10 dark:bg-slate-950/96",
+                          isModelMenuOpen ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none",
+                        ].join(" ")}
+                      >
+                        <div className="px-2 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                          Model
+                        </div>
+                        {INSTITUTION_CHAT_MODEL_OPTIONS.map((modelOption) => {
+                          const isSelected = modelOption.key === selectedChatModelKey;
+                          return (
+                            <button
+                              key={modelOption.key}
+                              type="button"
+                              onClick={() => {
+                                setSelectedChatModelKey(modelOption.key);
+                                setIsModelMenuOpen(false);
+                              }}
+                              className={[
+                                "w-full rounded-2xl px-3 py-3 text-left transition",
+                                isSelected
+                                  ? "bg-sky-50 text-slate-900 dark:bg-sky-500/15 dark:text-white"
+                                  : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/5",
+                              ].join(" ")}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-[14px] font-semibold">{modelOption.label}</span>
+                                {isSelected ? <Check size={16} /> : null}
+                              </div>
+                              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                {modelOption.description}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className={[
+                      "relative surface-elevated rounded-[24px] border px-2 py-1.5 backdrop-blur-xl transition-all duration-300",
+                      showMobileEntryGlow
+                        ? "border-sky-200/80 bg-white/92 shadow-[0_0_0_1px_rgba(14,165,233,0.08),0_18px_44px_rgba(14,165,233,0.18)] dark:border-sky-400/20 dark:bg-white/[0.07] dark:shadow-[0_0_0_1px_rgba(14,165,233,0.1),0_24px_48px_rgba(2,132,199,0.14)]"
+                        : "border-slate-200/90 bg-white/95 shadow-[0_12px_28px_rgba(15,23,42,0.10)] dark:border-white/[0.12] dark:bg-white/[0.06] dark:shadow-[0_14px_30px_rgba(0,0,0,0.28)]",
+                    ].join(" ")}
+                  >
                     <AttachmentChipsTray
                       items={attachments}
                       onPreview={openAttachmentItem}
                       onRemove={removeAttachment}
                     />
 
-                    <div className="flex items-end gap-2">
-                      <div ref={mobileAttachmentMenuRef} className="relative shrink-0">
+                    {mediaNotice ? (
+                      <div className="mb-1.5 flex items-center justify-between gap-2 rounded-2xl border border-amber-200/80 bg-amber-50/90 px-3 py-2 text-[11px] font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                        <span>{mediaNotice}</span>
                         <button
-                          onClick={toggleAttachmentPanel}
-                          className="h-11 w-11 rounded-full bg-[linear-gradient(180deg,rgba(239,246,255,0.92),rgba(245,247,252,0.96))] text-[#27415f] grid place-items-center transition hover:bg-slate-100/75 active:scale-[0.98] dark:border dark:border-white/[0.12] dark:bg-slate-800 dark:text-white dark:shadow-[0_8px_18px_rgba(0,0,0,0.28)] dark:hover:bg-slate-700"
-                          title="Add attachment"
+                          type="button"
+                          onClick={dismissMediaNotice}
+                          className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white/80 text-amber-900 dark:bg-white/10 dark:text-amber-100"
+                          aria-label="Dismiss upload notice"
                         >
-                          <Plus size={17} />
+                          <X size={12} />
                         </button>
+                      </div>
+                    ) : null}
 
-                        <div
-                          className={[
-                            "surface-elevated absolute left-0 bottom-12 z-30 w-[320px] max-w-[calc(100vw-24px)] rounded-2xl border border-white/40 bg-white/75 backdrop-blur-xl shadow-[0_18px_40px_rgba(15,23,42,0.16)] p-2 origin-bottom-left transition duration-150 dark:border-slate-700 dark:bg-slate-950/96",
-                            isAttachOpen ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-1.5 scale-95 pointer-events-none",
-                          ].join(" ")}
+                    <div className="flex items-end gap-1.5">
+                      <div className="relative shrink-0 self-end">
+                        <button
+                          type="button"
+                          onClick={toggleAttachmentPanel}
+                          className="grid h-10 w-10 place-items-center rounded-[18px] border border-slate-200/90 bg-slate-50 text-[#1f3654] transition active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100"
+                          title="Add attachment"
+                          aria-expanded={isAttachOpen}
                         >
-                          <div className="grid grid-cols-4 gap-1.5">
-                            <button
-                              onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
-                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                            >
-                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100">
-                                <Image size={16} />
-                              </span>
-                              <span>Photo</span>
-                            </button>
-                            <button
-                              onClick={() => openAttachmentPicker({ source: "file" })}
-                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
-                            >
-                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-                                <Paperclip size={16} />
-                              </span>
-                              <span>Files</span>
-                            </button>
-                            <button
-                              onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "camera" })}
-                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
-                            >
-                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-                                <Camera size={16} />
-                              </span>
-                              <span>Camera</span>
-                            </button>
-                            <button
-                              onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "scan" })}
-                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
-                            >
-                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-                                <ScanLine size={16} />
-                              </span>
-                              <span>Scan</span>
-                            </button>
-                          </div>
-
-                          <div className="mt-2 rounded-xl border border-slate-200/70 bg-white/65 p-1.5 dark:border-slate-700 dark:bg-slate-800/90">
-                            <div className="relative overflow-hidden">
-                              <div className={`transition-transform duration-200 ${isToolsPanelOpen ? "-translate-x-full" : "translate-x-0"}`}>
-                                <button
-                                  onClick={() => setIsToolsPanelOpen(true)}
-                                  className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-[12px] font-medium text-slate-700 hover:bg-white/80 dark:text-slate-100 dark:hover:bg-slate-700"
-                                >
-                                  <span className="inline-flex items-center gap-1.5"><Sparkles size={14} /> Tools</span>
-                                  <ChevronRight size={14} />
-                                </button>
-                              </div>
-                              <div
-                                className={[
-                                  "absolute inset-0 transition-transform duration-200",
-                                  isToolsPanelOpen ? "translate-x-0" : "translate-x-full",
-                                ].join(" ")}
-                              >
-                                <div className="rounded-lg bg-white/90 p-1 dark:bg-slate-900">
-                                  <button
-                                    onClick={() => setIsToolsPanelOpen(false)}
-                                    className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-                                  >
-                                    <ChevronDown size={12} />
-                                    Back
-                                  </button>
-                                  <div className="grid grid-cols-2 gap-1">
-                                    {COMPOSER_TOOL_PRESETS.map((tool) => (
-                                      <button
-                                        key={tool.key}
-                                        onClick={() => applyToolPreset(tool.prompt)}
-                                        className="rounded-md border border-slate-200/80 bg-white px-2 py-1.5 text-left text-[11px] text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                                      >
-                                        {tool.label}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+                          <Plus size={20} />
+                        </button>
                       </div>
 
                       <textarea
                         ref={mobilePromptInputRef}
-                        data-maxheight="168"
+                        data-maxheight="120"
                         rows={1}
                         value={input}
                         onChange={(e) => handleComposerInputChange(e.target.value, e.target)}
@@ -4805,42 +5206,128 @@ export default function NewChatLanding({
                         }
                       }}
                       onPaste={handlePaste}
-                      className="composer-plain-input min-h-[44px] flex-1 resize-none appearance-none border-0 bg-transparent px-1.5 py-2.5 text-[15px] leading-6 text-slate-800 outline-none shadow-none ring-0 placeholder:text-slate-400 dark:bg-transparent dark:text-slate-100 dark:placeholder:text-slate-500"
+                      className="composer-plain-input max-h-[120px] min-h-[40px] flex-1 resize-none appearance-none border-0 bg-transparent px-1.5 py-2 text-[15px] leading-6 text-slate-800 outline-none shadow-none ring-0 placeholder:text-slate-400 dark:bg-transparent dark:text-slate-100 dark:placeholder:text-slate-500"
                       placeholder="Type your message..."
                       />
 
                       <button
                         onClick={() => {
                           audioPlayer.closePlayer();
-                          setVoiceOpen(true);
+                          openLiveVoiceSession();
                         }}
-                        className="h-11 w-11 shrink-0 rounded-full bg-[linear-gradient(180deg,rgba(239,246,255,0.92),rgba(245,247,252,0.96))] text-[#27415f] grid place-items-center transition hover:bg-slate-100/78 dark:border dark:border-white/[0.12] dark:bg-slate-800 dark:text-white dark:shadow-[0_8px_18px_rgba(0,0,0,0.28)] dark:hover:bg-slate-700"
+                        className="grid h-10 w-10 shrink-0 place-items-center self-end rounded-[18px] border border-slate-200/90 bg-slate-50 text-[#1f3654] transition active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100"
                         title="Open live voice chat"
                       >
-                        <PhoneCall size={16} />
+                        <PhoneCall size={18} />
                       </button>
 
                       <button
                         onClick={() => (hasText ? sendMessage(input) : toggleMic())}
                         className={[
-                          "relative h-11 w-11 shrink-0 rounded-full transition grid place-items-center overflow-hidden",
+                          "relative shrink-0 self-end rounded-[18px] border transition grid place-items-center overflow-hidden",
                           hasText
-                            ? "bg-[linear-gradient(180deg,#0f7ae5,#0ea5b7)] text-white shadow-[0_10px_20px_rgba(14,165,233,0.26)] hover:brightness-105 active:scale-[0.98]"
-                            : "bg-[linear-gradient(180deg,rgba(239,246,255,0.92),rgba(245,247,252,0.96))] text-[#27415f] hover:bg-white dark:border dark:border-white/[0.12] dark:bg-slate-800 dark:text-white dark:shadow-[0_8px_18px_rgba(0,0,0,0.28)] dark:hover:bg-slate-700",
+                            ? "h-10 w-10 border-sky-500/20 bg-[linear-gradient(180deg,#0f7ae5,#0ea5b7)] text-white shadow-[0_10px_20px_rgba(14,165,233,0.24)] hover:brightness-105 active:scale-[0.98]"
+                            : "h-10 w-10 border-slate-200/90 bg-slate-50 text-[#1f3654] active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100",
                         ].join(" ")}
                         title={hasText ? "Send" : "Live AI ready"}
                       >
                       {!hasText ? (
                         <>
-                            <span className="absolute inset-0 rounded-full border border-sky-300/25" />
-                            <Mic size={16} className="relative z-10" />
+                            <span className="absolute inset-0 rounded-2xl border border-sky-300/20" />
+                            <Mic size={18} className="relative z-10" />
                           </>
                         ) : (
-                          <Send size={16} className="transition-transform duration-200" />
+                          <Send size={18} className="transition-transform duration-200" />
                         )}
                       </button>
                     </div>
                   </div>
+
+                  {isAttachOpen ? (
+                    <>
+                      <button
+                        type="button"
+                        aria-label="Close tools"
+                        className="fixed inset-0 z-[60] bg-slate-950/24 backdrop-blur-[2px]"
+                        onClick={() => {
+                          setIsAttachOpen(false);
+                          setIsToolsPanelOpen(false);
+                        }}
+                      />
+                      <div
+                        className="fixed left-0 right-0 z-[61] rounded-t-[32px] border border-white/60 bg-white/96 px-4 pb-[calc(16px+env(safe-area-inset-bottom))] pt-3 shadow-[0_-22px_48px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/96"
+                        style={{ bottom: `${kbHeight}px` }}
+                      >
+                        <div className="mx-auto h-1.5 w-12 rounded-full bg-slate-200 dark:bg-white/15" />
+                        <div className="mx-auto mt-4 max-w-xl">
+                          <div className="flex items-center justify-between">
+                            <div className="text-[13px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                              Tools
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsAttachOpen(false);
+                                setIsToolsPanelOpen(false);
+                              }}
+                              className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-slate-700 dark:bg-white/8 dark:text-slate-100"
+                              aria-label="Close tools"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-3 gap-2.5">
+                            <MobileComposerToolCard
+                              icon={<Paperclip size={20} />}
+                              label="Document"
+                              onClick={() => openAttachmentPicker({ source: "file" })}
+                            />
+                            <MobileComposerToolCard
+                              icon={<Image size={20} />}
+                              label="Gallery"
+                              onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
+                            />
+                            <MobileComposerToolCard
+                              icon={<Camera size={20} />}
+                              label="Camera"
+                              onClick={() =>
+                                openAttachmentPicker({
+                                  accept: "image/*",
+                                  capture: "environment",
+                                  source: "camera",
+                                })
+                              }
+                            />
+                          </div>
+
+                          <div className="mt-3 rounded-[26px] bg-slate-50/90 p-2 ring-1 ring-slate-200/70 dark:bg-white/5 dark:ring-white/10">
+                            <MobileComposerToolRow
+                              icon={<Sparkles size={18} />}
+                              label="AI Image Generator"
+                              onClick={() => applyToolPreset(COMPOSER_TOOL_PRESETS[0].prompt)}
+                            />
+                            <MobileComposerToolRow
+                              icon={<NotebookPen size={18} />}
+                              label="Problem Solving"
+                              onClick={() => applyToolPreset("Help me solve this problem step by step...")}
+                            />
+                            <MobileComposerToolRow
+                              icon={<ScanLine size={18} />}
+                              label="Scan-to-Doc"
+                              onClick={() =>
+                                openAttachmentPicker({
+                                  accept: "image/*",
+                                  capture: "environment",
+                                  source: "scan",
+                                })
+                              }
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -4857,17 +5344,17 @@ export default function NewChatLanding({
 
           {active === "newchat" ? (
             <div className="relative hidden md:flex flex-1 min-h-0 flex-col bg-transparent dark:bg-transparent">
-            <div className="px-4 py-2.5 shrink-0">
-              <div className="max-w-[1180px] w-full mx-auto">
-                <div className="text-sm font-semibold text-slate-800">{activeChat?.title || untitledChatBase}</div>
-                <div className="text-xs text-slate-500">
+            <div className="shrink-0 bg-transparent px-4 py-2.5">
+              <div
+                className="group/chat-header relative mx-auto w-full max-w-[1180px]"
+                title={`${isEmbeddedAdminChat ? "Institution Admin Assistant" : "AI Academic Assistant"} • ${formatChatStamp(activeChat?.updatedAt)}`}
+              >
+                <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {activeChat?.title || untitledChatBase}
+                </div>
+                <div className="pointer-events-none absolute left-0 top-full mt-1 text-xs text-slate-500 opacity-0 transition-opacity duration-150 group-hover/chat-header:opacity-100 dark:text-slate-400">
                   {isEmbeddedAdminChat ? "Institution Admin Assistant" : "AI Academic Assistant"} • {formatChatStamp(activeChat?.updatedAt)}
                 </div>
-                {activeContextLabel ? (
-                  <div className="mt-1 inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
-                    {activeContextLabel}
-                  </div>
-                ) : null}
               </div>
             </div>
 
@@ -4959,7 +5446,6 @@ export default function NewChatLanding({
                           reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
                           onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
                           onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
-                          onShare={() => shareAssistantMessage(m.text)}
                           onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
                           onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
                           onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
@@ -4967,6 +5453,8 @@ export default function NewChatLanding({
                           onNotesTool={() => sendMessage(`Turn this answer into clean study notes:\n\n${m.text}`)}
                           onFlashcardsTool={() => sendMessage(`Generate revision flashcards (Q/A) from this answer:\n\n${m.text}`)}
                           onSimplerTool={() => sendMessage(`Explain this answer in simpler student-friendly language:\n\n${m.text}`)}
+                          onDiagramTool={() => sendMessage(`Create a clear diagram from this explanation:\n\n${m.text}`)}
+                          onRewriteFormalTool={() => sendMessage(`Rewrite this in a polished formal academic/institutional tone:\n\n${m.text}`)}
                           showStudyTools={!isEmbeddedAdminChat}
                         />
                       </div>
@@ -5002,6 +5490,20 @@ export default function NewChatLanding({
                     onPreview={openAttachmentItem}
                     onRemove={removeAttachment}
                   />
+
+                  {mediaNotice ? (
+                    <div className="mb-1.5 flex items-center justify-between gap-2 rounded-2xl border border-amber-200/80 bg-amber-50/90 px-3 py-2 text-[11px] font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                      <span>{mediaNotice}</span>
+                      <button
+                        type="button"
+                        onClick={dismissMediaNotice}
+                        className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white/80 text-amber-900 dark:bg-white/10 dark:text-amber-100"
+                        aria-label="Dismiss upload notice"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ) : null}
 
                   <div className="flex items-end gap-2">
                     <button
@@ -5058,7 +5560,7 @@ export default function NewChatLanding({
                     <button
                       onClick={() => {
                         audioPlayer.closePlayer();
-                        setVoiceOpen(true);
+                        openLiveVoiceSession();
                       }}
                       className="h-9 w-9 rounded-xl border border-transparent bg-slate-100/75 text-slate-700 inline-flex items-center justify-center transition hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
                       title="Open live voice chat"
@@ -5233,7 +5735,7 @@ export default function NewChatLanding({
       ) : null}
       <LiveMultimodalSessionContainerV2
         open={voiceOpen}
-        onClose={() => setVoiceOpen(false)}
+        onClose={closeLiveVoiceSession}
         family="ai"
         app="institution"
         settingsUid={currentUid}
@@ -5245,6 +5747,44 @@ export default function NewChatLanding({
           return { text: reply };
         }}
       />
+      {voiceFeedbackCard.open && !voiceOpen ? (
+        <div
+          className="fixed left-1/2 z-[92] w-[min(420px,calc(100vw-24px))] -translate-x-1/2"
+          style={{ bottom: `${Math.max(96, composerHeight + kbHeight + 14)}px` }}
+        >
+          <div className="flex items-center gap-3 rounded-[22px] border border-slate-200/80 bg-white/96 px-3 py-2.5 shadow-[0_18px_40px_rgba(15,23,42,0.14)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/92 dark:shadow-[0_18px_40px_rgba(0,0,0,0.42)]">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200">
+              <Volume2 size={18} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-semibold text-slate-900 dark:text-slate-50">
+                Voice chat ended
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                {voiceFeedbackCard.durationLabel || "Rate this session"}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => submitVoiceSessionRating("like")}
+                className="grid h-9 w-9 place-items-center rounded-2xl border border-slate-200/80 bg-slate-50 text-slate-600 transition hover:bg-sky-50 hover:text-sky-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-sky-500/15 dark:hover:text-sky-200"
+                aria-label="Like voice chat"
+              >
+                <ThumbsUp size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={() => submitVoiceSessionRating("dislike")}
+                className="grid h-9 w-9 place-items-center rounded-2xl border border-slate-200/80 bg-slate-50 text-slate-600 transition hover:bg-slate-100 hover:text-slate-800 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10 dark:hover:text-white"
+                aria-label="Dislike voice chat"
+              >
+                <ThumbsDown size={15} />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {feedbackToast.open ? (
         <div className="fixed left-1/2 -translate-x-1/2 z-[90] bottom-[calc(82px+env(safe-area-inset-bottom))] md:bottom-5">
           <div className="rounded-xl border border-slate-200 bg-slate-900 text-white/95 px-4 py-2 text-sm shadow-lg">
@@ -5262,13 +5802,26 @@ export default function NewChatLanding({
               openEditor(item);
             }}
             onAskAI={(item) => {
-              setInput(`Help me understand this screenshot and tell me what to focus on: ${item.name || "Screenshot"}`);
               dismissToast();
-              requestAnimationFrame(() => focusPromptInput());
+              const screenshotPrompt =
+                String(input || "").trim() ||
+                `Explain this screenshot, read any visible text, extract any links, and tell me what to focus on: ${item.name || "Screenshot"}`;
+              sendMessage(screenshotPrompt);
             }}
             onDismiss={dismissToast}
           />
         </div>
+      ) : null}
+      {active === "newchat" && showJumpToLatest && !voiceOpen ? (
+        <button
+          type="button"
+          onClick={() => scrollToBottom("smooth")}
+          className="fixed right-3 z-[78] grid h-11 w-11 place-items-center rounded-full border border-slate-200/80 bg-white/95 text-slate-700 shadow-[0_14px_30px_rgba(15,23,42,0.16)] backdrop-blur-xl transition hover:bg-slate-50 dark:border-white/10 dark:bg-slate-950/92 dark:text-slate-100 dark:shadow-[0_16px_34px_rgba(0,0,0,0.42)]"
+          style={{ bottom: `${Math.max(92, composerHeight + kbHeight + 14)}px` }}
+          aria-label="Scroll to latest message"
+        >
+          <ChevronDown size={22} strokeWidth={2.4} />
+        </button>
       ) : null}
       <div
         className={[
@@ -5306,6 +5859,11 @@ export default function NewChatLanding({
           if (!editorItem) return;
           await applyEditedMedia(editorItem.id, file);
           closeEditor();
+          setFeedbackToast({ open: true, text: "Annotated image attached and ready to send." });
+          requestAnimationFrame(() => {
+            focusPromptInput();
+            scrollToBottom("smooth");
+          });
         }}
       />
       <AIImageEditModal

@@ -98,8 +98,10 @@ export function useCameraCaptureAnnotate({ onAskVision } = {}) {
   }, [cameraFacing]);
 
   const autoHighlightPhoto = useCallback(
-    async ({ prompt } = {}) => {
-      if (!rawPhoto?.rawDataUrl) {
+    async ({ prompt, sourceCapture = null } = {}) => {
+      const targetPhoto = sourceCapture?.rawDataUrl ? sourceCapture : rawPhoto;
+
+      if (!targetPhoto?.rawDataUrl) {
         setError("No captured photo available to analyze.");
         return null;
       }
@@ -113,7 +115,7 @@ export function useCameraCaptureAnnotate({ onAskVision } = {}) {
 
         if (onAskVision) {
           const result = await onAskVision({
-            imageDataUrl: rawPhoto.rawDataUrl,
+            imageDataUrl: targetPhoto.rawDataUrl,
             prompt:
               prompt ||
               "Analyze this camera photo and highlight the object or area the user should focus on.",
@@ -127,9 +129,9 @@ export function useCameraCaptureAnnotate({ onAskVision } = {}) {
           highlights = [
             {
               type: "circle",
-              x: Math.round(rawPhoto.width * 0.5),
-              y: Math.round(rawPhoto.height * 0.42),
-              radius: Math.round(Math.min(rawPhoto.width, rawPhoto.height) * 0.12),
+              x: Math.round((targetPhoto.width || 1280) * 0.5),
+              y: Math.round((targetPhoto.height || 720) * 0.42),
+              radius: Math.round(Math.min(targetPhoto.width || 1280, targetPhoto.height || 720) * 0.12),
               label: "Look here",
               color: "#20b8ff",
             },
@@ -137,20 +139,20 @@ export function useCameraCaptureAnnotate({ onAskVision } = {}) {
         }
 
         const rendered = await renderHighlightedImage({
-          imageUrl: rawPhoto.rawDataUrl,
+          imageUrl: targetPhoto.rawDataUrl,
           highlights,
           dimOutside: false,
         });
 
         const output = {
           id: `photo-highlight-${Date.now()}`,
-          type: "highlighted-camera-photo",
-          title: "AI camera guidance",
+          type: targetPhoto.type === "uploaded-photo" ? "highlighted-uploaded-photo" : "highlighted-camera-photo",
+          title: targetPhoto.type === "uploaded-photo" ? "AI photo guidance" : "AI camera guidance",
           previewUrl: rendered.dataUrl,
-          rawDataUrl: rawPhoto.rawDataUrl,
+          rawDataUrl: targetPhoto.rawDataUrl,
           highlightedDataUrl: rendered.dataUrl,
-          width: rawPhoto.width || rendered.width,
-          height: rawPhoto.height || rendered.height,
+          width: targetPhoto.width || rendered.width,
+          height: targetPhoto.height || rendered.height,
           highlights,
           answer,
           createdAt: Date.now(),

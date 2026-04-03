@@ -25,8 +25,8 @@ export default function ScreenshotPreviewToast({
   const handleShare = async () => {
     try {
       setShareStatus("");
-      await shareMediaItem(item);
-      setShareStatus("Shared");
+      const status = await shareMediaItem(item);
+      setShareStatus(status || "Shared");
       window.setTimeout(() => setShareStatus(""), 1600);
     } catch (error) {
       setShareStatus(error?.message || "Sharing is not supported on this device.");

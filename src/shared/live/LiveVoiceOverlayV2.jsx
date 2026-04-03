@@ -9,6 +9,7 @@ import {
   PhoneOff,
   RotateCw,
   Square,
+  Upload,
   Volume2,
   VolumeX,
   X,
@@ -35,6 +36,7 @@ export default function LiveVoiceOverlayV2({
   shareSurface = "unknown",
   screenShareSupported = true,
   screenRecordingSupported = true,
+  cameraFacingMode = "environment",
   onStartScreenShare,
   onStopScreenShare,
   onToggleMute,
@@ -42,6 +44,7 @@ export default function LiveVoiceOverlayV2({
   onToggleCamera,
   onSwitchCamera,
   onTakePhoto,
+  onUploadPhoto,
   onTakeScreenshot,
   onToggleScreenRecording,
   onSubmitTextMessage,
@@ -53,6 +56,7 @@ export default function LiveVoiceOverlayV2({
   onSendTextOverlay,
   guidanceHighlights = [],
   cameraModeActive = false,
+  appMode = "public",
   onInterrupt,
   onRetryListen,
   onStartVoice,
@@ -92,6 +96,11 @@ export default function LiveVoiceOverlayV2({
           title={title}
           subtitle={subtitle}
           muted={muted}
+          mode={mode}
+          cameraEnabled={cameraEnabled}
+          cameraFacingMode={cameraFacingMode}
+          isSharing={isSharing}
+          appMode={appMode}
           onToggleMute={onToggleMute}
           onClose={onClose}
         />
@@ -133,11 +142,13 @@ export default function LiveVoiceOverlayV2({
                   isSharing={isSharing}
                   screenShareSupported={screenShareSupported}
                   screenRecordingSupported={screenRecordingSupported}
+                  cameraFacingMode={cameraFacingMode}
                   onStartScreenShare={onStartScreenShare}
                   onStopScreenShare={onStopScreenShare}
                   onToggleCamera={onToggleCamera}
                   onSwitchCamera={onSwitchCamera}
                   onTakePhoto={onTakePhoto}
+                  onUploadPhoto={onUploadPhoto}
                   onTakeScreenshot={onTakeScreenshot}
                   onToggleScreenRecording={onToggleScreenRecording}
                 />
@@ -168,11 +179,13 @@ export default function LiveVoiceOverlayV2({
             isSharing={isSharing}
             screenShareSupported={screenShareSupported}
             screenRecordingSupported={screenRecordingSupported}
+            cameraFacingMode={cameraFacingMode}
             onStartScreenShare={onStartScreenShare}
             onStopScreenShare={onStopScreenShare}
             onToggleCamera={onToggleCamera}
             onSwitchCamera={onSwitchCamera}
             onTakePhoto={onTakePhoto}
+            onUploadPhoto={onUploadPhoto}
             onTakeScreenshot={onTakeScreenshot}
             onToggleScreenRecording={onToggleScreenRecording}
           />
@@ -188,27 +201,55 @@ export default function LiveVoiceOverlayV2({
   );
 }
 
-function Header({ title, subtitle, muted, onToggleMute, onClose }) {
+function Header({
+  title,
+  subtitle,
+  muted,
+  mode,
+  cameraEnabled,
+  cameraFacingMode,
+  isSharing,
+  appMode,
+  onToggleMute,
+  onClose,
+}) {
+  const liveStateCopy = cameraEnabled
+    ? `${cameraFacingMode === "user" ? "Front" : "Rear"} camera`
+    : isSharing
+    ? "Screen sharing"
+    : mode === "listening"
+    ? "Listening"
+    : mode === "thinking"
+    ? "Thinking"
+    : mode === "speaking"
+    ? "Responding"
+    : "Ready";
+
+  const compactInstitution = appMode === "institution";
+
   return (
-    <div className="absolute inset-x-0 top-0 z-20 flex items-start justify-between px-4 pb-2 pt-4 sm:px-6 lg:static lg:px-8">
-      <div className="flex items-center gap-3">
+    <div className={`absolute inset-x-0 top-0 z-20 flex items-start justify-between px-3 sm:px-6 lg:static lg:px-8 ${compactInstitution ? "pb-1 pt-2" : "pb-2 pt-4"}`}>
+      <div className="flex min-w-0 items-center gap-2.5">
         <button
           type="button"
           onClick={onToggleMute}
-          className={`flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-xl transition ${
+          className={`flex items-center justify-center rounded-full backdrop-blur-xl transition ${
             muted
               ? "bg-white/14 text-white ring-1 ring-white/12"
               : "bg-black/28 text-white shadow-[0_10px_30px_rgba(0,0,0,0.28)] ring-1 ring-white/8"
-          }`}
+          } ${compactInstitution ? "h-9 w-9" : "h-11 w-11"}`}
           aria-label={muted ? "Turn AI voice back on" : "Mute AI voice replies"}
           title={muted ? "AI voice off" : "AI voice on"}
         >
           {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
         </button>
-        <div className="rounded-full bg-black/20 px-4 py-2.5 backdrop-blur-xl ring-1 ring-white/8">
-          <div className="text-base font-semibold tracking-tight sm:text-xl">{title}</div>
-          <div className="max-w-[220px] text-[11px] text-white/55 sm:max-w-none sm:text-xs">
-            {subtitle}
+        <div className={`min-w-0 rounded-[20px] bg-black/16 backdrop-blur-xl ring-1 ring-white/8 ${compactInstitution ? "px-3 py-1.5" : "px-4 py-2.5"}`}>
+          <div className={`truncate font-semibold tracking-tight ${compactInstitution ? "text-[13px]" : "text-base sm:text-xl"}`}>{title}</div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <div className="h-1.5 w-1.5 rounded-full bg-emerald-300/90" />
+            <div className={`truncate text-white/65 ${compactInstitution ? "max-w-[160px] text-[10px]" : "max-w-[220px] text-[11px] sm:max-w-none sm:text-xs"}`}>
+              {compactInstitution ? liveStateCopy : subtitle}
+            </div>
           </div>
         </div>
       </div>
@@ -216,7 +257,7 @@ function Header({ title, subtitle, muted, onToggleMute, onClose }) {
       <button
         type="button"
         onClick={onClose}
-        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white shadow-[0_10px_30px_rgba(0,0,0,0.28)] ring-1 ring-white/10 backdrop-blur-xl transition hover:bg-white/14"
+      className={`flex items-center justify-center rounded-full bg-white/10 text-white shadow-[0_10px_30px_rgba(0,0,0,0.28)] ring-1 ring-white/10 backdrop-blur-xl transition hover:bg-white/14 ${compactInstitution ? "h-9 w-9" : "h-11 w-11"}`}
         aria-label="Close live mode"
       >
         <X size={18} />
@@ -403,6 +444,7 @@ function BottomControls({
   textOverlayOpen,
   onOpenTextOverlay,
   cameraEnabled,
+  cameraFacingMode,
   recordingScreen,
   isSharing,
   screenShareSupported,
@@ -412,11 +454,12 @@ function BottomControls({
   onToggleCamera,
   onSwitchCamera,
   onTakePhoto,
+  onUploadPhoto,
   onTakeScreenshot,
   onToggleScreenRecording,
 }) {
   const showStopReply = mode === "speaking";
-  const showListenAgain = mode !== "listening";
+  const showListenAgain = mode === "idle";
   const micLabel =
     mode === "listening"
       ? "Stop"
@@ -431,6 +474,7 @@ function BottomControls({
       <div className="pointer-events-auto mx-auto hidden w-full max-w-3xl items-center justify-center gap-3 overflow-x-auto rounded-[34px] bg-white/6 px-3 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.10)] ring-1 ring-white/10 backdrop-blur-xl lg:flex">
         <DesktopUtilityRow
           cameraEnabled={cameraEnabled}
+          cameraFacingMode={cameraFacingMode}
           recordingScreen={recordingScreen}
           isSharing={isSharing}
           screenShareSupported={screenShareSupported}
@@ -440,6 +484,7 @@ function BottomControls({
           onToggleCamera={onToggleCamera}
           onSwitchCamera={onSwitchCamera}
           onTakePhoto={onTakePhoto}
+          onUploadPhoto={onUploadPhoto}
           onTakeScreenshot={onTakeScreenshot}
           onToggleScreenRecording={onToggleScreenRecording}
         />
@@ -454,7 +499,7 @@ function BottomControls({
         ) : null}
       </div>
 
-      <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-3 lg:hidden">
+      <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-2.5 lg:hidden">
         <DockIconButton
           icon={<MessageCircle size={20} />}
           label="Chat"
@@ -480,6 +525,7 @@ function BottomControls({
 
 function MobileUtilityStack({
   cameraEnabled,
+  cameraFacingMode,
   recordingScreen,
   isSharing,
   screenShareSupported,
@@ -489,33 +535,41 @@ function MobileUtilityStack({
   onToggleCamera,
   onSwitchCamera,
   onTakePhoto,
+  onUploadPhoto,
   onTakeScreenshot,
   onToggleScreenRecording,
 }) {
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className="flex flex-col gap-2.5 rounded-[24px] bg-black/12 p-1.5 backdrop-blur-sm ring-1 ring-white/8">
       <UtilityIconButton
-        label={isSharing ? "Stop sharing" : "Share screen"}
+        label={
+          !screenShareSupported
+            ? "No share"
+            : isSharing
+            ? "Stop share"
+            : "Share"
+        }
         icon={isSharing ? <Monitor size={18} /> : <MonitorUp size={18} />}
         onClick={isSharing ? onStopScreenShare : onStartScreenShare}
         active={isSharing}
         dimmed={!screenShareSupported}
       />
       <UtilityIconButton
-        label={cameraEnabled ? "Turn camera off" : "Turn camera on"}
+        label={cameraEnabled ? "Camera off" : "Camera"}
         icon={<Camera size={18} />}
         onClick={onToggleCamera}
         active={cameraEnabled}
       />
       <UtilityIconButton
-        label="Switch camera"
+        label={cameraFacingMode === "user" ? "Back cam" : "Front cam"}
         icon={<RotateCw size={18} />}
         onClick={onSwitchCamera}
       />
-      <UtilityIconButton label="Take photo" icon={<ImagePlus size={18} />} onClick={onTakePhoto} />
-      <UtilityIconButton label="Take screenshot" icon={<Monitor size={18} />} onClick={onTakeScreenshot} />
+      <UtilityIconButton label="Snap" icon={<ImagePlus size={18} />} onClick={onTakePhoto} />
+      <UtilityIconButton label="Upload" icon={<Upload size={18} />} onClick={onUploadPhoto} />
+      <UtilityIconButton label="Shot" icon={<Monitor size={18} />} onClick={onTakeScreenshot} />
       <UtilityIconButton
-        label={recordingScreen ? "Stop recording" : "Record screen"}
+        label={!screenRecordingSupported ? "No record" : recordingScreen ? "Stop rec" : "Record"}
         icon={<Square size={18} />}
         onClick={onToggleScreenRecording}
         active={recordingScreen}
@@ -529,7 +583,7 @@ function DesktopUtilityRow(props) {
   return (
     <>
       <DesktopUtilityButton
-        label={props.isSharing ? "Sharing" : "Share"}
+        label={!props.screenShareSupported ? "No share" : props.isSharing ? "Sharing" : "Share"}
         icon={props.isSharing ? <Monitor size={18} /> : <MonitorUp size={18} />}
         onClick={props.isSharing ? props.onStopScreenShare : props.onStartScreenShare}
         active={props.isSharing}
@@ -541,8 +595,13 @@ function DesktopUtilityRow(props) {
         onClick={props.onToggleCamera}
         active={props.cameraEnabled}
       />
-      <DesktopUtilityButton label="Switch" icon={<RotateCw size={18} />} onClick={props.onSwitchCamera} />
+      <DesktopUtilityButton
+        label={props.cameraFacingMode === "user" ? "Back" : "Front"}
+        icon={<RotateCw size={18} />}
+        onClick={props.onSwitchCamera}
+      />
       <DesktopUtilityButton label="Photo" icon={<ImagePlus size={18} />} onClick={props.onTakePhoto} />
+      <DesktopUtilityButton label="Upload" icon={<Upload size={18} />} onClick={props.onUploadPhoto} />
       <DesktopUtilityButton label="Shot" icon={<Monitor size={18} />} onClick={props.onTakeScreenshot} />
       <DesktopUtilityButton
         label="Record"
@@ -560,7 +619,7 @@ function UtilityIconButton({ icon, label, onClick, active = false, dimmed = fals
     <button
       type="button"
       onClick={onClick}
-      className={`flex h-14 w-14 items-center justify-center rounded-2xl backdrop-blur-xl transition ${
+      className={`flex min-h-[54px] w-[56px] flex-col items-center justify-center gap-1 rounded-[18px] px-1.5 backdrop-blur-xl transition ${
         active
           ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(59,130,246,0.32)]"
           : "bg-black/24 text-white shadow-[0_14px_26px_rgba(2,6,23,0.24)] ring-1 ring-white/10"
@@ -569,6 +628,9 @@ function UtilityIconButton({ icon, label, onClick, active = false, dimmed = fals
       title={label}
     >
       {icon}
+      <span className="max-w-full truncate text-[9px] font-medium leading-none text-white/75">
+        {label}
+      </span>
     </button>
   );
 }
@@ -600,7 +662,7 @@ function MainMicButton({ mode, label, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`flex h-[74px] min-w-[124px] items-center justify-center gap-3 rounded-full px-6 text-white transition ${
+      className={`flex h-[64px] min-w-[112px] items-center justify-center gap-2.5 rounded-full px-5 text-white transition ${
         active
           ? "bg-blue-600 shadow-[0_16px_36px_rgba(59,130,246,0.34)]"
           : thinking
@@ -620,7 +682,7 @@ function DockIconButton({ icon, label, onClick, active = false }) {
     <button
       type="button"
       onClick={onClick}
-      className={`flex h-[68px] w-[68px] items-center justify-center rounded-full backdrop-blur-xl transition ${
+      className={`flex h-[60px] w-[60px] items-center justify-center rounded-full backdrop-blur-xl transition ${
         active
           ? "bg-white/16 text-white shadow-[0_12px_28px_rgba(15,23,42,0.24)] ring-1 ring-white/12"
           : "bg-white/10 text-white ring-1 ring-white/10"
@@ -638,7 +700,7 @@ function ActionChip({ children, onClick, emphasized = false }) {
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-4 py-2.5 text-sm font-medium transition ${
+      className={`rounded-full px-3.5 py-2 text-xs font-medium transition ${
         emphasized
           ? "bg-blue-600 text-white shadow-[0_8px_24px_rgba(59,130,246,0.28)]"
           : "bg-black/24 text-white/88 ring-1 ring-white/10 backdrop-blur-xl"
@@ -654,7 +716,7 @@ function DangerDockButton({ onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="flex h-[68px] min-w-[110px] items-center justify-center gap-2 rounded-full bg-red-500 px-6 text-white shadow-[0_14px_34px_rgba(239,68,68,0.28)] transition hover:bg-red-400"
+      className="flex h-[60px] min-w-[94px] items-center justify-center gap-2 rounded-full bg-red-500 px-5 text-white shadow-[0_14px_34px_rgba(239,68,68,0.28)] transition hover:bg-red-400"
       aria-label="End live mode"
     >
       <PhoneOff size={20} />

@@ -62,9 +62,13 @@ import LiveMultimodalSessionContainerV2 from "../shared/live/LiveMultimodalSessi
 import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
 import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
 import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
-import { isImageGenerationPrompt } from "../shared/image-generation/imageGenerationIntent.js";
+import {
+  isImageEditFollowUpPrompt,
+  isImageGenerationPrompt,
+} from "../shared/image-generation/imageGenerationIntent.js";
 import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
+import ResponseBlockRenderer from "../shared/assistant-blocks/ResponseBlockRenderer.jsx";
 import imageAPI from "../services/imageAPI.js";
 import DesktopSettingsLauncher from "../shared/settings/DesktopSettingsLauncher.jsx";
 import DesktopSettingsWorkspace from "../shared/settings/DesktopSettingsWorkspace.jsx";
@@ -103,6 +107,14 @@ const MORE_ITEMS_BASE = [
 const CHAT_HISTORY_KEY = "institution_chat_threads_v1";
 const CHAT_ACTIVE_KEY = "institution_chat_active_v1";
 const UNTITLED_CHAT_BASE = "New Chat";
+
+const STUDENT_CHAT_MODEL_OPTIONS = [
+  {
+    key: "elimulink-student-ai",
+    label: "ElimuLink AI",
+    description: "Current Student assistant model",
+  },
+];
 
 function timeGreeting(date = new Date()) {
   const hour = date.getHours();
@@ -253,6 +265,36 @@ function StatCard({ title, value, subtitle }) {
   );
 }
 
+function MobileComposerToolCard({ icon, label, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex min-h-[100px] flex-col items-center justify-center gap-2 rounded-[24px] bg-slate-100/80 px-3 py-4 text-slate-800 ring-1 ring-slate-200/70 transition active:scale-[0.98] dark:bg-white/6 dark:text-slate-100 dark:ring-white/10"
+    >
+      <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/70 text-slate-700 dark:bg-white/8 dark:text-slate-100">
+        {icon}
+      </span>
+      <span className="text-[12px] font-medium">{label}</span>
+    </button>
+  );
+}
+
+function MobileComposerToolRow({ icon, label, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-[20px] px-3 py-3 text-left text-[14px] font-medium text-slate-800 transition active:scale-[0.99] hover:bg-white/80 dark:text-slate-100 dark:hover:bg-white/5"
+    >
+      <span className="grid h-10 w-10 place-items-center rounded-2xl bg-white/80 text-slate-700 dark:bg-white/8 dark:text-slate-100">
+        {icon}
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function isErrorText(text) {
   const value = String(text || "").toLowerCase();
   return value.includes("failed to reach ai service") || value.includes("error (");
@@ -285,46 +327,15 @@ function Bubble({
     [imageSearchResults, sources, text]
   );
   return (
-    <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`group flex w-full ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={[
-          "max-w-[96%] md:max-w-[90%] rounded-2xl px-4 py-3 text-base leading-relaxed shadow-sm",
+          "text-base leading-relaxed",
           isUser
-            ? "bg-sky-500 text-white rounded-br-md"
-            : "bg-white/92 text-slate-900 rounded-bl-md dark:bg-slate-900/72 dark:text-slate-100",
+            ? "max-w-[88%] md:max-w-[72%] rounded-[20px] rounded-br-lg border border-sky-100/80 bg-sky-50/95 px-4 py-2.5 text-slate-900 shadow-[0_4px_14px_rgba(15,23,42,0.06)] dark:border-sky-400/15 dark:bg-sky-500/15 dark:text-slate-50"
+            : "max-w-[98%] md:max-w-[82%] bg-transparent px-0 py-0.5 text-slate-900 dark:text-slate-100",
         ].join(" ")}
       >
-        {!isUser && imageUrl ? (
-          <div className="mb-3 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/90 p-2 shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
-            <button
-              type="button"
-              onClick={() => onGeneratedImagePreview?.(imageUrl)}
-              className="block w-full overflow-hidden rounded-[16px]"
-            >
-              <img
-                src={imageUrl}
-                alt={text || "Generated image"}
-                className="max-h-[320px] w-full rounded-[16px] object-cover"
-              />
-            </button>
-            <div className="mt-2 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => onGeneratedImagePreview?.(imageUrl)}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:hover:bg-white/[0.08]"
-              >
-                Preview
-              </button>
-              <a
-                href={imageUrl}
-                download="elimulink-generated-image.png"
-                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:hover:bg-white/[0.08]"
-              >
-                Download
-              </a>
-            </div>
-          </div>
-        ) : null}
         {!isUser && imageSearchResults.length ? (
           <div className="mb-3">
             <ImageSearchResults
@@ -336,7 +347,16 @@ function Bubble({
           </div>
         ) : null}
 
-        <div>{text}</div>
+        {isUser ? (
+          <div>{text}</div>
+        ) : (
+          <ResponseBlockRenderer
+            text={text}
+            imageUrl={imageUrl}
+            sources={researchSources}
+            onGeneratedImagePreview={onGeneratedImagePreview}
+          />
+        )}
 
         {!isUser ? (
           <div className="mt-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -502,13 +522,19 @@ export default function StudentLanding() {
   });
   const [isMorePopupOpen, setIsMorePopupOpen] = useState(false);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isAiModeOn, setIsAiModeOn] = useState(true);
   const [isListening, setIsListening] = useState(false);
   const [lastPrompt, setLastPrompt] = useState("");
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [mobileSuggestionIndex, setMobileSuggestionIndex] = useState(0);
+  const [selectedChatModelKey, setSelectedChatModelKey] = useState(
+    STUDENT_CHAT_MODEL_OPTIONS[0]?.key || "elimulink-student-ai",
+  );
   const recognitionRef = useRef(null);
   const attachmentMenuRef = useRef(null);
+  const mobileModelMenuRef = useRef(null);
   const newChatMenuRef = useRef(null);
   const desktopSettingsTriggerRef = useRef(null);
   const profileMenuRef = useRef(null);
@@ -562,6 +588,16 @@ export default function StudentLanding() {
   }, [isAttachmentMenuOpen]);
 
   useEffect(() => {
+    if (!isModelMenuOpen) return;
+    const onDocumentMouseDown = (event) => {
+      if (mobileModelMenuRef.current?.contains(event.target)) return;
+      setIsModelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocumentMouseDown);
+    return () => document.removeEventListener("mousedown", onDocumentMouseDown);
+  }, [isModelMenuOpen]);
+
+  useEffect(() => {
     if (!isProfileMenuOpen && !isNotificationsMenuOpen) return;
     const onDocumentMouseDown = (event) => {
       const target = event.target;
@@ -590,6 +626,10 @@ export default function StudentLanding() {
     if (!isNotificationsMenuOpen) return;
     setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
   }, [isNotificationsMenuOpen]);
+
+  useEffect(() => {
+    setMobileSuggestionIndex(0);
+  }, [activeChatId]);
 
   useEffect(() => {
     try {
@@ -692,7 +732,46 @@ export default function StudentLanding() {
   const messages = activeChat?.messages || [];
   const hasConversation = messages.length > 0;
   const canSend = input.trim().length > 0 || attachments.length > 0;
+  const hasText = input.trim().length > 0;
+  const activeChatModel =
+    STUDENT_CHAT_MODEL_OPTIONS.find((model) => model.key === selectedChatModelKey) ||
+    STUDENT_CHAT_MODEL_OPTIONS[0];
+  const mobileSuggestionPool = useMemo(
+    () => Array.from(new Set(quickPrompts.map((item) => String(item.label || "").trim()).filter(Boolean))),
+    [quickPrompts],
+  );
+  const showMobileRotatingSuggestion =
+    isMobile &&
+    active === "newchat" &&
+    !hasConversation &&
+    !hasText &&
+    !isAttachmentMenuOpen &&
+    !isModelMenuOpen &&
+    !isMobileDrawerOpen &&
+    !voiceOpen &&
+    mobileSuggestionPool.length > 0;
+  const activeMobileSuggestion =
+    mobileSuggestionPool.length > 0
+      ? mobileSuggestionPool[mobileSuggestionIndex % mobileSuggestionPool.length]
+      : "";
+  const showMobileEntryGlow =
+    isMobile &&
+    active === "newchat" &&
+    !hasConversation &&
+    !hasText &&
+    !isAttachmentMenuOpen &&
+    !isModelMenuOpen &&
+    !isMobileDrawerOpen &&
+    !voiceOpen;
   const unreadNotifications = notifications.filter((item) => !item.read).length;
+
+  useEffect(() => {
+    if (!showMobileRotatingSuggestion || mobileSuggestionPool.length <= 1) return;
+    const id = window.setInterval(() => {
+      setMobileSuggestionIndex((current) => (current + 1) % mobileSuggestionPool.length);
+    }, 5200);
+    return () => window.clearInterval(id);
+  }, [mobileSuggestionPool.length, showMobileRotatingSuggestion]);
   const desktopSettingsUser = useMemo(
     () => ({
       ...user,
@@ -1058,10 +1137,18 @@ export default function StudentLanding() {
     if (!clean && pendingAttachments.length === 0) return;
     const shouldGenerateImage =
       pendingAttachments.length === 0 && isImageGenerationPrompt(clean);
-    const imageSearchQuery =
-      !shouldGenerateImage && pendingAttachments.length === 0
-        ? getImageSearchQuery(clean)
-        : "";
+    const shouldEditLatestImage =
+      pendingAttachments.length === 0 &&
+      !shouldGenerateImage &&
+      isImageEditFollowUpPrompt(clean);
+    const latestImageUrl = shouldEditLatestImage
+      ? imageAPI.getLatestImageFromMessages(messages)
+      : "";
+    const imageSearchQuery = getImageSearchQuery(clean, {
+      hasAttachments: pendingAttachments.length > 0,
+      shouldGenerateImage,
+      shouldEditImage: shouldEditLatestImage,
+    });
 
     const attachSummary =
       pendingAttachments.length > 0
@@ -1101,6 +1188,53 @@ export default function StudentLanding() {
             },
           ],
           clean || "Image generation"
+        );
+      }
+      return;
+    }
+
+    if (shouldEditLatestImage) {
+      if (!latestImageUrl) {
+        updateActiveChatMessages(
+          (chatMessages) => [
+            ...chatMessages,
+            {
+              role: "assistant",
+              text: "Please generate or upload an image first, then tell me how you want it edited.",
+            },
+          ],
+          clean || "Image editing"
+        );
+        return;
+      }
+
+      try {
+        const result = await imageAPI.editImage({
+          imageDataUrl: latestImageUrl,
+          prompt: clean,
+        });
+        updateActiveChatMessages(
+          (chatMessages) => [
+            ...chatMessages,
+            {
+              role: "assistant",
+              text: result.text || "Here is the edited image.",
+              imageUrl: result.image,
+              type: "image",
+            },
+          ],
+          "Edited image"
+        );
+      } catch (error) {
+        updateActiveChatMessages(
+          (chatMessages) => [
+            ...chatMessages,
+            {
+              role: "assistant",
+              text: String(error?.message || "Image editing is unavailable right now."),
+            },
+          ],
+          "Edited image"
         );
       }
       return;
@@ -1389,6 +1523,8 @@ export default function StudentLanding() {
         }}
         onBack={() => setActive("newchat")}
         launcherSectionId={selectedDesktopSettingsSection}
+        pageTitle="Student Settings"
+        pageDescription="Manage your public student profile, preferences, and study workspace."
       />
     );
   }
@@ -1423,13 +1559,10 @@ export default function StudentLanding() {
   }
 
   return (
-    <div className="min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-hidden">
-      <div className="bg-amber-100 text-amber-900 text-[11px] px-3 py-1 text-center">
-        STUDENT NEW UI LOADED
-      </div>
+    <div className="min-h-[100dvh] h-[100dvh] bg-slate-50 flex flex-col overflow-hidden dark:bg-[#020617]">
       {isMobile ? (
-        <div className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center justify-between">
-          <div className="font-semibold text-slate-900 truncate">{universityTitle}</div>
+        <div className="sticky top-0 z-40 bg-white/92 backdrop-blur-xl border-b border-slate-200/70 px-4 py-3 flex items-center justify-between dark:border-white/10 dark:bg-slate-950/88">
+          <div className="font-semibold text-slate-900 truncate dark:text-white">{universityTitle}</div>
           <div className="flex items-center gap-2">
           <div ref={notificationsMenuRef} className="relative">
             <button
@@ -2319,15 +2452,15 @@ export default function StudentLanding() {
           </div>
 
           {isMobile ? (
-          <div className="flex flex-col min-h-[calc(100dvh-56px)] bg-slate-50">
+          <div className="flex flex-col min-h-[calc(100dvh-56px)] bg-slate-50 dark:bg-[#020617]">
             <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-28">
               {messages.length === 0 ? (
-                <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
-                  <div className="text-sm text-slate-500">{timeGreeting()}</div>
-                  <div className="text-2xl font-semibold text-slate-900 mt-1">
+                <div className="rounded-[28px] border border-slate-200/70 bg-white/72 px-5 py-4 shadow-[0_18px_48px_rgba(15,23,42,0.06)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{timeGreeting()}</div>
+                  <div className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-900 dark:text-white">
                     Hi {firstNameOf(user.name)}, where should we start?
                   </div>
-                  <div className="text-sm text-slate-600 mt-1">
+                  <div className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
                     Ask anything about coursework, assignments, revision, or research.
                   </div>
                 </div>
@@ -2369,75 +2502,122 @@ export default function StudentLanding() {
               <div ref={messagesEndRef} />
             </div>
 
-            <div className="fixed left-0 right-0 bottom-0 bg-white/92 backdrop-blur-2xl border-t border-slate-200/45 px-3 py-3">
-              <div className="max-w-xl mx-auto">
+            <div className="fixed left-0 right-0 bottom-0 bg-[linear-gradient(180deg,rgba(255,255,255,0),rgba(248,250,252,0.92)_36%,rgba(248,250,252,0.98)_100%)] px-4 pt-2 pb-[calc(14px+env(safe-area-inset-bottom))] dark:bg-[linear-gradient(180deg,rgba(2,6,23,0),rgba(2,6,23,0.9)_36%,rgba(2,6,23,0.98)_100%)]">
+              <div ref={attachmentMenuRef} className="relative max-w-xl mx-auto space-y-2">
+                {showMobileEntryGlow ? (
+                  <>
+                    <div className="pointer-events-none fixed left-0 top-[14%] z-[38] h-[62vh] w-7 rounded-r-full bg-[linear-gradient(180deg,rgba(168,85,247,0.0),rgba(168,85,247,0.35),rgba(14,165,233,0.28),rgba(168,85,247,0.0))] blur-[10px] opacity-90 elu-mobile-entry-glow" />
+                    <div className="pointer-events-none fixed right-0 top-[14%] z-[38] h-[62vh] w-7 rounded-l-full bg-[linear-gradient(180deg,rgba(251,146,60,0.0),rgba(251,146,60,0.36),rgba(14,165,233,0.24),rgba(251,146,60,0.0))] blur-[10px] opacity-90 elu-mobile-entry-glow" />
+                  </>
+                ) : null}
+
+                {showMobileRotatingSuggestion && activeMobileSuggestion ? (
+                  <div className="px-1">
+                    <button
+                      key={activeMobileSuggestion}
+                      type="button"
+                      onClick={() => setInput(activeMobileSuggestion)}
+                      className="elu-rotating-suggestion-chip inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200/80 bg-white/92 px-3.5 py-2 text-left text-[13px] text-slate-700 shadow-[0_12px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/90 dark:text-slate-100"
+                    >
+                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-600 dark:text-sky-300">
+                        Try
+                      </span>
+                      <span className="truncate">{activeMobileSuggestion}</span>
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="flex items-center justify-center">
+                  <div ref={mobileModelMenuRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAttachmentMenuOpen(false);
+                        setIsModelMenuOpen((value) => !value);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/70 bg-slate-100/90 px-3.5 py-1.5 text-[12px] font-semibold text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.08)] backdrop-blur-xl transition active:scale-[0.98] dark:border-white/10 dark:bg-white/8 dark:text-slate-100"
+                      aria-expanded={isModelMenuOpen}
+                    >
+                      <span className="max-w-[140px] truncate">{activeChatModel?.label || "ElimuLink AI"}</span>
+                      <ChevronDown size={14} />
+                    </button>
+
+                    <div
+                      className={[
+                        "absolute left-1/2 bottom-[calc(100%+10px)] z-[70] w-64 -translate-x-1/2 rounded-[24px] border border-slate-200/80 bg-white/96 p-2 shadow-[0_20px_44px_rgba(15,23,42,0.16)] backdrop-blur-xl transition duration-150 dark:border-white/10 dark:bg-slate-950/96",
+                        isModelMenuOpen ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none",
+                      ].join(" ")}
+                    >
+                      <div className="px-2 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                        Model
+                      </div>
+                      {STUDENT_CHAT_MODEL_OPTIONS.map((modelOption) => {
+                        const isSelected = modelOption.key === selectedChatModelKey;
+                        return (
+                          <button
+                            key={modelOption.key}
+                            type="button"
+                            onClick={() => {
+                              setSelectedChatModelKey(modelOption.key);
+                              setIsModelMenuOpen(false);
+                            }}
+                            className={[
+                              "w-full rounded-2xl px-3 py-3 text-left transition",
+                              isSelected
+                                ? "bg-sky-50 text-slate-900 dark:bg-sky-500/15 dark:text-white"
+                                : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/5",
+                            ].join(" ")}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[14px] font-semibold">{modelOption.label}</span>
+                              {isSelected ? <Check size={16} /> : null}
+                            </div>
+                            <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                              {modelOption.description}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className={[
+                    "rounded-[24px] border px-2 py-1.5 backdrop-blur-xl transition-all duration-300",
+                    showMobileEntryGlow
+                      ? "border-sky-200/80 bg-white/92 shadow-[0_0_0_1px_rgba(14,165,233,0.08),0_18px_44px_rgba(14,165,233,0.18)] dark:border-sky-400/20 dark:bg-white/[0.07] dark:shadow-[0_0_0_1px_rgba(14,165,233,0.1),0_24px_48px_rgba(2,132,199,0.14)]"
+                      : "border-slate-200/90 bg-white/95 shadow-[0_12px_28px_rgba(15,23,42,0.10)] dark:border-white/[0.12] dark:bg-white/[0.06] dark:shadow-[0_14px_30px_rgba(0,0,0,0.28)]",
+                  ].join(" ")}
+                >
                 <AttachmentChipsTray
                   items={attachments}
                   onPreview={openAttachmentItem}
                   onRemove={removeAttachment}
                 />
                 <div className="flex items-end gap-2">
-                <div ref={attachmentMenuRef} className="relative">
                   <button
-                    onClick={() => setIsAttachmentMenuOpen((v) => !v)}
-                    className="h-11 w-11 rounded-2xl bg-slate-100/55 text-slate-700 grid place-items-center dark:bg-white/[0.04] dark:text-slate-100"
+                    onClick={() => {
+                      setIsModelMenuOpen(false);
+                      setIsAttachmentMenuOpen((value) => !value);
+                    }}
+                    className="h-10 w-10 rounded-[18px] border border-slate-200/90 bg-slate-50 text-[#1f3654] grid place-items-center dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100"
                     title="Add attachment"
+                    aria-expanded={isAttachmentMenuOpen}
                   >
-                    <Plus size={18} />
+                    <Plus size={20} />
                   </button>
 
-                  {isAttachmentMenuOpen ? (
-                    <div className="absolute left-0 bottom-14 z-20 rounded-xl border border-slate-200 bg-white shadow-lg p-2 w-44">
-                      <button
-                        onClick={() => {
-                          setIsAttachmentMenuOpen(false);
-                          galleryInputRef.current?.click();
-                        }}
-                        className="group w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between"
-                      >
-                        <span>Photo</span>
-                        <Image size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsAttachmentMenuOpen(false);
-                          cameraInputRef.current?.click();
-                        }}
-                        className="group w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between"
-                      >
-                        <span>Camera</span>
-                        <Camera size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsAttachmentMenuOpen(false);
-                          scanInputRef.current?.click();
-                        }}
-                        className="group w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between"
-                      >
-                        <span>Scan</span>
-                        <ScanLine size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsAttachmentMenuOpen(false);
-                          fileInputRef.current?.click();
-                        }}
-                        className="group w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between"
-                      >
-                        <span>File</span>
-                        <FileUp size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="flex-1 rounded-2xl bg-white/42 px-3 py-2 backdrop-blur dark:bg-white/[0.03]">
+                <div className="flex-1 px-1.5 py-1">
                   <textarea
                     ref={promptInputRef}
                     rows={1}
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      setIsModelMenuOpen(false);
+                      if (e.target.value.trim()) setIsAttachmentMenuOpen(false);
+                    }}
                     onPaste={handlePaste}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
@@ -2445,7 +2625,7 @@ export default function StudentLanding() {
                         sendMessage(input);
                       }
                     }}
-                    className="composer-plain-input w-full resize-none border-none bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"
+                    className="composer-plain-input min-h-[40px] max-h-[120px] w-full resize-none border-none bg-transparent py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
                     placeholder="Type your message..."
                   />
                 </div>
@@ -2454,14 +2634,102 @@ export default function StudentLanding() {
                   onClick={() => canSend && sendMessage(input)}
                   disabled={!canSend}
                   className={[
-                    "h-11 w-11 rounded-xl text-white shadow-sm transition grid place-items-center",
-                    canSend ? "bg-sky-500 hover:bg-sky-600 active:scale-[0.98]" : "bg-slate-300 cursor-not-allowed",
+                    "h-10 w-10 rounded-[18px] text-white transition grid place-items-center self-end",
+                    canSend
+                      ? "bg-[linear-gradient(180deg,#0f7ae5,#0ea5b7)] shadow-[0_10px_20px_rgba(14,165,233,0.24)] hover:brightness-105 active:scale-[0.98]"
+                      : "bg-slate-300 cursor-not-allowed",
                   ].join(" ")}
                   title="Send"
                 >
                   <Send size={16} />
                 </button>
-              </div>
+                </div>
+                </div>
+
+                {isAttachmentMenuOpen ? (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Close tools"
+                      className="fixed inset-0 z-[60] bg-slate-950/24 backdrop-blur-[2px]"
+                      onClick={() => setIsAttachmentMenuOpen(false)}
+                    />
+                    <div className="fixed inset-x-0 bottom-0 z-[61] rounded-t-[32px] border border-white/60 bg-white/96 px-4 pb-[calc(16px+env(safe-area-inset-bottom))] pt-3 shadow-[0_-22px_48px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/96">
+                      <div className="mx-auto h-1.5 w-12 rounded-full bg-slate-200 dark:bg-white/15" />
+                      <div className="mx-auto mt-4 max-w-xl">
+                        <div className="flex items-center justify-between">
+                          <div className="text-[13px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                            Tools
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsAttachmentMenuOpen(false)}
+                            className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-slate-700 dark:bg-white/8 dark:text-slate-100"
+                            aria-label="Close tools"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-3 gap-2.5">
+                          <MobileComposerToolCard
+                            icon={<FileUp size={20} />}
+                            label="Document"
+                            onClick={() => {
+                              setIsAttachmentMenuOpen(false);
+                              fileInputRef.current?.click();
+                            }}
+                          />
+                          <MobileComposerToolCard
+                            icon={<Image size={20} />}
+                            label="Gallery"
+                            onClick={() => {
+                              setIsAttachmentMenuOpen(false);
+                              galleryInputRef.current?.click();
+                            }}
+                          />
+                          <MobileComposerToolCard
+                            icon={<Camera size={20} />}
+                            label="Camera"
+                            onClick={() => {
+                              setIsAttachmentMenuOpen(false);
+                              cameraInputRef.current?.click();
+                            }}
+                          />
+                        </div>
+
+                        <div className="mt-3 rounded-[26px] bg-slate-50/90 p-2 ring-1 ring-slate-200/70 dark:bg-white/5 dark:ring-white/10">
+                          <MobileComposerToolRow
+                            icon={<Sparkles size={18} />}
+                            label="AI Image Generator"
+                            onClick={() => {
+                              setInput("Create an image concept for this topic...");
+                              setIsAttachmentMenuOpen(false);
+                              requestAnimationFrame(() => promptInputRef.current?.focus());
+                            }}
+                          />
+                          <MobileComposerToolRow
+                            icon={<NotebookPen size={18} />}
+                            label="Problem Solving"
+                            onClick={() => {
+                              setInput("Help me solve this problem step by step...");
+                              setIsAttachmentMenuOpen(false);
+                              requestAnimationFrame(() => promptInputRef.current?.focus());
+                            }}
+                          />
+                          <MobileComposerToolRow
+                            icon={<ScanLine size={18} />}
+                            label="Scan-to-Doc"
+                            onClick={() => {
+                              setIsAttachmentMenuOpen(false);
+                              scanInputRef.current?.click();
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
@@ -2487,13 +2755,13 @@ export default function StudentLanding() {
               ) : null}
 
               <div className="flex-1 min-h-0 overflow-y-auto smart-scrollbar px-3 py-4 space-y-3">
-                {messages.length === 0 ? (
-                  <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
-                    <div className="text-sm text-slate-500">{timeGreeting()}</div>
-                    <div className="text-2xl font-semibold text-slate-900 mt-1">
+              {messages.length === 0 ? (
+                  <div className="rounded-[28px] border border-slate-200/70 bg-white/72 px-5 py-4 shadow-[0_18px_48px_rgba(15,23,42,0.06)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
+                    <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{timeGreeting()}</div>
+                    <div className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-900 dark:text-white">
                       Hi {firstNameOf(user.name)}, where should we start?
                     </div>
-                    <div className="text-sm text-slate-600 mt-1">
+                    <div className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
                       Ask anything about coursework, assignments, revision, or research.
                     </div>
                   </div>
@@ -2541,7 +2809,7 @@ export default function StudentLanding() {
                     <button
                       key={p.label}
                       onClick={() => sendMessage(p.label)}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 hover:bg-white px-4 py-2 text-sm text-slate-700 shadow-sm"
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/88 px-4 py-2 text-sm text-slate-700 shadow-[0_12px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl transition hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.08]"
                     >
                       <span>{p.icon}</span>
                       <span>{p.label}</span>

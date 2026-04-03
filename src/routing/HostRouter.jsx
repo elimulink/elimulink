@@ -393,6 +393,11 @@ export default function HostRouter() {
   });
 
   useEffect(() => {
+    if (!lockState?.locked) return;
+    clearLock();
+  }, [clearLock, lockState?.locked]);
+
+  useEffect(() => {
     hostLog('[HOST_MODE]', { host: window.location.host, mode: hostMode });
   }, [hostMode]);
 
@@ -1034,7 +1039,7 @@ export default function HostRouter() {
         </div>
       ) : null}
       {devAuthBypassActive ? (
-        <div className="fixed top-3 right-3 z-50 rounded-full border border-amber-300/80 bg-amber-50/95 px-3 py-1.5 text-[11px] font-semibold text-amber-900 shadow-[0_12px_26px_rgba(120,53,15,0.12)]">
+        <div className="fixed bottom-3 right-3 z-50 rounded-full border border-amber-300/80 bg-amber-50/95 px-3 py-1.5 text-[10px] font-semibold text-amber-900 shadow-[0_12px_26px_rgba(120,53,15,0.12)] md:bottom-auto md:top-3 md:text-[11px]">
           Dev Mode: Auth Bypass Active
         </div>
       ) : null}
@@ -1147,38 +1152,6 @@ export default function HostRouter() {
 
   if (bootState === 'denied' && user && !user.isAnonymous) {
     return <AccessDeniedScreen hostMode={hostMode} />;
-  }
-
-  if (user && !user.isAnonymous && bootState === 'ready' && lockState?.locked) {
-    return (
-      <SecureLockScreen
-        user={user}
-        profile={profile}
-        lockReason={lockState.reason}
-        capabilities={secureUnlockCapabilities}
-        onUnlockPassword={(password) => finalizeSecureUnlock((activeUser) => unlockWithPassword(activeUser, password))}
-        onUnlockBiometric={() => finalizeSecureUnlock((activeUser) => unlockWithBiometrics(activeUser))}
-        onUnlockPasskey={() => finalizeSecureUnlock((activeUser) => unlockWithPasskey(activeUser))}
-        onUnlockProvider={() =>
-          finalizeSecureUnlock((activeUser) => unlockWithProvider(activeUser, secureUnlockCapabilities?.federatedProviderId))
-        }
-        onForgotPassword={async () => {
-          if (!secureUnlockCapabilities?.forgotPassword) {
-            throw new Error('Password reset is only available for password-based accounts.');
-          }
-          const email = String(user?.email || '').trim();
-          if (!email) throw new Error('Password reset is not available for this account.');
-          await sendPasswordResetEmail(auth, email);
-        }}
-        onSignOut={async () => {
-          clearLock();
-          await logoutFamilySession({
-            clearKeys: ['activeDepartmentId', 'activeDepartmentName', 'elimulink_admin_token'],
-          });
-          window.location.replace('/login');
-        }}
-      />
-    );
   }
 
   if (

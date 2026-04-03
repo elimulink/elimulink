@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+const MAX_IMAGE_ATTACHMENTS = 10;
+
 function makeId(file) {
   return `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(16).slice(2)}`;
 }
@@ -62,6 +64,44 @@ function normalizeItem(file, source = "file") {
   };
 }
 
+function probeImageDimensions(file) {
+  return new Promise((resolve) => {
+    if (!file || !String(file.type || "").startsWith("image/")) {
+      resolve(null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      const width = Number(image.naturalWidth || 0);
+      const height = Number(image.naturalHeight || 0);
+      URL.revokeObjectURL(objectUrl);
+      resolve(width > 0 && height > 0 ? { width, height } : null);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(null);
+    };
+    image.src = objectUrl;
+  });
+}
+
+function looksLikeScreenshotDimensions(dimensions) {
+  if (!dimensions) return false;
+  const width = Number(dimensions.width || 0);
+  const height = Number(dimensions.height || 0);
+  const largest = Math.max(width, height);
+  const smallest = Math.max(1, Math.min(width, height));
+  const ratio = largest / smallest;
+  const commonScreenSize =
+    largest >= 1080 &&
+    smallest >= 720 &&
+    largest <= 4200 &&
+    smallest <= 2600;
+  return commonScreenSize && ratio >= 1.3 && ratio <= 2.6;
+}
+
 function revokeItemUrl(item) {
   try {
     if (item?.url) URL.revokeObjectURL(item.url);
@@ -82,6 +122,7 @@ export default function useCapturedMedia() {
   const [previewItem, setPreviewItem] = useState(null);
   const [editorItem, setEditorItem] = useState(null);
   const [toastItem, setToastItem] = useState(null);
+  const [mediaNotice, setMediaNotice] = useState("");
   const mediaRef = useRef([]);
 
   useEffect(() => {
@@ -98,14 +139,52 @@ export default function useCapturedMedia() {
 
   const addFiles = useCallback((fileList, source = "file") => {
     if (!fileList || fileList.length === 0) return [];
-    const next = Array.from(fileList).map((file) => normalizeItem(file, source));
+    setMediaNotice("");
+    const candidates = Array.from(fileList).map((file) => normalizeItem(file, source));
+    const currentImageCount = mediaRef.current.filter((item) => item?.isImage).length;
+    let usedImageSlots = currentImageCount;
+    const next = [];
+    let imageLimitReached = false;
+
+    candidates.forEach((item) => {
+      if (item.isImage) {
+        if (usedImageSlots >= MAX_IMAGE_ATTACHMENTS) {
+          revokeItemUrl(item);
+          imageLimitReached = true;
+          return;
+        }
+        usedImageSlots += 1;
+      }
+      next.push(item);
+    });
+
+    if (imageLimitReached) {
+      setMediaNotice(`You can upload up to ${MAX_IMAGE_ATTACHMENTS} images per message.`);
+    }
+
+    if (!next.length) return [];
     setMediaItems((prev) => [...prev, ...next]);
     const screenshotCandidate = next.find((item) => item.isScreenshot);
     if (screenshotCandidate) setToastItem(screenshotCandidate);
+
+    next.forEach((item) => {
+      if (item.isScreenshot || !item.isImage || !item.file || source === "camera" || source === "scan") {
+        return;
+      }
+      probeImageDimensions(item.file).then((dimensions) => {
+        if (!looksLikeScreenshotDimensions(dimensions)) return;
+        setMediaItems((prev) =>
+          prev.map((entry) => (entry.id === item.id ? { ...entry, isScreenshot: true } : entry))
+        );
+        setToastItem((current) => current || { ...item, isScreenshot: true });
+      });
+    });
+
     return next;
   }, []);
 
   const removeMedia = useCallback((id) => {
+    setMediaNotice("");
     setMediaItems((prev) => {
       const target = prev.find((item) => item.id === id);
       if (target) revokeItemUrl(target);
@@ -117,6 +196,7 @@ export default function useCapturedMedia() {
   }, []);
 
   const clearMedia = useCallback(() => {
+    setMediaNotice("");
     setMediaItems((prev) => {
       prev.forEach((item) => revokeItemUrl(item));
       return [];
@@ -197,6 +277,7 @@ export default function useCapturedMedia() {
       previewItem,
       editorItem,
       toastItem,
+      mediaNotice,
       addFiles,
       removeMedia,
       clearMedia,
@@ -206,8 +287,9 @@ export default function useCapturedMedia() {
       closePreview: () => setPreviewItem(null),
       closeEditor: () => setEditorItem(null),
       dismissToast: () => setToastItem(null),
+      dismissMediaNotice: () => setMediaNotice(""),
       handlePaste,
     }),
-    [addFiles, applyEditedMedia, clearMedia, editorItem, handlePaste, mediaItems, openEditor, openPreview, previewItem, removeMedia, toastItem],
+    [addFiles, applyEditedMedia, clearMedia, editorItem, handlePaste, mediaItems, mediaNotice, openEditor, openPreview, previewItem, removeMedia, toastItem],
   );
 }

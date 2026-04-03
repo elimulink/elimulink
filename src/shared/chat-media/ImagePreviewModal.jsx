@@ -44,6 +44,12 @@ export default function ImagePreviewModal({
             <div className="chat-media-modal-title">{item.name}</div>
             <div className="chat-media-modal-subtitle">{item.source || "attachment"}</div>
           </div>
+          <button type="button" className="chat-media-modal-close" onClick={onClose} aria-label="Close preview">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="chat-media-modal-actions-row">
           <div className="chat-media-modal-actions">
             {item.isImage ? (
               <button
@@ -83,9 +89,6 @@ export default function ImagePreviewModal({
               <Download size={15} />
               <span>Download</span>
             </a>
-            <button type="button" className="chat-media-modal-close" onClick={onClose} aria-label="Close preview">
-              <X size={16} />
-            </button>
           </div>
         </div>
         <div className="chat-media-modal-body">

@@ -1,5 +1,5 @@
 import React from "react";
-import { Image as ImageIcon, Paperclip, Pencil, X } from "lucide-react";
+import { Paperclip, X } from "lucide-react";
 import { formatMediaSize } from "./useCapturedMedia.js";
 import "./chat-media.css";
 
@@ -28,20 +28,16 @@ export default function AttachmentChipsTray({
                   <Paperclip size={14} />
                 </span>
               )}
-              {item.isImage ? (
-                <span className="chat-media-chip-badge">
-                  <Pencil size={11} />
-                  <span>Edit</span>
-                </span>
+              {item.isImage && item.editedAt ? (
+                <span className="chat-media-chip-edited-badge">Edited</span>
               ) : null}
             </span>
-            <span className="chat-media-chip-copy">
-              <span className="chat-media-chip-name">{item.isImage ? "Image" : item.name}</span>
-              <span className="chat-media-chip-meta">
-                {item.isImage ? <ImageIcon size={11} /> : null}
-                {formatMediaSize(item.size)}
+            {!item.isImage ? (
+              <span className="chat-media-chip-copy">
+                <span className="chat-media-chip-name">{item.name}</span>
+                <span className="chat-media-chip-meta">{formatMediaSize(item.size)}</span>
               </span>
-            </span>
+            ) : null}
           </button>
           <button
             type="button"

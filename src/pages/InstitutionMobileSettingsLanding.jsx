@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AppWindow,
   Bell,
@@ -22,7 +22,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { getStoredProfile } from "../lib/userSettings";
+import { getStoredProfile, saveStoredProfile } from "../lib/userSettings";
 import InstitutionMobileAccountSettingsPage from "./InstitutionMobileAccountSettingsPage.jsx";
 import InstitutionMobileAboutSettingsPage from "./InstitutionMobileAboutSettingsPage.jsx";
 import InstitutionMobileAppsSettingsPage from "./InstitutionMobileAppsSettingsPage.jsx";
@@ -203,23 +203,74 @@ function surfaceClasses(extra = "") {
   return `rounded-[28px] bg-white/96 shadow-[0_16px_48px_rgba(15,23,42,0.05)] ring-1 ring-slate-200/75 ${extra}`.trim();
 }
 
-function MobileTopBar({ title, eyebrow = "Institution settings", onBack }) {
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to load image"));
+    image.src = source;
+  });
+}
+
+async function normalizeAvatarImage(file) {
+  const rawDataUrl = await readFileAsDataUrl(file);
+  if (!String(file?.type || "").startsWith("image/")) return rawDataUrl;
+
+  try {
+    const image = await loadImage(rawDataUrl);
+    const maxSize = 512;
+    const sourceWidth = Math.max(1, Number(image.width) || 1);
+    const sourceHeight = Math.max(1, Number(image.height) || 1);
+    const scale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
+    const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return rawDataUrl;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, targetWidth, targetHeight);
+    ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+    return canvas.toDataURL("image/jpeg", 0.86);
+  } catch {
+    return rawDataUrl;
+  }
+}
+
+function MobileTopBar({ title, eyebrow = "Institution settings", onBack, showBackButton = true }) {
   return (
     <div className="sticky top-0 z-10 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(248,250,252,0.92)_70%,rgba(248,250,252,0))] px-4 pt-3 pb-4 backdrop-blur-[2px]">
-      <div className="flex items-start justify-between gap-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/80"
-          aria-label="Go back"
-        >
-          <ChevronLeft size={18} />
-        </button>
+      <div className={["flex items-start gap-3", showBackButton ? "justify-between" : "justify-start"].join(" ")}>
+        {showBackButton ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/80"
+            aria-label="Go back"
+          >
+            <ChevronLeft size={18} />
+          </button>
+        ) : (
+          null
+        )}
         <div className="min-w-0 flex-1 pt-1">
           <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{eyebrow}</div>
           <div className="mt-0.5 text-[1.35rem] font-semibold leading-none tracking-[-0.02em] text-slate-950">{title}</div>
         </div>
-        <div className="h-11 w-11 shrink-0" aria-hidden="true" />
+        {showBackButton ? <div className="h-11 w-11 shrink-0" aria-hidden="true" /> : null}
       </div>
     </div>
   );
@@ -405,19 +456,39 @@ export default function InstitutionMobileSettingsLanding({
   const [isSubmittingBugReport, setIsSubmittingBugReport] = useState(false);
   const [reportBugDraft, setReportBugDraft] = useState("");
   const [utilityStatus, setUtilityStatus] = useState("");
-  const profile = useMemo(
-    () =>
+  const avatarInputRef = useRef(null);
+  const uid = user?.uid || null;
+  const [profile, setProfile] = useState(() =>
+    getStoredProfile(
+      {
+        name: user?.name || user?.displayName || "Scholar",
+        email: user?.email || "scholar@elimulink.demo",
+        phone: user?.phone || "",
+        avatarUrl: user?.avatarUrl || "",
+      },
+      uid
+    )
+  );
+  const [avatarError, setAvatarError] = useState("");
+
+  useEffect(() => {
+    setProfile((current) =>
       getStoredProfile(
         {
-          name: user?.name || user?.displayName || "Scholar",
-          email: user?.email || "scholar@elimulink.demo",
-          phone: user?.phone || "",
-          avatarUrl: user?.avatarUrl || "",
+          ...current,
+          name: user?.name || user?.displayName || current.name || "Scholar",
+          email: user?.email || current.email || "scholar@elimulink.demo",
+          phone: user?.phone || current.phone || "",
+          avatarUrl: current.avatarUrl || user?.avatarUrl || "",
         },
-        user?.uid || null
-      ),
-    [user]
-  );
+        uid
+      )
+    );
+  }, [uid, user?.avatarUrl, user?.displayName, user?.email, user?.name, user?.phone]);
+
+  useEffect(() => {
+    saveStoredProfile(profile, uid);
+  }, [profile, uid]);
 
   if (showClassicSettings) {
     return (
@@ -559,6 +630,23 @@ export default function InstitutionMobileSettingsLanding({
     }
   }
 
+  async function handleAvatarSelect(event) {
+    const input = event?.target;
+    const file = input?.files?.[0];
+    if (input) input.value = "";
+    if (!file) return;
+
+    setAvatarError("");
+    setUtilityStatus("");
+    try {
+      const avatarUrl = await normalizeAvatarImage(file);
+      setProfile((current) => ({ ...current, avatarUrl }));
+      setUtilityStatus("Profile photo updated for this account.");
+    } catch {
+      setAvatarError("Could not process this image. Try another photo.");
+    }
+  }
+
   async function handleReportBugSubmit() {
     const message = String(reportBugDraft || "").trim();
     if (message.length < 12 || isSubmittingBugReport) return;
@@ -586,7 +674,7 @@ export default function InstitutionMobileSettingsLanding({
 
   return (
     <div className="min-h-[100dvh] bg-[linear-gradient(180deg,#fbfcfe_0%,#f6f8fb_100%)]">
-      <MobileTopBar title="Settings" onBack={onBack} />
+      <MobileTopBar title="Settings" onBack={onBack} showBackButton={false} />
 
       <div className="px-4 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
         <section className="mb-5 px-1">
@@ -595,21 +683,32 @@ export default function InstitutionMobileSettingsLanding({
               {profile.email || "Institution account"}
             </div>
 
-            <div className="relative mx-auto mt-6 flex h-28 w-28 items-center justify-center overflow-hidden rounded-full bg-[linear-gradient(180deg,#7e8af1_0%,#6774d8_100%)] text-[2.5rem] font-medium text-white shadow-[0_18px_38px_rgba(99,102,241,0.22)]">
-              {profile.avatarUrl ? (
-                <img src={profile.avatarUrl} alt="Profile avatar" className="h-full w-full object-cover" />
-              ) : (
-                initialsOf(profile.name).slice(0, 1)
-              )}
+            <div className="relative mx-auto mt-6 h-28 w-28">
+              <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-[linear-gradient(180deg,#7e8af1_0%,#6774d8_100%)] text-[2.5rem] font-medium text-white shadow-[0_18px_38px_rgba(99,102,241,0.22)]">
+                {profile.avatarUrl ? (
+                  <img src={profile.avatarUrl} alt="Profile avatar" className="h-full w-full object-cover" />
+                ) : (
+                  initialsOf(profile.name).slice(0, 1)
+                )}
+              </div>
               <button
                 type="button"
-                onClick={() => window.alert("Profile photo editing is currently handled inside Account settings.")}
-                className="absolute bottom-1 right-1 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-700 shadow-[0_10px_22px_rgba(15,23,42,0.12)] ring-1 ring-slate-200/90"
+                onClick={() => avatarInputRef.current?.click()}
+                className="absolute -bottom-1 -right-1 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-700 shadow-[0_10px_22px_rgba(15,23,42,0.12)] ring-1 ring-slate-200/90"
                 aria-label="Edit profile photo"
               >
                 <Camera size={18} />
               </button>
             </div>
+
+            {avatarError ? <div className="mt-3 text-[13px] leading-5 text-red-600">{avatarError}</div> : null}
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleAvatarSelect}
+            />
 
             <div className="mt-5 text-[2.1rem] font-semibold leading-none tracking-[-0.04em] text-slate-950">
               {`Hi, ${String(profile.name || "Scholar").trim().split(/\s+/)[0]}!`}

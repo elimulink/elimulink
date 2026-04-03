@@ -1,3 +1,8 @@
+import {
+  isImageEditFollowUpPrompt,
+  isImageGenerationPrompt,
+} from "../image-generation/imageGenerationIntent.js";
+
 function normalizeResult(item, index) {
   return {
     id: item.id || `${item.url || item.foreign_landing_url || "image"}-${index}`,
@@ -9,19 +14,50 @@ function normalizeResult(item, index) {
   };
 }
 
-export function getImageSearchQuery(text) {
+const WEB_IMAGE_SEARCH_PATTERNS = [
+  /^(?:show|show me|search|find|browse|get)\s+(?:me\s+)?(?:the\s+)?(?:web\s+)?(?:images?|pictures?|photos?|visuals?)\s+(?:for|of|about)\s+(.+)$/i,
+  /^search\s+(?:the\s+)?web\s+for\s+(?:images?|pictures?|photos?|visuals?)\s+(?:of|about)\s+(.+)$/i,
+  /^(?:web\s+)?image\s+search\s*(?:for|:)\s*(.+)$/i,
+  /^(?:images?|pictures?|photos?)\s*:\s*(.+)$/i,
+  /^(?:show|find|get|browse)\s+(?:me\s+)?(?:real|reference)\s+(?:images?|pictures?|photos?|visuals?)\s+(?:of|for|about)\s+(.+)$/i,
+  /^(?:show|find|get)\s+(?:me\s+)?(?:examples?|visual references?)\s+(?:from\s+the\s+web\s+)?(?:of|for)\s+(.+)$/i,
+];
+
+const WEB_IMAGE_REFERENCE_HINT = /\b(real|reference|web)\s+(images?|pictures?|photos?|visuals?)\b/i;
+const WEB_IMAGE_CASUAL_BLOCKLIST = /\b(uploaded image|this image|previous image|generated image|edit image|analy[sz]e (?:this|the) image)\b/i;
+
+export function getImageSearchQuery(text, {
+  hasAttachments = false,
+  shouldGenerateImage = false,
+  shouldEditImage = false,
+} = {}) {
   const value = String(text || "").trim();
   if (!value) return "";
-  const patterns = [
-    /^(?:search|find|show)\s+(?:the\s+)?(?:web\s+)?images?\s+(?:for|of)\s+(.+)$/i,
-    /^(?:web\s+)?image\s+search\s*:\s*(.+)$/i,
-    /^images?\s*:\s*(.+)$/i,
-  ];
-  for (const pattern of patterns) {
+  if (hasAttachments || shouldGenerateImage || shouldEditImage) return "";
+  if (isImageGenerationPrompt(value) || isImageEditFollowUpPrompt(value)) return "";
+  if (WEB_IMAGE_CASUAL_BLOCKLIST.test(value)) return "";
+
+  for (const pattern of WEB_IMAGE_SEARCH_PATTERNS) {
     const match = value.match(pattern);
     if (match?.[1]) return match[1].trim();
   }
+
+  if (
+    WEB_IMAGE_REFERENCE_HINT.test(value) &&
+    /\b(show|find|get|browse|search|examples?|references?)\b/i.test(value)
+  ) {
+    return value
+      .replace(/^(?:please\s+)?(?:show|find|get|browse|search)\s+(?:me\s+)?/i, "")
+      .replace(/\b(?:real|reference|web)\s+(?:images?|pictures?|photos?|visuals?)\b/gi, "")
+      .replace(/^(?:of|for|about)\s+/i, "")
+      .trim();
+  }
+
   return "";
+}
+
+export function resolveWebImageSearchQuery(text, options = {}) {
+  return getImageSearchQuery(text, options);
 }
 
 export async function searchWebImages(query, { limit = 8 } = {}) {
