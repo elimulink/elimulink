@@ -53,6 +53,10 @@ def make_conversation_id() -> str:
     return str(uuid4())
 
 
+def make_message_id() -> str:
+    return str(uuid4())
+
+
 def resolve_conversation_owner_uid(owner_uid: str | None) -> str:
     value = (owner_uid or "").strip()
     if value:
@@ -715,7 +719,7 @@ def create_message(conversation_id: str, body: CreateMessageRequest) -> dict[str
     with SessionLocal() as db:
         conversation = get_conversation_or_404(db, conversation_id)
         user_message = Message(
-            id=make_id("msg"),
+            id=make_message_id(),
             conversation_id=conversation.id,
             role="user",
             content=body.content,
@@ -731,7 +735,7 @@ def create_message(conversation_id: str, body: CreateMessageRequest) -> dict[str
             assistant_content, citations, sources = create_demo_assistant_answer(body.content)
 
         assistant_message = Message(
-            id=make_id("msg"),
+            id=make_message_id(),
             conversation_id=conversation.id,
             role="assistant",
             content=assistant_content,

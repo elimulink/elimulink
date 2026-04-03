@@ -10,6 +10,7 @@ from ..database import Base
 
 
 CONVERSATION_KEY_TYPE = String().with_variant(PGUUID(as_uuid=False), "postgresql")
+MESSAGE_KEY_TYPE = String().with_variant(PGUUID(as_uuid=False), "postgresql")
 
 
 class Conversation(Base):
@@ -36,7 +37,7 @@ class Conversation(Base):
 class Message(Base):
     __tablename__ = "messages"
 
-    id = Column(String, primary_key=True, index=True)
+    id = Column(MESSAGE_KEY_TYPE, primary_key=True, index=True)
     conversation_id = Column(CONVERSATION_KEY_TYPE, ForeignKey("conversations.id"), nullable=False, index=True)
     role = Column(String, nullable=False, index=True)
     content = Column(Text, nullable=False)
@@ -69,7 +70,7 @@ class MessageSource(Base):
     __tablename__ = "message_sources"
 
     id = Column(Integer, primary_key=True, index=True)
-    message_id = Column(String, ForeignKey("messages.id"), nullable=False, index=True)
+    message_id = Column(MESSAGE_KEY_TYPE, ForeignKey("messages.id"), nullable=False, index=True)
     source_id = Column(String, ForeignKey("sources.id"), nullable=False, index=True)
     citation_id = Column(String, nullable=True, index=True)
     label = Column(String, nullable=True)
@@ -103,7 +104,7 @@ class ShareLinkMessage(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     share_link_id = Column(String, ForeignKey("share_links.id"), nullable=False, index=True)
-    message_id = Column(String, ForeignKey("messages.id"), nullable=False, index=True)
+    message_id = Column(MESSAGE_KEY_TYPE, ForeignKey("messages.id"), nullable=False, index=True)
     position = Column(Integer, nullable=False, default=0)
 
     share_link = relationship("ShareLink", back_populates="share_link_messages")

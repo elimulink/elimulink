@@ -53,10 +53,10 @@ def ensure_institution_research_schema(engine: Engine) -> None:
 
             conn.execute(
                 text(
-                    """
+                    f"""
                     CREATE TABLE IF NOT EXISTS messages (
-                        id VARCHAR PRIMARY KEY,
-                        conversation_id VARCHAR NOT NULL REFERENCES conversations(id),
+                        id {conversation_id_type} PRIMARY KEY,
+                        conversation_id {conversation_id_type} NOT NULL REFERENCES conversations(id),
                         role VARCHAR NOT NULL,
                         content TEXT NOT NULL,
                         citations_json JSON NOT NULL DEFAULT '[]'::json,
@@ -69,6 +69,10 @@ def ensure_institution_research_schema(engine: Engine) -> None:
                 text(
                     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS citations_json JSON NOT NULL DEFAULT '[]'::json"
                 )
+            )
+            inspector = inspect(conn)
+            message_id_type = _compiled_column_type_sql_from_inspector(
+                inspector, conn.dialect, "messages", "id"
             )
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_role ON messages (role)"))
@@ -95,10 +99,10 @@ def ensure_institution_research_schema(engine: Engine) -> None:
 
             conn.execute(
                 text(
-                    """
+                    f"""
                     CREATE TABLE IF NOT EXISTS message_sources (
                         id SERIAL PRIMARY KEY,
-                        message_id VARCHAR NOT NULL REFERENCES messages(id),
+                        message_id {message_id_type} NOT NULL REFERENCES messages(id),
                         source_id VARCHAR NOT NULL REFERENCES sources(id),
                         citation_id VARCHAR,
                         label VARCHAR,
@@ -135,11 +139,11 @@ def ensure_institution_research_schema(engine: Engine) -> None:
 
             conn.execute(
                 text(
-                    """
+                    f"""
                     CREATE TABLE IF NOT EXISTS share_link_messages (
                         id SERIAL PRIMARY KEY,
                         share_link_id VARCHAR NOT NULL REFERENCES share_links(id),
-                        message_id VARCHAR NOT NULL REFERENCES messages(id),
+                        message_id {message_id_type} NOT NULL REFERENCES messages(id),
                         position INTEGER NOT NULL DEFAULT 0
                     )
                     """
