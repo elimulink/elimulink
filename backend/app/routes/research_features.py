@@ -670,6 +670,7 @@ class ArchiveConversationRequest(BaseModel):
 
 @router.post("/conversations")
 def create_conversation(body: CreateConversationRequest) -> dict[str, Any]:
+    ensure_institution_research_schema(engine)
     with SessionLocal() as db:
         owner_uid = resolve_conversation_owner_uid(body.owner_uid)
         conversation = Conversation(
@@ -696,6 +697,7 @@ def create_conversation(body: CreateConversationRequest) -> dict[str, Any]:
 
 @router.get("/conversations/{conversation_id}")
 def get_conversation(conversation_id: str) -> dict[str, Any]:
+    ensure_institution_research_schema(engine)
     with SessionLocal() as db:
         conversation = get_conversation_or_404(db, conversation_id)
         ordered_messages = sorted(conversation.messages, key=lambda msg: msg.created_at)
@@ -709,6 +711,7 @@ def get_conversation(conversation_id: str) -> dict[str, Any]:
 
 @router.post("/conversations/{conversation_id}/messages")
 def create_message(conversation_id: str, body: CreateMessageRequest) -> dict[str, Any]:
+    ensure_institution_research_schema(engine)
     with SessionLocal() as db:
         conversation = get_conversation_or_404(db, conversation_id)
         user_message = Message(

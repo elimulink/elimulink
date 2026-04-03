@@ -65,6 +65,11 @@ def ensure_institution_research_schema(engine: Engine) -> None:
                     """
                 )
             )
+            conn.execute(
+                text(
+                    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS citations_json JSON NOT NULL DEFAULT '[]'::json"
+                )
+            )
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_role ON messages (role)"))
 
