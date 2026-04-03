@@ -53,6 +53,14 @@ def make_conversation_id() -> str:
     return str(uuid4())
 
 
+def resolve_conversation_owner_uid(owner_uid: str | None) -> str:
+    value = (owner_uid or "").strip()
+    if value:
+        return value
+    fail(400, "OWNER_UID_REQUIRED", "Conversation owner is required")
+    return ""
+
+
 def ok(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, **payload}
 
@@ -455,12 +463,14 @@ def get_or_create_notebook_workspace(db: Session, user: CurrentUser) -> Conversa
             db.refresh(conversation)
         return conversation
 
+    owner_uid = resolve_conversation_owner_uid(user.uid)
     conversation = Conversation(
         id=make_conversation_id(),
         family="ai",
         app="institution",
         title="ElimuLink Notebook",
-        owner_uid=user.uid,
+        owner_uid=owner_uid,
+        owner_user_id=owner_uid,
         workspace_kind=WORKSPACE_KIND_NOTEBOOK,
         workspace_settings_json=dict(DEFAULT_NOTEBOOK_WORKSPACE_SETTINGS),
         is_archived=False,
@@ -661,12 +671,14 @@ class ArchiveConversationRequest(BaseModel):
 @router.post("/conversations")
 def create_conversation(body: CreateConversationRequest) -> dict[str, Any]:
     with SessionLocal() as db:
+        owner_uid = resolve_conversation_owner_uid(body.owner_uid)
         conversation = Conversation(
             id=make_conversation_id(),
             family="ai",
             app="institution",
             title=body.title,
-            owner_uid=body.owner_uid,
+            owner_uid=owner_uid,
+            owner_user_id=owner_uid,
             is_archived=False,
             archived_at=None,
             created_at=datetime.utcnow(),

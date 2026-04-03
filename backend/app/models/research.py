@@ -20,6 +20,7 @@ class Conversation(Base):
     app = Column(String, nullable=False, index=True, default="institution")
     title = Column(String, nullable=False, default="New conversation")
     owner_uid = Column(String, nullable=True, index=True)
+    owner_user_id = Column(String, nullable=True)
     workspace_kind = Column(String, nullable=True, index=True)
     workspace_settings_json = Column(JSON, nullable=False, default=dict)
     is_archived = Column(Boolean, nullable=False, index=True, default=False)
