@@ -1505,14 +1505,6 @@ export default function NewChatLanding({
   }, [activeChatId, selectedStarter, starterSuggestions.length]);
 
   useEffect(() => {
-    if (!showMobileRotatingSuggestion || mobileSuggestionPool.length <= 1) return;
-    const id = window.setInterval(() => {
-      setMobileSuggestionIndex((current) => (current + 1) % mobileSuggestionPool.length);
-    }, 5200);
-    return () => window.clearInterval(id);
-  }, [mobileSuggestionPool.length, showMobileRotatingSuggestion]);
-
-  useEffect(() => {
     if (!isProfileMenuOpen && !isNotificationsMenuOpen) return;
     const onDocumentMouseDown = (event) => {
       const target = event.target;
@@ -1829,6 +1821,15 @@ export default function NewChatLanding({
     !isModelMenuOpen &&
     !isMobileDrawerOpen &&
     !voiceOpen;
+
+  useEffect(() => {
+    if (!showMobileRotatingSuggestion || mobileSuggestionPool.length <= 1) return;
+    const id = window.setInterval(() => {
+      setMobileSuggestionIndex((current) => (current + 1) % mobileSuggestionPool.length);
+    }, 5200);
+    return () => window.clearInterval(id);
+  }, [mobileSuggestionPool.length, showMobileRotatingSuggestion]);
+
   const unreadNotifications = notifications.filter((item) => !item.read).length;
   const desktopSettingsUser = useMemo(
     () => ({
