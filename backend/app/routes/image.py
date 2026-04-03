@@ -17,6 +17,16 @@ from ..utils import (
 
 router = APIRouter()
 
+DEFAULT_GENERATION_MODELS = (
+    "gemini-2.5-flash-image",
+    "gemini-2.5-flash-image-preview",
+    "gemini-2.0-flash-preview-image-generation",
+)
+DEFAULT_EDIT_MODELS = (
+    "gemini-2.5-flash-image",
+    "gemini-2.5-flash-image-preview",
+)
+
 
 def _extract_image_output(raw: dict[str, Any]) -> tuple[str | None, str]:
     parts = raw.get("candidates", [{}])[0].get("content", {}).get("parts", [])
@@ -25,11 +35,47 @@ def _extract_image_output(raw: dict[str, Any]) -> tuple[str | None, str]:
     for part in parts:
       if part.get("text"):
           response_text += str(part.get("text", "")).strip()
-      inline_data = part.get("inlineData") or {}
+      inline_data = part.get("inlineData") or part.get("inline_data") or {}
       if inline_data.get("data"):
-          mime_type = inline_data.get("mimeType", "image/png")
+          mime_type = inline_data.get("mimeType") or inline_data.get("mime_type") or "image/png"
           image_data_url = f"data:{mime_type};base64,{inline_data['data']}"
     return image_data_url, response_text
+
+
+def _resolve_model_candidates(env_name: str, defaults: tuple[str, ...]) -> list[str]:
+    configured = [
+        item.strip()
+        for item in str(os.getenv(env_name, "") or "").split(",")
+        if item.strip()
+    ]
+    return list(dict.fromkeys([*configured, *defaults]))
+
+
+async def _request_image_generation(
+    *,
+    gemini_key: str,
+    models: list[str],
+    payload: dict[str, Any],
+    timeout_seconds: float,
+) -> tuple[str, dict[str, Any]]:
+    last_error = ""
+    for model in models:
+        try:
+            raw = await post_json_with_timeout(
+                (
+                    "https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{model}:generateContent?key={gemini_key}"
+                ),
+                payload,
+                timeout_seconds=timeout_seconds,
+            )
+            return model, raw
+        except ProviderTimeoutError:
+            raise
+        except Exception as exc:
+            last_error = f"{model}: {str(exc)}"
+            print(f"[IMAGE_PROVIDER_ERROR] {last_error}", flush=True)
+    raise RuntimeError(last_error or "Image provider request failed.")
 
 
 def _parse_image_data_url(value: str) -> tuple[str, str]:
@@ -50,10 +96,7 @@ async def image(request: Request, user: CurrentUser = Depends(get_current_user))
     if not gemini_key:
         return err_response("MISSING_PROVIDER_KEY", 500)
 
-    model = os.getenv(
-        "GEMINI_IMAGE_MODEL",
-        "gemini-2.0-flash-preview-image-generation",
-    ).strip()
+    models = _resolve_model_candidates("GEMINI_IMAGE_MODEL", DEFAULT_GENERATION_MODELS)
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -61,18 +104,16 @@ async def image(request: Request, user: CurrentUser = Depends(get_current_user))
         },
     }
     try:
-        raw = await post_json_with_timeout(
-            (
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{model}:generateContent?key={gemini_key}"
-            ),
-            payload,
+        model, raw = await _request_image_generation(
+            gemini_key=gemini_key,
+            models=models,
+            payload=payload,
             timeout_seconds=25.0,
         )
     except ProviderTimeoutError:
         return err_response("AI_TIMEOUT", 504)
-    except Exception:
-        return err_response("PROVIDER_ERROR", 502)
+    except Exception as exc:
+        return err_response("PROVIDER_ERROR", 502, str(exc))
 
     image_data_url, response_text = _extract_image_output(raw)
 
@@ -114,7 +155,7 @@ async def edit_image(request: Request, user: CurrentUser = Depends(get_current_u
     except ValueError as exc:
         return err_response("INVALID_IMAGE", 400, str(exc))
 
-    model = os.getenv("GEMINI_IMAGE_EDIT_MODEL", "gemini-2.5-flash-image").strip()
+    models = _resolve_model_candidates("GEMINI_IMAGE_EDIT_MODEL", DEFAULT_EDIT_MODELS)
     payload = {
         "contents": [
             {
@@ -130,18 +171,16 @@ async def edit_image(request: Request, user: CurrentUser = Depends(get_current_u
         },
     }
     try:
-        raw = await post_json_with_timeout(
-            (
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{model}:generateContent?key={gemini_key}"
-            ),
-            payload,
+        model, raw = await _request_image_generation(
+            gemini_key=gemini_key,
+            models=models,
+            payload=payload,
             timeout_seconds=40.0,
         )
     except ProviderTimeoutError:
         return err_response("AI_TIMEOUT", 504)
-    except Exception:
-        return err_response("PROVIDER_ERROR", 502)
+    except Exception as exc:
+        return err_response("PROVIDER_ERROR", 502, str(exc))
 
     edited_image_url, response_text = _extract_image_output(raw)
     if not edited_image_url:
