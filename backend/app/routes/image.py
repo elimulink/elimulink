@@ -18,11 +18,13 @@ from ..utils import (
 router = APIRouter()
 
 DEFAULT_GENERATION_MODELS = (
+    "gemini-3-pro-image-preview",
     "gemini-2.5-flash-image",
     "gemini-2.5-flash-image-preview",
     "gemini-2.0-flash-preview-image-generation",
 )
 DEFAULT_EDIT_MODELS = (
+    "gemini-3-pro-image-preview",
     "gemini-2.5-flash-image",
     "gemini-2.5-flash-image-preview",
 )

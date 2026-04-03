@@ -4249,10 +4249,10 @@ export default function NewChatLanding({
       ) : null}
 
       {!isAdminShellEmbed ? (
-      <div className="hidden md:block w-full px-4 md:px-5 pt-0 pb-0.5 shrink-0 relative z-20">
-          <div className="h-12 bg-transparent px-2.5 md:px-3 flex items-center gap-2">
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-20 hidden w-full px-4 pt-2 md:block md:px-5">
+          <div className="flex h-12 items-center gap-2 px-2.5 md:px-3">
           <button
-            className="md:hidden h-9 w-9 rounded-lg bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
+            className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-200/80 bg-white/80 shadow-sm backdrop-blur-xl hover:bg-white/90 md:hidden"
             onClick={() => setIsMobileDrawerOpen(true)}
             title="Open menu"
           >
@@ -4278,35 +4278,35 @@ export default function NewChatLanding({
                   }
                 }}
                 placeholder="Search Ctrl K"
-                className="w-full h-9 rounded-full border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:ring-sky-500/20"
+                className="pointer-events-auto h-9 w-full rounded-full border border-slate-200/80 bg-white/70 pl-10 pr-4 text-sm text-slate-800 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl outline-none placeholder:text-slate-400 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:ring-sky-500/20"
               />
             </div>
           </div>
 
-          <div className="hidden xl:flex items-center gap-1 mr-1">
+          <div className="pointer-events-auto mr-1 hidden items-center gap-1 rounded-full border border-slate-200/70 bg-white/65 px-1.5 py-1 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl xl:flex dark:border-white/10 dark:bg-slate-900/50">
             <button
-              className="h-8 w-8 rounded-lg text-slate-500 hover:bg-slate-100 inline-flex items-center justify-center"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
               title="New Chat"
               onClick={startNewChat}
             >
               <Check size={16} />
             </button>
             <button
-              className="h-8 w-8 rounded-lg text-slate-500 hover:bg-slate-100 inline-flex items-center justify-center"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
               title="Notebook"
               onClick={() => handleNavClick("notebook")}
             >
               <NotebookPen size={16} />
             </button>
             <button
-              className="h-8 w-8 rounded-lg text-slate-500 hover:bg-slate-100 inline-flex items-center justify-center"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
               title="Courses"
               onClick={() => handleNavClick("courses")}
             >
               <BookOpen size={16} />
             </button>
             <button
-              className="h-8 w-8 rounded-lg text-slate-500 hover:bg-slate-100 inline-flex items-center justify-center"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
               title="Results"
               onClick={() => handleNavClick("results")}
             >
@@ -4314,10 +4314,10 @@ export default function NewChatLanding({
             </button>
           </div>
 
-          <div ref={notificationsMenuRef} className="relative">
+          <div ref={notificationsMenuRef} className="pointer-events-auto relative">
             <button
               onClick={toggleNotificationsMenu}
-              className="h-9 w-9 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 relative dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              className="relative h-9 w-9 rounded-full border border-slate-200/80 bg-white/75 text-slate-700 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl hover:bg-white/90 dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:hover:bg-slate-800/80"
               title="Notifications"
             >
               <Bell size={16} className="mx-auto" />
@@ -4385,10 +4385,10 @@ export default function NewChatLanding({
             ) : null}
           </div>
 
-          <div ref={profileMenuRef} className="relative">
+          <div ref={profileMenuRef} className="pointer-events-auto relative">
             <button
               onClick={toggleProfileMenu}
-              className="h-9 w-9 rounded-full overflow-hidden bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              className="inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-slate-200/80 bg-white/75 text-slate-700 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl hover:bg-white/90 dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:hover:bg-slate-800/80"
               title={`${user.name} profile`}
             >
               {user.avatarUrl ? (
