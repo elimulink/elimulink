@@ -1,7 +1,8 @@
 const IMAGE_GENERATION_PATTERNS = [
-  /^(?:generate|create|make|draw|design|illustrate|render)\s+(?:an?\s+)?(?:image|picture|photo|illustration|graphic|visual)\s+(?:of|for)?\s*(.+)$/i,
-  /^(?:generate|create|make|design)\s+(?:a|an)\s+(logo|poster|banner|flyer|cover|thumbnail|icon|wallpaper)\b.*$/i,
-  /^(?:generate|create|make|draw|design|illustrate|render|show me)\s+(?:an?\s+)?(?:map|diagram|chart|poster|banner|flyer|infographic|logo)\b.*$/i,
+  /^(?:generate|create|make|draw|design|illustrate|render)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|graphic|visual)\s+(?:of|for)?\s*(.+)$/i,
+  /^(?:generate|create|make|design)\s+(?:me\s+)?(?:a|an)\s+(logo|poster|banner|flyer|cover|thumbnail|icon|wallpaper)\b.*$/i,
+  /^(?:generate|create|make|draw|design|illustrate|render|show me)\s+(?:me\s+)?(?:an?\s+)?(?:map|diagram|chart|poster|banner|flyer|infographic|logo)\s*(?:of|for)?\b.*$/i,
+  /^(?:draw|sketch|paint)\s+(?:me\s+)?(?:an?\s+)?(?!conclusions?\b|a\s+conclusion\b).{2,}$/i,
   /^(?:draw|show me|create|make)\s+.+\b(?:diagram|map|poster|chart|illustration)\b.*$/i,
   /^(?:logo|poster|banner|flyer|cover|thumbnail|icon|wallpaper)\s*:\s*(.+)$/i,
 ];

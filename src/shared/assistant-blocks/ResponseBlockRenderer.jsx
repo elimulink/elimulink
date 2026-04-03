@@ -228,7 +228,7 @@ export function CodeBlock({ block }) {
       label={block.language || "Code"}
       action={<CopyButton text={block.code} label="Copy" />}
     >
-      <pre className="overflow-x-auto bg-transparent py-2 text-[13px] leading-6 text-slate-900 dark:text-slate-100">
+      <pre className="overflow-x-auto rounded-xl bg-slate-50/70 px-3 py-3 text-[13px] leading-6 text-slate-900 dark:bg-transparent dark:px-0 dark:py-1 dark:text-slate-100">
         <code>{block.code}</code>
       </pre>
     </ResponseBlockShell>
@@ -422,7 +422,7 @@ export function SuccessInfoBlock({ block }) {
 export function MathBlock({ block }) {
   return (
     <ResponseBlockShell icon={Sigma} label="Math" action={<CopyButton text={block.text} label="Copy" />}>
-      <div className="overflow-x-auto rounded-2xl bg-slate-50 px-4 py-3 font-mono text-sm leading-7 text-slate-800 dark:bg-white/[0.04] dark:text-slate-100">
+      <div className="overflow-x-auto rounded-xl bg-slate-50/70 px-4 py-3 font-mono text-sm leading-7 text-slate-800 dark:bg-transparent dark:px-0 dark:py-1 dark:text-slate-100">
         <pre className="whitespace-pre-wrap">{block.text}</pre>
       </div>
     </ResponseBlockShell>
@@ -440,7 +440,7 @@ export function JsonDataBlock({ block }) {
 
   return (
     <ResponseBlockShell icon={Code2} label="JSON" action={<CopyButton text={rawJson} label="Copy" />}>
-      <pre className="overflow-x-auto rounded-2xl bg-slate-950 px-4 py-3 text-[13px] leading-6 text-slate-100">
+      <pre className="overflow-x-auto rounded-xl bg-slate-50/70 px-4 py-3 text-[13px] leading-6 text-slate-900 dark:bg-transparent dark:px-0 dark:py-1 dark:text-slate-100">
         <code>{rawJson}</code>
       </pre>
     </ResponseBlockShell>

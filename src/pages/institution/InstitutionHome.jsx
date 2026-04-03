@@ -9,6 +9,8 @@ import {
   Mail,
 } from "lucide-react";
 import { apiUrl } from "../../lib/apiUrl";
+import imageAPI from "../../services/imageAPI";
+import { isImageGenerationPrompt } from "../../shared/image-generation/imageGenerationIntent";
 
 function getGreetingByHour(date = new Date()) {
   const h = date.getHours();
@@ -126,6 +128,7 @@ export default function InstitutionHome({
   const sendMessage = async (rawText) => {
     const text = String(rawText || "").trim();
     if (!text || isThinking) return;
+    const shouldGenerateImage = isImageGenerationPrompt(text);
 
     setStatus("");
     setIsThinking(true);
@@ -134,13 +137,37 @@ export default function InstitutionHome({
     setMessages((prev) => [
       ...prev,
       { id: userMessageId, role: "user", text },
-      { id: assistantMessageId, role: "ai", text: "" },
+      {
+        id: assistantMessageId,
+        role: "ai",
+        text: shouldGenerateImage ? "Generating image..." : "",
+        type: shouldGenerateImage ? "image" : "text",
+        imageUrl: "",
+      },
     ]);
     setQuery("");
 
     try {
       if (!user) throw new Error("Please sign in");
       const idToken = await user.getIdToken();
+
+      if (shouldGenerateImage) {
+        const imageUrl = await imageAPI.generateImage(text, { idToken });
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? {
+                  ...message,
+                  type: "image",
+                  imageUrl,
+                  text: "Here is the generated image.",
+                }
+              : message
+          )
+        );
+        return;
+      }
+
       const requestBody = {
         message: text,
         text,
@@ -261,10 +288,21 @@ export default function InstitutionHome({
                 <div className="text-xs font-semibold uppercase tracking-wide mb-1 text-slate-500">
                   {message.role === "user" ? "You" : "ElimuLink AI"}
                 </div>
+                {message.role === "ai" && message.imageUrl ? (
+                  <img
+                    src={message.imageUrl}
+                    alt={message.text || "Generated image"}
+                    className="mb-3 w-full max-w-xl rounded-lg border border-slate-200 object-contain"
+                  />
+                ) : null}
                 <div className="text-sm whitespace-pre-wrap">{message.text}</div>
               </div>
             ))}
-            {isThinking ? <div className="text-sm text-slate-500">AI is thinking...</div> : null}
+            {isThinking ? (
+              <div className="text-sm text-slate-500">
+                {messages[messages.length - 1]?.type === "image" ? "Generating image..." : "AI is thinking..."}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

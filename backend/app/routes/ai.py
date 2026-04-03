@@ -24,8 +24,6 @@ INSTITUTION_FAST_STREAM_INTENTS = {
     "general_chat",
     "announcements",
     "institution_analytics",
-    "image_generation",
-    "image_edit",
 }
 
 
