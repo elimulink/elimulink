@@ -731,6 +731,7 @@ export default function StudentLanding() {
   const activeChat = chats.find((chat) => chat.id === activeChatId) || chats[0];
   const messages = activeChat?.messages || [];
   const hasConversation = messages.length > 0;
+  const hasUserMessages = messages.some((message) => message?.role === "user");
   const canSend = input.trim().length > 0 || attachments.length > 0;
   const hasText = input.trim().length > 0;
   const activeChatModel =
@@ -744,6 +745,7 @@ export default function StudentLanding() {
     isMobile &&
     active === "newchat" &&
     !hasConversation &&
+    !hasUserMessages &&
     !hasText &&
     !isAttachmentMenuOpen &&
     !isModelMenuOpen &&

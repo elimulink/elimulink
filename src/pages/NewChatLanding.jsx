@@ -322,6 +322,12 @@ const EMPTY_ACADEMIC_CONTEXT = Object.freeze({
   studyMode: "",
 });
 
+const FOLLOW_UP_ACCEPTANCE_PATTERN =
+  /^(yes|yeah|yep|okay|ok|sure|continue|continue please|go on|go ahead|proceed|do that|show me|explain more|tell me more)$/i;
+const FOLLOW_UP_DETAIL_PATTERN = /^(explain more|tell me more|more details|expand|go deeper)$/i;
+const CONTINUATION_SENTENCE_PATTERN =
+  /\b(?:next(?:,)?\s+)?(?:i can|i'll|i will|let me|next step is|the next useful step is)\s+([^.!?\n]+[.!?]?)/gi;
+
 function timeGreeting(date = new Date()) {
   const hour = date.getHours();
   if (hour < 12) return "Good morning";
@@ -355,6 +361,54 @@ function initialsOf(name) {
 
 function buildWelcomeMessage(name) {
   return `${timeGreeting()}, ${firstNameOf(name)}! I'm ElimuLink AI. What would you like to research today?`;
+}
+
+function getLastAssistantMessageText(items = []) {
+  for (let index = (Array.isArray(items) ? items.length : 0) - 1; index >= 0; index -= 1) {
+    const message = items[index] || {};
+    if (message.role === "assistant" && String(message.text || "").trim()) {
+      return String(message.text || "").trim();
+    }
+  }
+  return "";
+}
+
+function extractLastOfferedContinuation(text = "") {
+  const value = String(text || "").trim();
+  if (!value) return "";
+
+  const matches = [...value.matchAll(CONTINUATION_SENTENCE_PATTERN)]
+    .map((match) => String(match?.[0] || "").trim())
+    .filter(Boolean);
+  if (matches.length) return matches[matches.length - 1].replace(/\s+/g, " ");
+
+  const sentences = value
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const fallback = sentences
+    .slice(-3)
+    .find((sentence) =>
+      /\b(next|continue|step by step|notes|flashcards|diagram|compare|summarize|simpler|detail|explain)\b/i.test(
+        sentence,
+      ),
+    );
+  return fallback || "";
+}
+
+function resolveContinuationPrompt(userText, items = []) {
+  const clean = String(userText || "").trim();
+  if (!FOLLOW_UP_ACCEPTANCE_PATTERN.test(clean)) return clean;
+
+  const lastAssistantText = getLastAssistantMessageText(items);
+  const offeredStep = extractLastOfferedContinuation(lastAssistantText);
+  if (offeredStep) {
+    return `Please continue with the last suggested next step from your previous answer: ${offeredStep}`;
+  }
+  if (FOLLOW_UP_DETAIL_PATTERN.test(clean)) {
+    return "Please expand your previous answer with a clearer, more detailed explanation and practical examples.";
+  }
+  return "Please continue directly from your previous answer and carry out the most relevant next step you just proposed.";
 }
 
 function getDefaultAssistantMessage(mode = "student", name = "Scholar") {
@@ -1787,6 +1841,7 @@ export default function NewChatLanding({
   const activeAcademicContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
   const activeContextLabel = contextLabel(activeAcademicContext);
   const hasConversation = messages.length > 0;
+  const hasUserMessages = messages.some((message) => message?.role === "user");
   const hasStreamingAssistantReply = messages.some((message) => Boolean(message?.streaming));
   const canSend = input.trim().length > 0 || attachments.length > 0;
   const hasText = input.trim().length > 0;
@@ -1802,6 +1857,8 @@ export default function NewChatLanding({
   }, [starterSet, starterSuggestions]);
   const showMobileRotatingSuggestion =
     active === "newchat" &&
+    !hasConversation &&
+    !hasUserMessages &&
     mobileSuggestionPool.length > 0 &&
     !hasText &&
     !hasStreamingAssistantReply &&
@@ -3265,20 +3322,22 @@ export default function NewChatLanding({
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
-    const shouldExtractLinks = isLinkExtractionPrompt(clean);
+    const continuationPrompt = clean ? resolveContinuationPrompt(clean, messages) : "";
+    const requestPrompt = continuationPrompt || clean;
+    const shouldExtractLinks = isLinkExtractionPrompt(requestPrompt);
     const shouldGenerateImage =
       !shouldExtractLinks &&
       pendingAttachments.length === 0 &&
-      isImageGenerationPrompt(clean);
+      isImageGenerationPrompt(requestPrompt);
     const shouldEditLatestImage =
       !shouldExtractLinks &&
       pendingAttachments.length === 0 &&
       !shouldGenerateImage &&
-      isImageEditFollowUpPrompt(clean);
+      isImageEditFollowUpPrompt(requestPrompt);
     const latestImageUrl = shouldEditLatestImage
       ? imageAPI.getLatestImageFromMessages(messages)
       : "";
-    const imageSearchQuery = getImageSearchQuery(clean, {
+    const imageSearchQuery = getImageSearchQuery(requestPrompt, {
       hasAttachments: pendingAttachments.length > 0,
       shouldGenerateImage,
       shouldEditImage: shouldEditLatestImage,
@@ -3289,10 +3348,11 @@ export default function NewChatLanding({
         ? `\n\nAttachments:\n${pendingAttachments.map((a) => `- ${a.name}`).join("\n")}`
         : "";
     const messageText = `${clean || "Sent attachments"}${attachSummary}`;
+    const assistantBaseText = requestPrompt || clean || "Sent attachments";
     const imageVisionContext = shouldExtractLinks
       ? ""
       : await buildVisionAttachmentSummary(pendingAttachments, clean);
-    const assistantRequestText = `${messageText}${imageVisionContext}`;
+    const assistantRequestText = `${assistantBaseText}${attachSummary}${imageVisionContext}`;
     const currentContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
     const detectedContext = detectAcademicContext(assistantRequestText, currentContext);
     const mergedContext = mergeAcademicContext(currentContext, detectedContext, assistantRequestText);
@@ -3373,7 +3433,7 @@ export default function NewChatLanding({
 
     if (shouldGenerateImage) {
       try {
-        const imageUrl = await imageAPI.generateImage(clean);
+        const imageUrl = await imageAPI.generateImage(requestPrompt);
         updateActiveChatMessages(
           (messages) => [
             ...messages,
@@ -3425,7 +3485,7 @@ export default function NewChatLanding({
       try {
         const result = await imageAPI.editImage({
           imageDataUrl: latestImageUrl,
-          prompt: clean,
+          prompt: requestPrompt,
         });
         updateActiveChatMessages(
           (chatMessages) => [
@@ -3570,10 +3630,11 @@ export default function NewChatLanding({
   async function requestLiveVoiceReply(spokenText, liveContext = null) {
     const clean = String(spokenText || "").trim();
     if (!clean) return "";
+    const requestPrompt = resolveContinuationPrompt(clean, messages);
 
     const currentContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
-    const detectedContext = detectAcademicContext(clean, currentContext);
-    const mergedContext = mergeAcademicContext(currentContext, detectedContext, clean);
+    const detectedContext = detectAcademicContext(requestPrompt, currentContext);
+    const mergedContext = mergeAcademicContext(currentContext, detectedContext, requestPrompt);
     if (activeChat?.id) {
       setContextByChat((prev) => ({ ...prev, [activeChat.id]: mergedContext }));
     }
@@ -3595,7 +3656,7 @@ export default function NewChatLanding({
 
     try {
       const fullReply = await askInstitutionLiveChat({
-        text: clean,
+        text: requestPrompt,
         context: {
           ...liveContext,
           academicContext: mergedContext,
@@ -5072,7 +5133,7 @@ export default function NewChatLanding({
               <div
                 ref={mobileComposerRef}
                 className={[
-                  "fixed left-0 right-0 bottom-0 z-50 bg-[linear-gradient(180deg,rgba(255,255,255,0),rgba(248,250,252,0.92)_36%,rgba(248,250,252,0.98)_100%)] px-4 pt-2 pb-[calc(14px+env(safe-area-inset-bottom))] md:static md:z-auto dark:bg-[linear-gradient(180deg,rgba(2,6,23,0),rgba(2,6,23,0.9)_36%,rgba(2,6,23,0.98)_100%)]",
+                  "fixed left-0 right-0 bottom-0 z-50 bg-transparent px-4 pt-2 pb-[calc(14px+env(safe-area-inset-bottom))] md:static md:z-auto",
                   isMobileDrawerOpen ? "pointer-events-none opacity-0" : "opacity-100",
                 ].join(" ")}
                 style={{ bottom: `${kbHeight}px` }}
@@ -5157,8 +5218,8 @@ export default function NewChatLanding({
                     className={[
                       "relative surface-elevated rounded-[24px] border px-2 py-1.5 backdrop-blur-xl transition-all duration-300",
                       showMobileEntryGlow
-                        ? "border-sky-200/80 bg-white/92 shadow-[0_0_0_1px_rgba(14,165,233,0.08),0_18px_44px_rgba(14,165,233,0.18)] dark:border-sky-400/20 dark:bg-white/[0.07] dark:shadow-[0_0_0_1px_rgba(14,165,233,0.1),0_24px_48px_rgba(2,132,199,0.14)]"
-                        : "border-slate-200/90 bg-white/95 shadow-[0_12px_28px_rgba(15,23,42,0.10)] dark:border-white/[0.12] dark:bg-white/[0.06] dark:shadow-[0_14px_30px_rgba(0,0,0,0.28)]",
+                        ? "border-cyan-300/75 bg-white/94 shadow-[0_0_0_1px_rgba(14,165,233,0.16),0_0_18px_rgba(14,165,233,0.14),0_18px_44px_rgba(15,23,42,0.12)] dark:border-cyan-400/25 dark:bg-slate-950/72 dark:shadow-[0_0_0_1px_rgba(34,211,238,0.12),0_0_18px_rgba(14,165,233,0.16),0_18px_38px_rgba(0,0,0,0.28)]"
+                        : "border-cyan-200/70 bg-white/94 shadow-[0_0_0_1px_rgba(14,165,233,0.10),0_0_14px_rgba(14,165,233,0.08),0_12px_28px_rgba(15,23,42,0.10)] dark:border-cyan-400/15 dark:bg-slate-950/72 dark:shadow-[0_0_0_1px_rgba(34,211,238,0.10),0_0_14px_rgba(14,165,233,0.12),0_14px_30px_rgba(0,0,0,0.24)]",
                     ].join(" ")}
                   >
                     <AttachmentChipsTray
@@ -5485,7 +5546,7 @@ export default function NewChatLanding({
               ) : null}
 
               <div ref={desktopAttachmentMenuRef} className="mt-3 shrink-0 relative max-w-[920px] w-full mx-auto pt-4 pb-1">
-                <div className="surface-elevated rounded-[28px] border border-slate-200/55 bg-white/78 backdrop-blur-xl px-3 py-2.5 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition focus-within:border-sky-300/45 dark:border-white/8 dark:bg-slate-900/72">
+                <div className="surface-elevated rounded-[28px] border border-cyan-200/70 bg-white/94 px-3 py-2.5 shadow-[0_0_0_1px_rgba(14,165,233,0.10),0_0_14px_rgba(14,165,233,0.08),0_12px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl transition focus-within:border-cyan-300/80 dark:border-cyan-400/15 dark:bg-slate-950/72 dark:shadow-[0_0_0_1px_rgba(34,211,238,0.10),0_0_14px_rgba(14,165,233,0.12),0_14px_30px_rgba(0,0,0,0.24)]">
                   <AttachmentChipsTray
                     items={attachments}
                     onPreview={openAttachmentItem}

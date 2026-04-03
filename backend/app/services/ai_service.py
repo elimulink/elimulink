@@ -1,9 +1,12 @@
 ﻿from __future__ import annotations
 
+import json
 import os
-from typing import Any
+from typing import Any, AsyncIterator
 
-from ..utils import post_json_with_timeout
+import httpx
+
+from ..utils import ProviderTimeoutError, post_json_with_timeout
 
 STUDENT_SYSTEM_PROMPT = """You are ElimuLink AI, an intelligent academic assistant for students and universities.
 
@@ -24,8 +27,14 @@ Guidelines:
 6. Use **bold** selectively for key phrases, not every sentence.
 7. Use light symbols/emojis only when genuinely helpful, and do not overuse them.
 8. If deeper detail is needed, expand in a structured way after the direct answer.
-9. When appropriate, close with one concise next-step suggestion or offer to continue.
-10. Respond in English or Swahili depending on the user's language.
+9. If a next step is useful, end with one specific action-oriented continuation tied to the current topic.
+   Prefer modern phrasing like:
+   - Next, I can break this down step by step.
+   - I can turn this into notes, flashcards, or a simple diagram.
+   - I can compare the two ideas side by side.
+10. Avoid generic customer-service endings such as "How may I assist you today?" or "Would you like more information?"
+11. When the user sends a short acceptance like "yes", "continue", "go on", or "do that", treat it as approval to continue the most recent suggested next step.
+12. Respond in English or Swahili depending on the user's language.
 """
 
 ADMIN_SYSTEM_PROMPT = """You are ElimuLink Administrative AI, an intelligent institutional assistant for university administration.
@@ -144,3 +153,81 @@ async def call_gemini_text(
         ).strip()
         or "I couldn't generate a response."
     )
+
+
+async def stream_gemini_text(
+    message: str,
+    context: dict[str, Any],
+    system_instruction: str | None = None,
+    mode: str | None = None,
+    workspace_context: dict[str, Any] | None = None,
+    timeout_seconds: float = 25.0,
+) -> AsyncIterator[str]:
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not gemini_key:
+        raise RuntimeError("MISSING_PROVIDER_KEY")
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.5-flash:streamGenerateContent?alt=sse&key={gemini_key}"
+    )
+    system_text = system_instruction or resolve_system_prompt(mode, workspace_context)
+    context_prefix = build_context_prefix(mode, workspace_context)
+    final_user_message = f"{context_prefix}{message}".strip()
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_text}]},
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": f"USER_MESSAGE:\n{final_user_message}\n"},
+                    {"text": f"GROUNDING_DATA:\n{context}\n"},
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.4,
+            "maxOutputTokens": 900,
+            "topP": 0.9,
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            async with client.stream("POST", url, json=payload) as response:
+                if response.status_code >= 400:
+                    raw = (await response.aread()).decode("utf-8", errors="ignore")
+                    try:
+                        data = json.loads(raw or "{}")
+                    except json.JSONDecodeError:
+                        data = {}
+                    message = (
+                        data.get("error", {}).get("message")
+                        if isinstance(data.get("error"), dict)
+                        else data.get("error")
+                    ) or f"PROVIDER_HTTP_{response.status_code}"
+                    raise RuntimeError(str(message))
+
+                async for line in response.aiter_lines():
+                    clean_line = str(line or "").strip()
+                    if not clean_line.startswith("data:"):
+                        continue
+                    raw_data = clean_line[5:].strip()
+                    if not raw_data:
+                        continue
+                    try:
+                        chunk_payload = json.loads(raw_data)
+                    except json.JSONDecodeError:
+                        continue
+                    parts = (
+                        chunk_payload.get("candidates", [{}])[0]
+                        .get("content", {})
+                        .get("parts", [])
+                    )
+                    delta = "".join(str(part.get("text", "")) for part in parts if part.get("text"))
+                    if delta:
+                        yield delta
+    except httpx.TimeoutException as exc:
+        raise ProviderTimeoutError("AI_TIMEOUT") from exc
+    except httpx.RequestError as exc:
+        raise RuntimeError(f"PROVIDER_REQUEST_ERROR:{str(exc)}") from exc

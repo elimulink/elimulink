@@ -1,9 +1,6 @@
 import React, { useMemo, useState } from "react";
 import CitationChip from "./CitationChip";
 import SourcesDrawer from "./SourcesDrawer";
-import ShareChatButton from "./ShareChatButton";
-import ShareChatModal from "./ShareChatModal";
-import { createShareChatLink } from "./researchUtils";
 
 function hasRenderableSource(source) {
   return Boolean(
@@ -30,9 +27,7 @@ export default function ResearchActions({
   disableShare = false,
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
   const [activeChipIndex, setActiveChipIndex] = useState(-1);
-  const [localShareUrl, setLocalShareUrl] = useState("");
 
   const validSources = useMemo(
     () => (Array.isArray(sources) ? sources.filter(hasRenderableSource) : []),
@@ -42,21 +37,6 @@ export default function ResearchActions({
   const overflowCount = Math.max(0, validSources.length - visibleChips.length);
   const firstSourceCountLabel =
     overflowCount > 0 ? `+${overflowCount}` : validSources.length > 1 ? `${validSources.length}` : "";
-
-  const handleCreateLink = async () => {
-    if (disableShare) return;
-    try {
-      if (onCreateShareLink) {
-        const nextUrl = await onCreateShareLink();
-        if (nextUrl) setLocalShareUrl(String(nextUrl));
-        return;
-      }
-      const nextUrl = createShareChatLink(sharePayload || {});
-      setLocalShareUrl(String(nextUrl || ""));
-    } catch {
-      return;
-    }
-  };
 
   const handleOpenSources = async (index = -1) => {
     setActiveChipIndex(index);
@@ -85,12 +65,8 @@ export default function ResearchActions({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2">
-          <ShareChatButton onClick={() => setShareOpen(true)} disabled={disableShare && !shareUrl}>
-            {shareLoading ? "Sharing..." : "Share"}
-          </ShareChatButton>
-
-          {validSources.length > 0 ? (
+        {validSources.length > 0 ? (
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => handleOpenSources(-1)}
@@ -98,8 +74,8 @@ export default function ResearchActions({
             >
               {validSources.length === 1 ? "1 Source" : `${validSources.length} Sources`}
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
 
       <SourcesDrawer
@@ -110,17 +86,6 @@ export default function ResearchActions({
         error={sourcesError}
       />
 
-      <ShareChatModal
-        open={shareOpen}
-        onClose={() => setShareOpen(false)}
-        shareUrl={shareUrl || localShareUrl}
-        onCreateLink={handleCreateLink}
-        onDeleteLink={onDeleteShareLink}
-        isCreating={shareLoading}
-        isDeleting={shareDeleteLoading}
-        error={shareError}
-        allowDelete={allowShareDelete}
-      />
     </>
   );
 }

@@ -8,7 +8,7 @@ import {
   GitBranch,
   Mail,
 } from "lucide-react";
-import { apiPost } from "../../lib/apiClient";
+import { apiUrl } from "../../lib/apiUrl";
 
 function getGreetingByHour(date = new Date()) {
   const h = date.getHours();
@@ -39,6 +39,60 @@ const Card = ({ icon: Icon, title, subtitle, onClick }) => (
     <div className="mt-1 text-sm text-slate-500">{subtitle}</div>
   </button>
 );
+
+async function readInstitutionStream(response, onDelta) {
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const data = await response.json().catch(() => ({}));
+    return String(data?.text || "");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalText = "";
+  let accumulatedText = "";
+
+  const applyEventBlock = (block) => {
+    const lines = String(block || "").split("\n");
+    const eventName = lines
+      .find((line) => line.startsWith("event:"))
+      ?.slice(6)
+      .trim();
+    const dataLine = lines.find((line) => line.startsWith("data:"));
+    if (!eventName || !dataLine) return;
+    let payload = {};
+    try {
+      payload = JSON.parse(dataLine.slice(5).trim() || "{}");
+    } catch {
+      return;
+    }
+    if (eventName === "chunk" && payload?.delta) {
+      const delta = String(payload.delta);
+      accumulatedText += delta;
+      onDelta(delta, accumulatedText);
+    }
+    if (eventName === "done") {
+      finalText = String(payload?.text || accumulatedText || "");
+    }
+    if (eventName === "error") {
+      throw new Error(String(payload?.message || "Failed to stream AI response."));
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) {
+      buffer += decoder.decode(value, { stream: !done });
+      const blocks = buffer.replace(/\r\n/g, "\n").split("\n\n");
+      buffer = blocks.pop() || "";
+      blocks.forEach(applyEventBlock);
+    }
+    if (done) break;
+  }
+
+  if (buffer.trim()) applyEventBlock(buffer.replace(/\r\n/g, "\n"));
+  return finalText || accumulatedText;
+}
 
 export default function InstitutionHome({
   user,
@@ -75,13 +129,19 @@ export default function InstitutionHome({
 
     setStatus("");
     setIsThinking(true);
-    setMessages((prev) => [...prev, { id: Date.now(), role: "user", text }]);
+    const userMessageId = Date.now();
+    const assistantMessageId = userMessageId + 1;
+    setMessages((prev) => [
+      ...prev,
+      { id: userMessageId, role: "user", text },
+      { id: assistantMessageId, role: "ai", text: "" },
+    ]);
     setQuery("");
 
     try {
       if (!user) throw new Error("Please sign in");
       const idToken = await user.getIdToken();
-      const data = await apiPost("/api/ai/student", {
+      const requestBody = {
         message: text,
         text,
         hostMode: "institution",
@@ -89,11 +149,47 @@ export default function InstitutionHome({
         departmentId: activeDepartmentId || "general",
         departmentName: activeDepartmentName || "General",
         mode: activeDepartmentName || "General",
-      }, {
-        token: idToken,
+      };
+
+      const response = await fetch(apiUrl("/api/ai/student?stream=1"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify(requestBody),
       });
-      const aiText = data?.text || "I could not generate a response.";
-      setMessages((prev) => [...prev, { id: Date.now() + 1, role: "ai", text: aiText }]);
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const error = new Error(data?.message || data?.error || `Request failed (${response.status})`);
+        error.status = response.status;
+        error.body = data;
+        throw error;
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      let aiText = "";
+      if (contentType.includes("text/event-stream")) {
+        aiText = await readInstitutionStream(response, (_delta, nextText) => {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantMessageId ? { ...message, text: nextText } : message
+            )
+          );
+        });
+      } else {
+        const data = await response.json().catch(() => ({}));
+        aiText = data?.text || "I could not generate a response.";
+      }
+
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantMessageId
+            ? { ...message, text: aiText || "I could not generate a response." }
+            : message
+        )
+      );
     } catch (error) {
       const status = error?.status ? ` (${error.status})` : "";
       console.error("[AI_ERROR][institutionHome]", {
@@ -101,14 +197,16 @@ export default function InstitutionHome({
         message: error?.message || null,
         body: error?.body || null,
       });
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          role: "ai",
-          text: `Error${status}: ${error?.message || "Failed to fetch AI response."}`,
-        },
-      ]);
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantMessageId
+            ? {
+                ...message,
+                text: `Error${status}: ${error?.message || "Failed to fetch AI response."}`,
+              }
+            : message
+        )
+      );
       setStatus(`Error${status}: ${error?.message || "Failed to fetch"}`);
     } finally {
       setIsThinking(false);

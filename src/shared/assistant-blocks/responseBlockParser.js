@@ -3,6 +3,11 @@ const HEADING_PATTERN = /^#{1,4}\s+\S+/m;
 const MARKDOWN_LINK_PATTERN = /\[[^\]]+\]\((https?:\/\/[^)]+)\)/;
 const MARKDOWN_BOLD_PATTERN = /(\*\*[^*]+\*\*|__[^_]+__)/;
 const MATH_PATTERN = /(\$\$[\s\S]+?\$\$|\$[^$\n]+\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\))/;
+const SIMPLE_DEFINITION_PATTERN =
+  /^(?:[A-Z][\w\s()/.-]{1,80})\s+(?:is|are|refers to|means)\s+[\s\S]{12,420}$/;
+const EXPLICIT_NOTE_PREFIX_PATTERN =
+  /^(note|summary|study notes|revision notes|key points|takeaways?)\s*[:\-]/i;
+const EXPLICIT_ACTION_PREFIX_PATTERN = /^(actions?|next steps?|quick actions?)\s*[:\-]/i;
 
 function cleanText(value) {
   return String(value || "").replace(/\r\n/g, "\n").trim();
@@ -47,6 +52,30 @@ function splitTextIntoParagraphs(text) {
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function getTextShape(value) {
+  const text = cleanText(value);
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  return {
+    text,
+    lines,
+    lineCount: lines.length,
+    paragraphCount: splitTextIntoParagraphs(text).length,
+    listItemCount: lines.filter((line) => /^(\s{0,6}[-*â€¢]\s+|\s{0,6}\d+[.)]\s+)/.test(line)).length,
+    headingCount: lines.filter((line) => HEADING_PATTERN.test(line)).length,
+    hasCodeFence: /```/.test(text),
+  };
+}
+
+function isSimpleDirectAnswer(value) {
+  const shape = getTextShape(value);
+  if (!shape.text || shape.hasCodeFence) return false;
+  if (EXPLICIT_NOTE_PREFIX_PATTERN.test(shape.text) || EXPLICIT_ACTION_PREFIX_PATTERN.test(shape.text)) return false;
+  if (shape.lineCount <= 3 && shape.paragraphCount <= 2 && shape.listItemCount <= 2 && shape.text.length <= 520) {
+    return true;
+  }
+  return SIMPLE_DEFINITION_PATTERN.test(shape.text) && shape.lineCount <= 5 && shape.listItemCount <= 2;
 }
 
 function isJsonBlock(value) {
@@ -260,6 +289,15 @@ function normalizeSourceLinks(sources = []) {
 }
 
 function buildTextBlock(segment, index) {
+  const shape = getTextShape(segment);
+  const shouldStayPlain =
+    isSimpleDirectAnswer(segment) ||
+    (shape.listItemCount > 0 &&
+      shape.listItemCount <= 3 &&
+      shape.text.length < 260 &&
+      !EXPLICIT_NOTE_PREFIX_PATTERN.test(shape.text) &&
+      !EXPLICIT_ACTION_PREFIX_PATTERN.test(shape.text));
+
   if (isJsonBlock(segment)) {
     return {
       id: `json-${index}`,
@@ -274,6 +312,14 @@ function buildTextBlock(segment, index) {
       id: `table-${index}`,
       type: "table",
       ...toTableData(segment),
+    };
+  }
+
+  if (shouldStayPlain && !isLinkBlock(segment)) {
+    return {
+      id: `text-${index}`,
+      type: "normal_text",
+      text: cleanText(segment),
     };
   }
 
