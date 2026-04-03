@@ -126,11 +126,11 @@ async def image(request: Request, user: CurrentUser = Depends(get_current_user))
         "image": image_data_url,
         "provider": "gemini",
         "model": model,
-        "text": response_text or "Here is the generated image.",
+        "text": "Done ✅",
     }
     # extra top-level field included for existing frontend compatibility
     return ok_response(
-        text=response_text or "Here is the generated image.",
+        text="Done ✅",
         data=data,
         image=image_data_url,
         provider="gemini",
@@ -192,10 +192,10 @@ async def edit_image(request: Request, user: CurrentUser = Depends(get_current_u
         "image": edited_image_url,
         "provider": "gemini",
         "model": model,
-        "text": response_text or "Here is the edited image.",
+        "text": "Updated ✅",
     }
     return ok_response(
-        text=response_text or "Here is the edited image.",
+        text="Updated ✅",
         data=data,
         image=edited_image_url,
         provider="gemini",

@@ -10,7 +10,10 @@ import {
 } from "lucide-react";
 import { apiUrl } from "../../lib/apiUrl";
 import imageAPI from "../../services/imageAPI";
-import { isImageGenerationPrompt } from "../../shared/image-generation/imageGenerationIntent";
+import {
+  getVagueImageRequestClarification,
+  isImageGenerationPrompt,
+} from "../../shared/image-generation/imageGenerationIntent";
 
 function getGreetingByHour(date = new Date()) {
   const h = date.getHours();
@@ -129,6 +132,9 @@ export default function InstitutionHome({
     const text = String(rawText || "").trim();
     if (!text || isThinking) return;
     const shouldGenerateImage = isImageGenerationPrompt(text);
+    const imageGenerationClarification = shouldGenerateImage
+      ? getVagueImageRequestClarification(text)
+      : "";
 
     setStatus("");
     setIsThinking(true);
@@ -152,17 +158,32 @@ export default function InstitutionHome({
       const idToken = await user.getIdToken();
 
       if (shouldGenerateImage) {
+        if (imageGenerationClarification) {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    type: "text",
+                    imageUrl: "",
+                    text: imageGenerationClarification,
+                  }
+                : message
+            )
+          );
+          return;
+        }
         const imageUrl = await imageAPI.generateImage(text, { idToken });
         setMessages((prev) =>
           prev.map((message) =>
             message.id === assistantMessageId
-              ? {
-                  ...message,
-                  type: "image",
-                  imageUrl,
-                  text: "Here is the generated image.",
-                }
-              : message
+                ? {
+                    ...message,
+                    type: "image",
+                    imageUrl,
+                    text: "Done ✅",
+                  }
+                : message
           )
         );
         return;

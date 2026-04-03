@@ -63,7 +63,10 @@ import AIImageEditModal from './shared/chat-media/AIImageEditModal.jsx';
 import ScreenshotPreviewToast from './shared/chat-media/ScreenshotPreviewToast.jsx';
 import useCapturedMedia from './shared/chat-media/useCapturedMedia.js';
 import LiveMultimodalSessionContainerV2 from './shared/live/LiveMultimodalSessionContainerV2.jsx';
-import { isImageGenerationPrompt } from './shared/image-generation/imageGenerationIntent.js';
+import {
+  getVagueImageRequestClarification,
+  isImageGenerationPrompt,
+} from './shared/image-generation/imageGenerationIntent.js';
 import DesktopSettingsLauncher from './shared/settings/DesktopSettingsLauncher.jsx';
 import './shared/audio/audio-ui.css';
 import './shared/chat-media/chat-media.css';
@@ -858,7 +861,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
           role: 'ai',
           type: 'image',
           content: imageUrl,
-          text: text || 'Here is the edited image.',
+          text: text || 'Updated ✅',
         },
       ]);
     }
@@ -979,61 +982,20 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
       const isImageReq = isImageGenerationPrompt(text);
       if (isImageReq) {
+        const imageGenerationClarification = getVagueImageRequestClarification(text);
+        if (imageGenerationClarification) {
+          setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', text: imageGenerationClarification }]);
+          setIsThinking(false);
+          setLastActiveDepartmentId(activeDepartmentId);
+          return;
+        }
         try {
           const examStyle = "Make it clean, high-contrast, exam-ready, well-labeled if diagram, minimal clutter.";
           const imgPrompt = `${text}\n\n${examStyle}`;
           const imgDataUrl = await imageAPI.generateImage(imgPrompt);
-          setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', type: 'image', content: imgDataUrl, text: 'Here is the generated image.' }]);
+          setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', type: 'image', content: imgDataUrl, text: 'Done ✅' }]);
         } catch (imgErr) {
-          // fallback to textual description via backend student AI
-          try {
-            const idToken = user ? await user.getIdToken() : null;
-            const bodyText = `${filesSummary}\n\n${rulePrefix} ${text}`;
-            const res = await fetchWithErrorLog(apiUrl('/api/ai/student'), {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': idToken ? `Bearer ${idToken}` : ''
-              },
-              body: JSON.stringify({
-                text: bodyText,
-                region,
-                userName: settings.userName,
-                aiTone: settings.aiTone,
-                useGoogleSearch: settings.useGoogleSearch,
-                departmentId: activeDepartmentId,
-                departmentName: isInstitutionHost ? activeDepartmentName : null,
-                hostMode: isInstitutionHost ? 'institution' : 'public',
-                institutionId: isInstitutionHost ? (userProfile?.institutionId || null) : null,
-                mode: isInstitutionHost ? activeDepartmentName : null,
-                systemPrompt
-              })
-            });
-            const data = await res.json();
-            // AI department switch suggestion
-            if (data?.suggestDepartmentId && data.suggestDepartmentId !== activeDepartmentId) {
-              setSuggestedDept(data);
-              setShowDeptBanner(true);
-            }
-            const aiText = data?.text || 'Could not generate image.';
-            const aiSources = normalizeResearchSources(data);
-            setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText, sources: aiSources }]);
-            speakIfInstitutionVoiceEnabled(aiText);
-            if (isInstitutionHost && userProfile?.institutionId && user?.uid) {
-              logInstitutionCaseMessage({
-                institutionId: userProfile.institutionId,
-                studentUid: user.uid,
-                departmentId: activeDepartmentId || 'general',
-                from: 'ai',
-                text: aiText,
-                visibility: 'student',
-              });
-            }
-            // Log activity
-            logInstitutionActivity({ departmentId: activeDepartmentId, studentUid: user?.uid, chatId: activeChatId, role: userRole, content: text });
-          } catch (fallbackErr) {
-            setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: 'Error: Could not reach AI service.' }]);
-          }
+          setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', text: String(imgErr?.message || 'Image generation failed. Please try again.') }]);
         }
       } else {
         const idToken = user ? await user.getIdToken() : null;

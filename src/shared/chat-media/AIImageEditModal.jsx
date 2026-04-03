@@ -98,12 +98,12 @@ export default function AIImageEditModal({
       const nextFile = dataUrlToFile(nextUrl, item.name || "edited-image.png");
       setCurrentImageUrl(nextUrl);
       setPrompt("");
-      setStatusText(result.text || "Edited image ready.");
+      setStatusText(result.text || "Updated ✅");
       await onApply?.({
         imageUrl: nextUrl,
         file: nextFile,
         prompt: cleanPrompt,
-        text: result.text || "Here is the edited image.",
+        text: result.text || "Updated ✅",
         previousItem: item,
       });
     } catch (error) {

@@ -63,6 +63,8 @@ import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.js
 import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
 import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
 import {
+  getVagueImageEditClarification,
+  getVagueImageRequestClarification,
   isImageEditFollowUpPrompt,
   isImageGenerationPrompt,
 } from "../shared/image-generation/imageGenerationIntent.js";
@@ -1082,7 +1084,7 @@ export default function StudentLanding() {
           ...messages,
           {
             role: "assistant",
-            text: text || "Here is the edited image.",
+            text: text || "Updated ✅",
             imageUrl,
             type: "image",
           },
@@ -1139,10 +1141,16 @@ export default function StudentLanding() {
     if (!clean && pendingAttachments.length === 0) return;
     const shouldGenerateImage =
       pendingAttachments.length === 0 && isImageGenerationPrompt(clean);
+    const imageGenerationClarification = shouldGenerateImage
+      ? getVagueImageRequestClarification(clean)
+      : "";
     const shouldEditLatestImage =
       pendingAttachments.length === 0 &&
       !shouldGenerateImage &&
-      isImageEditFollowUpPrompt(clean);
+      (isImageEditFollowUpPrompt(clean) || Boolean(getVagueImageEditClarification(clean)));
+    const imageEditClarification = shouldEditLatestImage
+      ? getVagueImageEditClarification(clean)
+      : "";
     const latestImageUrl = shouldEditLatestImage
       ? imageAPI.getLatestImageFromMessages(messages)
       : "";
@@ -1166,6 +1174,19 @@ export default function StudentLanding() {
     clearMedia();
 
     if (shouldGenerateImage) {
+      if (imageGenerationClarification) {
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: imageGenerationClarification,
+            },
+          ],
+          clean || "Image generation"
+        );
+        return;
+      }
       try {
         const imageUrl = await imageAPI.generateImage(clean);
         updateActiveChatMessages(
@@ -1173,7 +1194,7 @@ export default function StudentLanding() {
             ...messages,
             {
               role: "assistant",
-              text: "Here is the generated image.",
+              text: "Done ✅",
               imageUrl,
               type: "image",
             },
@@ -1196,6 +1217,19 @@ export default function StudentLanding() {
     }
 
     if (shouldEditLatestImage) {
+      if (imageEditClarification && latestImageUrl) {
+        updateActiveChatMessages(
+          (chatMessages) => [
+            ...chatMessages,
+            {
+              role: "assistant",
+              text: imageEditClarification,
+            },
+          ],
+          clean || "Image editing"
+        );
+        return;
+      }
       if (!latestImageUrl) {
         updateActiveChatMessages(
           (chatMessages) => [
@@ -1220,7 +1254,7 @@ export default function StudentLanding() {
             ...chatMessages,
             {
               role: "assistant",
-              text: result.text || "Here is the edited image.",
+              text: result.text || "Updated ✅",
               imageUrl: result.image,
               type: "image",
             },

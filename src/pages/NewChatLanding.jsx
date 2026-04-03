@@ -67,6 +67,8 @@ import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.js
 import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
 import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
 import {
+  getVagueImageEditClarification,
+  getVagueImageRequestClarification,
   isImageEditFollowUpPrompt,
   isImageGenerationPrompt,
 } from "../shared/image-generation/imageGenerationIntent.js";
@@ -2883,7 +2885,7 @@ export default function NewChatLanding({
           ...messages,
           {
             role: "assistant",
-            text: text || "Here is the edited image.",
+            text: text || "Updated ✅",
             imageUrl,
             type: "image",
             ownerUid: currentUid,
@@ -3329,11 +3331,18 @@ export default function NewChatLanding({
       !shouldExtractLinks &&
       pendingAttachments.length === 0 &&
       isImageGenerationPrompt(requestPrompt);
+    const imageGenerationClarification = shouldGenerateImage
+      ? getVagueImageRequestClarification(requestPrompt)
+      : "";
     const shouldEditLatestImage =
       !shouldExtractLinks &&
       pendingAttachments.length === 0 &&
       !shouldGenerateImage &&
-      isImageEditFollowUpPrompt(requestPrompt);
+      (isImageEditFollowUpPrompt(requestPrompt) ||
+        Boolean(getVagueImageEditClarification(requestPrompt)));
+    const imageEditClarification = shouldEditLatestImage
+      ? getVagueImageEditClarification(requestPrompt)
+      : "";
     const latestImageUrl = shouldEditLatestImage
       ? imageAPI.getLatestImageFromMessages(messages)
       : "";
@@ -3432,6 +3441,21 @@ export default function NewChatLanding({
     }
 
     if (shouldGenerateImage) {
+      if (imageGenerationClarification) {
+        updateActiveChatMessages(
+          (messages) => [
+            ...messages,
+            {
+              role: "assistant",
+              text: imageGenerationClarification,
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || untitledChatBase
+        );
+        return;
+      }
       try {
         const imageUrl = await imageAPI.generateImage(requestPrompt);
         updateActiveChatMessages(
@@ -3439,7 +3463,7 @@ export default function NewChatLanding({
             ...messages,
             {
               role: "assistant",
-              text: "Here is the generated image.",
+              text: "Done ✅",
               imageUrl,
               type: "image",
               ownerUid: currentUid,
@@ -3466,6 +3490,21 @@ export default function NewChatLanding({
     }
 
     if (shouldEditLatestImage) {
+      if (imageEditClarification && latestImageUrl) {
+        updateActiveChatMessages(
+          (chatMessages) => [
+            ...chatMessages,
+            {
+              role: "assistant",
+              text: imageEditClarification,
+              ownerUid: currentUid,
+              createdAt: Date.now(),
+            },
+          ],
+          clean || untitledChatBase
+        );
+        return;
+      }
       if (!latestImageUrl) {
         updateActiveChatMessages(
           (chatMessages) => [
@@ -3492,7 +3531,7 @@ export default function NewChatLanding({
             ...chatMessages,
             {
               role: "assistant",
-              text: result.text || "Here is the edited image.",
+              text: result.text || "Updated ✅",
               imageUrl: result.image,
               type: "image",
               ownerUid: currentUid,
@@ -4045,9 +4084,7 @@ export default function NewChatLanding({
     >
       {!isAdminShellEmbed ? (
       <div className="md:hidden fixed top-0 left-0 right-0 z-50 pointer-events-none">
-        <div className="relative overflow-hidden border-b border-slate-200/60 bg-white/68 px-3.5 py-3.5 flex items-center justify-between pointer-events-auto shadow-[0_10px_30px_rgba(15,23,42,0.06)] supports-[backdrop-filter]:backdrop-blur-3xl dark:border-white/[0.1] dark:bg-slate-950/62 dark:shadow-[0_10px_34px_rgba(0,0,0,0.42)]">
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),rgba(255,255,255,0.04))] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))]" />
-          <div className="pointer-events-none absolute inset-x-8 top-0 h-full bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.34),rgba(255,255,255,0)_62%)] blur-2xl dark:bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.18),rgba(255,255,255,0)_62%)]" />
+        <div className="relative flex items-center justify-between px-3.5 py-3.5 pointer-events-auto">
           <div className="flex items-center gap-2.5 min-w-0">
             <button
               className="relative h-10 w-10 rounded-[18px] border border-slate-200/70 bg-white/70 shadow-[0_10px_24px_rgba(14,30,63,0.08)] backdrop-blur-xl grid place-items-center text-slate-700 dark:border-white/[0.1] dark:bg-slate-900/78 dark:text-slate-100"

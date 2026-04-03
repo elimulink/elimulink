@@ -15,7 +15,7 @@ const imageAPI = {
     if (!data?.image) throw new Error(data?.error || 'Image editing failed');
     return {
       image: data.image,
-      text: data.text || 'Here is the edited image.',
+      text: data.text || 'Updated ✅',
       provider: data.provider || data?.data?.provider || '',
       model: data.model || data?.data?.model || '',
     };

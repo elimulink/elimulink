@@ -1,4 +1,15 @@
+const VAGUE_IMAGE_REQUEST_PATTERNS = [
+  /^(?:generate|create|make|draw|design|illustrate|render)(?:\s+me)?\s+(?:an?\s+)?(?:image|picture|photo|illustration|graphic|visual|diagram|something)\s*\.?$/i,
+  /^(?:draw|sketch|paint)(?:\s+me)?\s+(?:something|anything)\s*\.?$/i,
+];
+
+const VAGUE_IMAGE_EDIT_PATTERNS = [
+  /^(?:edit|update|change|modify|improve|enhance)(?:\s+(?:it|this|this image|the image|image|picture))?\s*\.?$/i,
+  /^(?:make it|make this)(?:\s+(?:better|different))?\s*\.?$/i,
+];
+
 const IMAGE_GENERATION_PATTERNS = [
+  /^(?:generate|create|make|draw|design|illustrate|render)(?:\s+me)?\s+(?:an?\s+)?(?:image|picture|photo|illustration|graphic|visual|diagram|something)\s*\.?$/i,
   /^(?:generate|create|make|draw|design|illustrate|render)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|graphic|visual)\s+(?:of|for)?\s*(.+)$/i,
   /^(?:generate|create|make|design)\s+(?:me\s+)?(?:a|an)\s+(logo|poster|banner|flyer|cover|thumbnail|icon|wallpaper)\b.*$/i,
   /^(?:generate|create|make|draw|design|illustrate|render|show me)\s+(?:me\s+)?(?:an?\s+)?(?:map|diagram|chart|poster|banner|flyer|infographic|logo)\s*(?:of|for)?\b.*$/i,
@@ -18,6 +29,23 @@ export function isImageGenerationPrompt(text) {
   const value = String(text || "").trim();
   if (!value) return false;
   return IMAGE_GENERATION_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+export function getVagueImageRequestClarification(text) {
+  const value = String(text || "").trim();
+  if (!value || !isImageGenerationPrompt(value)) return "";
+  if (!VAGUE_IMAGE_REQUEST_PATTERNS.some((pattern) => pattern.test(value))) return "";
+  if (/\b(?:logo|poster|banner|flyer|cover|thumbnail|icon|wallpaper|map|diagram|chart|infographic)\b/i.test(value)) {
+    return "What should it show?";
+  }
+  return "What image would you like me to generate?";
+}
+
+export function getVagueImageEditClarification(text) {
+  const value = String(text || "").trim();
+  if (!value) return "";
+  if (!VAGUE_IMAGE_EDIT_PATTERNS.some((pattern) => pattern.test(value))) return "";
+  return "What would you like me to change in the image?";
 }
 
 export function isImageEditFollowUpPrompt(text) {

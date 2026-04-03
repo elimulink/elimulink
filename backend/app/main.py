@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from datetime import datetime
 import time
 import uuid
@@ -77,6 +78,12 @@ allowed_origin_regex = (
     r"|((app|student|institution)\.)?elimulink\.co\.ke"
     r")$"
 )
+allowed_origin_matcher = re.compile(allowed_origin_regex)
+
+
+def _is_allowed_origin(origin: str | None) -> bool:
+  value = str(origin or "").strip()
+  return bool(value and (value in allowed_origins or allowed_origin_matcher.match(value)))
 
 app.add_middleware(
     CORSMiddleware,
@@ -108,6 +115,16 @@ async def request_timing_log(request: Request, call_next):
   role = getattr(request.state, "role", None)
   institution_id = getattr(request.state, "institution_id", None)
   response.headers["X-Request-Id"] = request_id
+  request_origin = request.headers.get("origin")
+  if _is_allowed_origin(request_origin) and not response.headers.get("access-control-allow-origin"):
+    response.headers["Access-Control-Allow-Origin"] = str(request_origin)
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    existing_vary = response.headers.get("Vary")
+    if existing_vary:
+      if "origin" not in existing_vary.lower():
+        response.headers["Vary"] = f"{existing_vary}, Origin"
+    else:
+      response.headers["Vary"] = "Origin"
   print(f"[REQ] rid={request_id} uid={uid} role={role} institutionId={institution_id} {request.method} {request.url.path} -> {response.status_code} ({elapsed_ms:.1f}ms)")
   return response
 
