@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import {
   Search as SearchIcon,
   Send,
+  PhoneCall,
   Megaphone,
   Headphones,
   BarChart3,
@@ -9,6 +10,8 @@ import {
   Mail,
 } from "lucide-react";
 import { apiUrl } from "../../lib/apiUrl";
+import { askInstitutionLiveChat } from "../../lib/liveChatApi";
+import { getStoredLanguage } from "../../lib/userSettings";
 import imageAPI from "../../services/imageAPI";
 import {
   isImageClarificationQuestion,
@@ -21,6 +24,7 @@ import {
   resolveContinuationPrompt,
 } from "../../shared/chat/chatResponseBehavior";
 import ImageComparisonPicker from "../../shared/chat-media/ImageComparisonPicker.jsx";
+import LiveMultimodalSessionContainerV2 from "../../shared/live/LiveMultimodalSessionContainerV2.jsx";
 
 function getGreetingByHour(date = new Date()) {
   const h = date.getHours();
@@ -120,6 +124,7 @@ export default function InstitutionHome({
   const [status, setStatus] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState([]);
+  const [voiceOpen, setVoiceOpen] = useState(false);
 
   const quickFill = (text) => {
     setQuery(text);
@@ -128,6 +133,24 @@ export default function InstitutionHome({
       const el = document.getElementById("institution-ai-input");
       el?.focus?.();
     }, 0);
+  };
+
+  const openLiveSession = () => {
+    setStatus("");
+    setVoiceOpen(true);
+  };
+
+  const requestLiveVoiceReply = async ({ text, context }) => {
+    const liveContext = {
+      ...context,
+      hostMode: "institution",
+      institutionId: userProfile?.institutionId || null,
+      departmentId: activeDepartmentId || "general",
+      departmentName: activeDepartmentName || "General",
+      userName: name,
+    };
+    const data = await askInstitutionLiveChat({ text, context: liveContext });
+    return { text: String(data?.text || "Connection error.").trim() || "Connection error." };
   };
 
   const handleImageComparisonChoice = (messageId, choiceIndex, { skipped = false } = {}) => {
@@ -406,6 +429,16 @@ export default function InstitutionHome({
             >
               <Send className="h-5 w-5 text-white" />
             </button>
+            <button
+              type="button"
+              onClick={openLiveSession}
+              className="h-10 px-3 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition flex items-center gap-2 text-xs font-semibold"
+              aria-label="Open live voice chat"
+              title="Open live voice chat"
+            >
+              <PhoneCall className="h-4 w-4" />
+              Live
+            </button>
           </div>
           {status ? (
             <div className="mt-3 text-sm text-slate-600">{status}</div>
@@ -554,6 +587,18 @@ export default function InstitutionHome({
           </div>
         </div>
       </div>
+
+      <LiveMultimodalSessionContainerV2
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        family="ai"
+        app="institution"
+        settingsUid={user?.uid || null}
+        title="Institution Live"
+        subtitle="Talk through study support and institution tasks with AI."
+        language={getStoredLanguage("en-US", user?.uid || null)}
+        onAskAI={requestLiveVoiceReply}
+      />
     </div>
   );
 }
