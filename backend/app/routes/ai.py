@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from time import perf_counter
 from typing import Optional
 
 from fastapi import APIRouter, Header, Request
@@ -13,8 +14,13 @@ from ..core.dependencies import get_db
 from ..schemas.ai import AIChatRequest
 from ..services.ai_orchestrator import run_orchestrator
 from ..services.ai_service import stream_gemini_text
-from ..services.auth_service import resolve_user_from_header
+from ..services.auth_service import resolve_app_type, resolve_role, resolve_user_from_header
+from ..services.assistant_style import normalize_assistant_style
+from ..services.compound_question import build_compound_request_context
+from ..services.memory_service import get_recent_history
+from ..repositories.chat_repository import create_session, get_session, save_message
 from ..services.intent_router import detect_intent
+from ..utils.ids import new_session_id
 from ..utils import enforce_payload_limits, err_response, normalize_message, ok_response, rate_limit
 
 
@@ -55,6 +61,7 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
     message = normalize_message(body or {})
     mode = (body or {}).get("mode")
     workspace_context = (body or {}).get("workspaceContext") or (body or {}).get("context") or {}
+    assistant_style = normalize_assistant_style((body or {}).get("assistantStyle"))
     if not message:
         return err_response("MESSAGE_REQUIRED", 400)
     try:
@@ -71,6 +78,8 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
     user = user or CurrentUser(uid="public", role="public")
     rate_limit(user.uid, limit=15, window_sec=60)
     payload = AIChatRequest(**(body or {}))
+    trace_id = getattr(request.state, "request_id", None)
+    stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}
 
     with get_db() as db:
         answer, session_id, intent, tool_used = await run_orchestrator(
@@ -81,12 +90,15 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
             payload.app_type,
             mode=mode,
             workspace_context=workspace_context if isinstance(workspace_context, dict) else {},
+            assistant_style=normalize_assistant_style(payload.assistantStyle or assistant_style),
+            trace_id=trace_id,
         )
 
     stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}
     if stream_requested:
         async def event_stream() -> object:
             # First event confirms stream readiness.
+            started_at = perf_counter()
             yield "event: start\ndata: {\"ok\":true}\n\n"
             text = str(answer or "")
             if not text:
@@ -101,6 +113,10 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
                 await asyncio.sleep(0.01)
 
             payload_done = json.dumps({"text": text}, ensure_ascii=False)
+            print(
+                f"[AI_TIMING] rid={trace_id or 'none'} stage=stream_wrapper_end ms={int((perf_counter() - started_at) * 1000)}",
+                flush=True,
+            )
             yield f"event: done\ndata: {payload_done}\n\n"
 
         return StreamingResponse(
@@ -126,7 +142,12 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
 
 @router.post("/api/ai/student")
 async def ai_student(request: Request, authorization: Optional[str] = Header(default=None)) -> object:
+    request_received_at = perf_counter()
     body = await request.json()
+    print(
+        f"[AI_TIMING] rid={getattr(request.state, 'request_id', None) or 'none'} stage=backend_request_received ms={int((perf_counter() - request_received_at) * 1000)} endpoint=/api/ai/student",
+        flush=True,
+    )
     message = normalize_message(body or {})
     if not message:
         return err_response("MESSAGE_REQUIRED", 400)
@@ -139,14 +160,21 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
 
     if not authorization:
         return err_response("AUTH_REQUIRED", 401)
+    auth_started = perf_counter()
     try:
         user = resolve_user_from_header(authorization)
     except HTTPException:
         return err_response("AUTH_INVALID", 401)
     if not user:
         return err_response("AUTH_REQUIRED", 401)
+    print(
+        f"[AI_TIMING] rid={getattr(request.state, 'request_id', None) or 'none'} stage=auth_check ms={int((perf_counter() - auth_started) * 1000)} endpoint=/api/ai/student",
+        flush=True,
+    )
     rate_limit(user.uid, limit=15, window_sec=60)
     payload = AIChatRequest(**(body or {}))
+    trace_id = getattr(request.state, "request_id", None)
+    current_session_id = payload.session_id or new_session_id()
     intent = detect_intent(message)
     stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}
 
@@ -156,31 +184,90 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
         and intent in INSTITUTION_FAST_STREAM_INTENTS
     ):
         async def institution_event_stream() -> object:
+            stream_started = perf_counter()
+            first_chunk_at = None
             yield _sse_event("start", {"ok": True})
             accumulated_text = ""
-            context = {
-                "uid": user.uid,
-                "role": user.role,
-                "institutionId": (body or {}).get("institutionId") or user.institution_id,
-                "departmentId": (body or {}).get("departmentId") or user.department_id or "general",
-                "departmentName": (body or {}).get("departmentName") or "General",
-                "hostMode": "institution",
-            }
-            try:
-                async for delta in stream_gemini_text(
-                    message,
-                    context,
-                    mode=(body or {}).get("mode"),
-                    workspace_context=_workspace_context_from_body(body or {}, user),
-                ):
-                    accumulated_text += delta
-                    yield _sse_event("chunk", {"delta": delta})
-            except Exception as exc:  # noqa: BLE001
-                error_message = str(exc) if str(exc) != "MISSING_PROVIDER_KEY" else "AI provider key is missing."
-                yield _sse_event("error", {"message": error_message})
-                return
-            final_text = accumulated_text.strip() or "I couldn't generate a response."
-            yield _sse_event("done", {"text": final_text, "intent": intent})
+            prompt_started = perf_counter()
+            with get_db() as db:
+                if not get_session(db, current_session_id):
+                    create_session(
+                        db,
+                        current_session_id,
+                        user.uid or "public",
+                        resolve_app_type(payload.app_type),
+                        getattr(user, "institution_id", None),
+                        title="New Chat",
+                    )
+                save_message(db, current_session_id, "user", message, intent=intent, tool_used=None)
+                context = {
+                    "uid": user.uid,
+                    "role": user.role,
+                    "institutionId": (body or {}).get("institutionId") or user.institution_id,
+                    "departmentId": (body or {}).get("departmentId") or user.department_id or "general",
+                    "departmentName": (body or {}).get("departmentName") or "General",
+                    "hostMode": "institution",
+                }
+                history_started = perf_counter()
+                history = get_recent_history(db, current_session_id, limit=2)
+                print(
+                    f"[AI_TIMING] rid={trace_id or 'none'} stage=history_fetch ms={int((perf_counter() - history_started) * 1000)} "
+                    f"count={len(history)} limit=2 endpoint=/api/ai/student",
+                    flush=True,
+                )
+                compound_context = build_compound_request_context(message)
+                prompt_parts = []
+                if compound_context:
+                    prompt_parts.append(compound_context)
+                if history:
+                    history_text = "\n".join(f"{item['role']}: {item['content']}" for item in history)
+                    prompt_parts.append(f"HISTORY:\n{history_text}")
+                prompt_parts.append(f"USER_MESSAGE:\n{message}")
+                prompt = "\n\n".join(prompt_parts)
+                print(
+                    f"[AI_TIMING] rid={trace_id or 'none'} stage=prompt_build ms={int((perf_counter() - prompt_started) * 1000)} "
+                    f"chars={len(prompt)} endpoint=/api/ai/student",
+                    flush=True,
+                )
+                model_started = perf_counter()
+                try:
+                    async for delta in stream_gemini_text(
+                        prompt,
+                        context,
+                        mode=(body or {}).get("mode"),
+                        workspace_context=_workspace_context_from_body(body or {}, user),
+                        assistant_style=assistant_style,
+                        max_output_tokens=520,
+                        temperature=0.35,
+                    ):
+                        if first_chunk_at is None:
+                            first_chunk_at = perf_counter()
+                            print(
+                                f"[AI_TIMING] rid={trace_id or 'none'} stage=first_chunk ms={int((first_chunk_at - stream_started) * 1000)} "
+                                f"endpoint=/api/ai/student fast=true",
+                                flush=True,
+                            )
+                        accumulated_text += delta
+                        yield _sse_event("chunk", {"delta": delta})
+                except Exception as exc:  # noqa: BLE001
+                    error_message = str(exc) if str(exc) != "MISSING_PROVIDER_KEY" else "AI provider key is missing."
+                    yield _sse_event("error", {"message": error_message})
+                    return
+                final_text = accumulated_text.strip() or "I couldn't generate a response."
+                save_message(
+                    db,
+                    current_session_id,
+                    "assistant",
+                    final_text,
+                    intent=intent,
+                    tool_used=None,
+                )
+                print(
+                    f"[AI_TIMING] rid={trace_id or 'none'} stage=stream_end ms={int((perf_counter() - model_started) * 1000)} "
+                    f"endpoint=/api/ai/student fast=true chars={len(final_text)}",
+                    flush=True,
+                )
+                yield _sse_event("done", {"text": final_text, "intent": intent})
 
         return StreamingResponse(
             institution_event_stream(),

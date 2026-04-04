@@ -174,6 +174,11 @@ export default function InstitutionHome({
   const sendMessage = async (rawText) => {
     const text = String(rawText || "").trim();
     if (!text || isThinking) return;
+    const frontendTimingStarted = performance.now();
+    console.debug("[AI_TIMING][institution] frontend_send_start", {
+      at: frontendTimingStarted,
+      textLength: text.length,
+    });
     const requestText = resolveContinuationPrompt(text, messages);
     const latestAssistantText = String(
       [...messages].reverse().find((message) => message?.role === "ai")?.text || ""
@@ -293,6 +298,10 @@ export default function InstitutionHome({
         },
         body: JSON.stringify(requestBody),
       });
+      console.debug("[AI_TIMING][institution] frontend_request_dispatched", {
+        elapsedMs: Math.round(performance.now() - frontendTimingStarted),
+        status: response.status,
+      });
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -305,7 +314,14 @@ export default function InstitutionHome({
       const contentType = response.headers.get("content-type") || "";
       let aiText = "";
       if (contentType.includes("text/event-stream")) {
+        let sawFirstChunk = false;
         aiText = await readInstitutionStream(response, (_delta, nextText) => {
+          if (!sawFirstChunk) {
+            sawFirstChunk = true;
+            console.debug("[AI_TIMING][institution] frontend_first_chunk", {
+              elapsedMs: Math.round(performance.now() - frontendTimingStarted),
+            });
+          }
           setMessages((prev) =>
             prev.map((message) =>
               message.id === assistantMessageId ? { ...message, text: nextText } : message
@@ -324,6 +340,11 @@ export default function InstitutionHome({
             : message
         )
       );
+      requestAnimationFrame(() => {
+        console.debug("[AI_TIMING][institution] frontend_render_complete", {
+          elapsedMs: Math.round(performance.now() - frontendTimingStarted),
+        });
+      });
     } catch (error) {
       const status = error?.status ? ` (${error.status})` : "";
       console.error("[AI_ERROR][institutionHome]", {
