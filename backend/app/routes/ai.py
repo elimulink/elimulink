@@ -16,7 +16,7 @@ from ..services.ai_orchestrator import run_orchestrator
 from ..services.ai_service import stream_gemini_text
 from ..services.auth_service import resolve_app_type, resolve_role, resolve_user_from_header
 from ..services.assistant_style import normalize_assistant_style
-from ..services.compound_question import build_compound_request_context
+from ..services.compound_question import analyze_compound_question, build_compound_request_context
 from ..services.memory_service import get_recent_history
 from ..repositories.chat_repository import create_session, get_session, save_message
 from ..services.intent_router import detect_intent
@@ -208,14 +208,16 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                     "departmentName": (body or {}).get("departmentName") or "General",
                     "hostMode": "institution",
                 }
+                analysis = analyze_compound_question(message)
+                history_limit = 2 if (analysis.is_compound or analysis.brief or analysis.needs_live_limitations) else 0
                 history_started = perf_counter()
-                history = get_recent_history(db, current_session_id, limit=2)
+                history = get_recent_history(db, current_session_id, limit=history_limit) if history_limit else []
                 print(
                     f"[AI_TIMING] rid={trace_id or 'none'} stage=history_fetch ms={int((perf_counter() - history_started) * 1000)} "
-                    f"count={len(history)} limit=2 endpoint=/api/ai/student",
+                    f"count={len(history)} limit={history_limit} endpoint=/api/ai/student",
                     flush=True,
                 )
-                compound_context = build_compound_request_context(message)
+                compound_context = build_compound_request_context(message) if history_limit else ""
                 prompt_parts = []
                 if compound_context:
                     prompt_parts.append(compound_context)
