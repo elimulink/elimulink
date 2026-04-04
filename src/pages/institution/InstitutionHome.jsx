@@ -15,10 +15,12 @@ import {
   getVagueImageRequestClarification,
   isImageGenerationPrompt,
 } from "../../shared/image-generation/imageGenerationIntent";
+import { shouldOfferImageComparison } from "../../shared/image-generation/imageComparisonIntent";
 import {
   formatAiServiceError,
   resolveContinuationPrompt,
 } from "../../shared/chat/chatResponseBehavior";
+import ImageComparisonPicker from "../../shared/chat-media/ImageComparisonPicker.jsx";
 
 function getGreetingByHour(date = new Date()) {
   const h = date.getHours();
@@ -128,6 +130,42 @@ export default function InstitutionHome({
     }, 0);
   };
 
+  const handleImageComparisonChoice = (messageId, choiceIndex, { skipped = false } = {}) => {
+    if (!messageId) return;
+    setMessages((currentMessages) =>
+      currentMessages.map((message) => {
+        if (message.id !== messageId) return message;
+        if (skipped) {
+          return {
+            ...message,
+            comparisonSkipped: true,
+            comparisonSelectedIndex: null,
+            selectedImageIndex: null,
+            selectedImageUrl: "",
+            imageUrl: "",
+            type: "text",
+            text: "Skipped.",
+          };
+        }
+
+        const options = Array.isArray(message.imageOptions) ? message.imageOptions : [];
+        const selected = options[choiceIndex] || options.find((item) => Number(item?.index) === choiceIndex + 1);
+        const selectedImageUrl = String(selected?.image || "").trim();
+        if (!selectedImageUrl) return message;
+
+        return {
+          ...message,
+          comparisonSelectedIndex: choiceIndex,
+          selectedImageIndex: choiceIndex,
+          selectedImageUrl,
+          imageUrl: selectedImageUrl,
+          type: "image",
+          text: choiceIndex === 0 ? "Thanks — I’ll continue with image 1." : "Got it — using image 2.",
+        };
+      })
+    );
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     void sendMessage(query);
@@ -185,7 +223,43 @@ export default function InstitutionHome({
           );
           return;
         }
-        const imageUrl = await imageAPI.generateImage(effectiveRequestText, { idToken });
+        const shouldCompareImage = shouldOfferImageComparison(effectiveRequestText, {
+          isNewChat: messages.length <= 1,
+          hasExistingDirection: Boolean(imageAPI.getLatestImageFromMessages(messages)),
+          hasShownComparison: messages.some(
+            (message) => Boolean(message?.comparison) || (Array.isArray(message?.imageOptions) && message.imageOptions.length >= 2)
+          ),
+        });
+        const imageResult = await imageAPI.generateImage(effectiveRequestText, {
+          idToken,
+          compare: shouldCompareImage,
+        });
+        if (Array.isArray(imageResult.images) && imageResult.images.length >= 2) {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    type: "image-comparison",
+                    comparison: true,
+                    comparisonTitle: imageResult.text || "Which image do you like more?",
+                    comparisonSelectedIndex: null,
+                    selectedImageIndex: null,
+                    selectedImageUrl: "",
+                    imageUrl: "",
+                    text: "",
+                    imageOptions: imageResult.images.map((item, index) => ({
+                      index: index + 1,
+                      image: item.image,
+                      model: item.model || "",
+                    })),
+                  }
+                : message
+            )
+          );
+          return;
+        }
+        const imageUrl = imageResult.image;
         setMessages((prev) =>
           prev.map((message) =>
             message.id === assistantMessageId
@@ -329,8 +403,19 @@ export default function InstitutionHome({
                 }`}
               >
                 <div className="text-xs font-semibold uppercase tracking-wide mb-1 text-slate-500">
-                  {message.role === "user" ? "You" : "ElimuLink AI"}
-                </div>
+                {message.role === "user" ? "You" : "ElimuLink AI"}
+              </div>
+                {message.role === "ai" && Array.isArray(message.imageOptions) && message.imageOptions.length >= 2 && !message.selectedImageUrl && !message.comparisonSkipped ? (
+                  <div className="mb-3">
+                    <ImageComparisonPicker
+                      title={message.comparisonTitle || "Which image do you like more?"}
+                      images={message.imageOptions}
+                      selectedIndex={message.comparisonSelectedIndex ?? null}
+                      onChoose={(choiceIndex) => handleImageComparisonChoice(message.id, choiceIndex)}
+                      onSkip={() => handleImageComparisonChoice(message.id, null, { skipped: true })}
+                    />
+                  </div>
+                ) : null}
                 {message.role === "ai" && message.imageUrl ? (
                   <img
                     src={message.imageUrl}

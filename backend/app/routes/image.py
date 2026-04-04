@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from typing import Any
@@ -35,12 +36,12 @@ def _extract_image_output(raw: dict[str, Any]) -> tuple[str | None, str]:
     image_data_url = None
     response_text = ""
     for part in parts:
-      if part.get("text"):
-          response_text += str(part.get("text", "")).strip()
-      inline_data = part.get("inlineData") or part.get("inline_data") or {}
-      if inline_data.get("data"):
-          mime_type = inline_data.get("mimeType") or inline_data.get("mime_type") or "image/png"
-          image_data_url = f"data:{mime_type};base64,{inline_data['data']}"
+        if part.get("text"):
+            response_text += str(part.get("text", "")).strip()
+        inline_data = part.get("inlineData") or part.get("inline_data") or {}
+        if inline_data.get("data"):
+            mime_type = inline_data.get("mimeType") or inline_data.get("mime_type") or "image/png"
+            image_data_url = f"data:{mime_type};base64,{inline_data['data']}"
     return image_data_url, response_text
 
 
@@ -80,6 +81,34 @@ async def _request_image_generation(
     raise RuntimeError(last_error or "Image provider request failed.")
 
 
+async def _generate_image_variant(
+    *,
+    gemini_key: str,
+    models: list[str],
+    prompt: str,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+        },
+    }
+    model, raw = await _request_image_generation(
+        gemini_key=gemini_key,
+        models=models,
+        payload=payload,
+        timeout_seconds=timeout_seconds,
+    )
+    image_data_url, response_text = _extract_image_output(raw)
+    return {
+        "image": image_data_url,
+        "text": response_text,
+        "provider": "gemini",
+        "model": model,
+    }
+
+
 def _parse_image_data_url(value: str) -> tuple[str, str]:
     match = re.match(r"^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$", str(value or ""), re.DOTALL)
     if not match:
@@ -91,6 +120,7 @@ def _parse_image_data_url(value: str) -> tuple[str, str]:
 async def image(request: Request, user: CurrentUser = Depends(get_current_user)) -> object:
     body = await request.json()
     prompt = str((body or {}).get("prompt") or (body or {}).get("message") or (body or {}).get("text") or "").strip()
+    compare = bool((body or {}).get("compare") or (body or {}).get("comparison") or (body or {}).get("twoImages"))
     if not prompt:
         return err_response("MESSAGE_REQUIRED", 400)
 
@@ -99,13 +129,87 @@ async def image(request: Request, user: CurrentUser = Depends(get_current_user))
         return err_response("MISSING_PROVIDER_KEY", 500)
 
     models = _resolve_model_candidates("GEMINI_IMAGE_MODEL", DEFAULT_GENERATION_MODELS)
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"],
-        },
-    }
+
     try:
+        if compare:
+            variant_prompts = [
+                f"{prompt}\n\nVariation A: balanced, polished, and visually clear.",
+                f"{prompt}\n\nVariation B: slightly more expressive and visually distinct.",
+            ]
+            results = await asyncio.gather(
+                *[
+                    _generate_image_variant(
+                        gemini_key=gemini_key,
+                        models=models,
+                        prompt=variant_prompt,
+                        timeout_seconds=25.0,
+                    )
+                    for variant_prompt in variant_prompts
+                ],
+                return_exceptions=True,
+            )
+
+            images: list[dict[str, Any]] = []
+            for index, result in enumerate(results, start=1):
+                if isinstance(result, Exception):
+                    print(f"[IMAGE_PROVIDER_ERROR] compare_{index}: {result}", flush=True)
+                    continue
+                image_url = str(result.get("image") or "").strip()
+                if not image_url:
+                    continue
+                images.append(
+                    {
+                        "index": index,
+                        "image": image_url,
+                        "model": result.get("model"),
+                    }
+                )
+
+            if len(images) >= 2:
+                primary_model = str(images[0].get("model") or "")
+                data = {
+                    "image": images[0]["image"],
+                    "images": images,
+                    "comparison": True,
+                    "provider": "gemini",
+                    "model": primary_model,
+                    "text": "Which image do you like more?",
+                }
+                return ok_response(
+                    text=data["text"],
+                    data=data,
+                    image=data["image"],
+                    images=images,
+                    comparison=True,
+                    provider="gemini",
+                    model=primary_model,
+                )
+
+            if len(images) == 1:
+                fallback_model = str(images[0].get("model") or "")
+                fallback_image = images[0]["image"]
+                data = {
+                    "image": fallback_image,
+                    "provider": "gemini",
+                    "model": fallback_model,
+                    "text": "Done ✅",
+                }
+                return ok_response(
+                    text="Done ✅",
+                    data=data,
+                    image=fallback_image,
+                    provider="gemini",
+                    model=fallback_model,
+                )
+
+            return err_response("IMAGE_GENERATION_FAILED", 502, "No image was returned by the provider.")
+
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseModalities": ["TEXT", "IMAGE"],
+            },
+        }
         model, raw = await _request_image_generation(
             gemini_key=gemini_key,
             models=models,
