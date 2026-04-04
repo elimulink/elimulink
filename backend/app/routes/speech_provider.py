@@ -8,13 +8,12 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.services.voice_mapping import resolve_provider_voice, resolve_voice_style
+from app.services.model_registry import get_tts_model, get_transcribe_model
 from app.utils import ProviderTimeoutError, post_json_with_timeout
 
 router = APIRouter(prefix="/api/v1/speech", tags=["speech-provider"])
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts").strip()
-GEMINI_TRANSCRIBE_MODEL = os.getenv("GEMINI_TRANSCRIBE_MODEL", "gemini-2.5-flash").strip()
 
 
 class SpeakRequest(BaseModel):
@@ -106,7 +105,7 @@ async def transcribe(file: UploadFile = File(...)):
 
     try:
         raw = await post_json_with_timeout(
-            _provider_url(GEMINI_TRANSCRIBE_MODEL),
+            _provider_url(get_transcribe_model()),
             payload,
             timeout_seconds=60.0,
         )
@@ -146,7 +145,7 @@ async def speak(body: SpeakRequest):
 
     try:
         raw = await post_json_with_timeout(
-            _provider_url(GEMINI_TTS_MODEL),
+            _provider_url(get_tts_model()),
             payload,
             timeout_seconds=60.0,
         )

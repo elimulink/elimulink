@@ -6,11 +6,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from ..utils import ProviderTimeoutError, post_json_with_timeout
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash").strip()
-
+from ..utils import ProviderTimeoutError, is_provider_quota_error, post_json_with_timeout, provider_busy_response
+from .model_registry import get_live_model
 
 def _fail(code: str, message: str, status_code: int = 500) -> None:
     raise HTTPException(
@@ -58,13 +55,14 @@ async def generate_live_chat_reply(
     text: str,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if not GEMINI_API_KEY:
+    gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not gemini_api_key:
         _fail("MISSING_GEMINI_KEY", "GEMINI_API_KEY is not configured.")
 
     system_prompt = _build_system_prompt(family, app, context)
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{GEMINI_CHAT_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        f"{get_live_model()}:generateContent?key={gemini_api_key}"
     )
 
     user_parts = [{"text": f"USER_MESSAGE:\n{text.strip()}"}]
@@ -91,6 +89,13 @@ async def generate_live_chat_reply(
     except ProviderTimeoutError:
         _fail("LIVE_CHAT_TIMEOUT", "The live chat provider timed out.", 504)
     except RuntimeError as exc:
+        if is_provider_quota_error(str(exc)):
+            return {
+                "text": provider_busy_response(),
+                "provider": "gemini",
+                "model": get_live_model(),
+                "error_code": "LIVE_CHAT_RATE_LIMIT",
+            }
         _fail("LIVE_CHAT_PROVIDER_FAILED", str(exc), 502)
 
     output_text = _extract_text(data)
@@ -100,5 +105,5 @@ async def generate_live_chat_reply(
     return {
         "text": output_text,
         "provider": "gemini",
-        "model": GEMINI_CHAT_MODEL,
+        "model": get_live_model(),
     }

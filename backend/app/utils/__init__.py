@@ -21,6 +21,29 @@ class ProviderTimeoutError(Exception):
     pass
 
 
+PROVIDER_BUSY_MESSAGE = "ElimuLink is busy right now. Please try again in a moment."
+_PROVIDER_QUOTA_PATTERNS = (
+    "quota exceeded",
+    "rate limit",
+    "resource_exhausted",
+    "limit: 0",
+    "limit: 20",
+    "please retry in",
+    "too many requests",
+)
+
+
+def is_provider_quota_error(message: str | None) -> bool:
+    text = str(message or "").strip().lower()
+    if not text:
+        return False
+    return any(pattern in text for pattern in _PROVIDER_QUOTA_PATTERNS)
+
+
+def provider_busy_response() -> str:
+    return PROVIDER_BUSY_MESSAGE
+
+
 def ok_response(
     text: Optional[str] = None,
     data: Any = None,

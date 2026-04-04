@@ -9,7 +9,8 @@ router = APIRouter(prefix="/api/v1/vision", tags=["vision-assist"])
 
 
 class VisionAnalyzeRequest(BaseModel):
-    image_data_url: str = Field(..., description="Base64 data URL image")
+    image_data_url: str | None = Field(default=None, description="Base64 data URL image")
+    image_data_urls: list[str] | None = Field(default=None, description="Base64 data URL images")
     prompt: str = Field(..., min_length=1, max_length=4000)
     family: str | None = None
     app: str | None = None
@@ -19,6 +20,7 @@ class VisionAnalyzeRequest(BaseModel):
 async def analyze_image(body: VisionAnalyzeRequest):
     result = await analyze_visual_context(
         image_data_url=body.image_data_url,
+        image_data_urls=body.image_data_urls,
         prompt=body.prompt,
         family=body.family,
         app=body.app,

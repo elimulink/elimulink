@@ -21,7 +21,15 @@ from ..services.memory_service import get_recent_history
 from ..repositories.chat_repository import create_session, get_session, save_message
 from ..services.intent_router import detect_intent
 from ..utils.ids import new_session_id
-from ..utils import enforce_payload_limits, err_response, normalize_message, ok_response, rate_limit
+from ..utils import (
+    enforce_payload_limits,
+    err_response,
+    is_provider_quota_error,
+    normalize_message,
+    ok_response,
+    provider_busy_response,
+    rate_limit,
+)
 
 
 router = APIRouter()
@@ -252,8 +260,37 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                         accumulated_text += delta
                         yield _sse_event("chunk", {"delta": delta})
                 except Exception as exc:  # noqa: BLE001
-                    error_message = str(exc) if str(exc) != "MISSING_PROVIDER_KEY" else "AI provider key is missing."
-                    yield _sse_event("error", {"message": error_message})
+                    if str(exc) == "MISSING_PROVIDER_KEY":
+                        yield _sse_event("error", {"message": "AI provider key is missing."})
+                        return
+                    if is_provider_quota_error(str(exc)):
+                        fallback_text = provider_busy_response()
+                        accumulated_text = fallback_text
+                        if first_chunk_at is None:
+                            first_chunk_at = perf_counter()
+                            print(
+                                f"[AI_TIMING] rid={trace_id or 'none'} stage=first_chunk ms={int((first_chunk_at - stream_started) * 1000)} "
+                                f"endpoint=/api/ai/student fast=true provider=quota_fallback",
+                                flush=True,
+                            )
+                        yield _sse_event("chunk", {"delta": fallback_text})
+                        final_text = fallback_text
+                        save_message(
+                            db,
+                            current_session_id,
+                            "assistant",
+                            final_text,
+                            intent=f"{intent}:PROVIDER_RATE_LIMIT",
+                            tool_used=None,
+                        )
+                        print(
+                            f"[AI_TIMING] rid={trace_id or 'none'} stage=stream_end ms={int((perf_counter() - model_started) * 1000)} "
+                            f"endpoint=/api/ai/student fast=true chars={len(final_text)} provider=quota_fallback",
+                            flush=True,
+                        )
+                        yield _sse_event("done", {"text": final_text, "intent": f"{intent}:PROVIDER_RATE_LIMIT"})
+                        return
+                    yield _sse_event("error", {"message": str(exc)})
                     return
                 final_text = accumulated_text.strip() or "I couldn't generate a response."
                 save_message(

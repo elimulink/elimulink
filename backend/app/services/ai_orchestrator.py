@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import time
 from typing import Any, Dict, Optional, Tuple
 
 from ..repositories.chat_repository import create_session, get_session, save_message
@@ -29,6 +27,7 @@ async def run_orchestrator(
     app_type: Optional[str],
     mode: Optional[str] = None,
     workspace_context: Optional[Dict[str, Any]] = None,
+    assistant_style: Optional[str] = None,
 ) -> Tuple[str, str, str, Optional[str]]:
     resolved_app = resolve_app_type(app_type)
     role = resolve_role(user)
@@ -66,14 +65,19 @@ async def run_orchestrator(
     prompt = build_context_prompt(message, intent, tool_data, history)
 
     save_message(db, current_session_id, "user", message, intent=intent, tool_used=None)
-    start = time.perf_counter()
     answer, error_code = await generate_answer(
         prompt,
-        {"app_type": resolved_app, "role": role, "tool_data": tool_data or {}, "history": history},
+        {
+            "app_type": resolved_app,
+            "role": role,
+            "tool_data": tool_data or {},
+            "history": history,
+            "assistantStyle": assistant_style,
+        },
         mode=mode,
         workspace_context=workspace_context,
+        assistant_style=assistant_style,
     )
-    latency_ms = int((time.perf_counter() - start) * 1000)
     save_message(
         db,
         current_session_id,
@@ -81,7 +85,6 @@ async def run_orchestrator(
         answer,
         intent=intent,
         tool_used=tool_used,
-        latency_ms=latency_ms,
     )
     if error_code:
         intent = f"{intent}:{error_code}"

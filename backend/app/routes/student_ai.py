@@ -10,13 +10,17 @@ from ..utils import (
     ProviderTimeoutError,
     enforce_payload_limits,
     err_response,
+    is_provider_quota_error,
     normalize_message,
     ok_response,
+    provider_busy_response,
     rate_limit,
     require_department,
     require_institution,
 )
+from ..services.assistant_style import normalize_assistant_style
 from ..services.institution_graph import build_institution_graph, resolve_graph_context
+from ..services.model_registry import get_chat_model
 from .chat import call_gemini_text
 
 
@@ -31,6 +35,7 @@ async def student_ai(request: Request, user: CurrentUser = Depends(get_current_u
     )
     body = await request.json()
     message = normalize_message(body or {})
+    assistant_style = normalize_assistant_style((body or {}).get("assistantStyle"))
     if not message:
         return err_response("MESSAGE_REQUIRED", 400)
     try:
@@ -103,7 +108,7 @@ async def student_ai(request: Request, user: CurrentUser = Depends(get_current_u
         f"endpoint=/api/ai/student provider=gemini status=started"
     )
     try:
-        text = await call_gemini_text(message, context)
+        text = await call_gemini_text(message, context, assistant_style=assistant_style)
         print(
             f"[AI_DEBUG] rid={getattr(request.state, 'request_id', None)} "
             f"uid={user.uid} role={user.role} institutionId={scoped_institution} "
@@ -124,6 +129,22 @@ async def student_ai(request: Request, user: CurrentUser = Depends(get_current_u
                 f"endpoint=/api/ai/student provider=gemini status=missing_key"
             )
             return err_response("MISSING_PROVIDER_KEY", 500)
+        if is_provider_quota_error(str(exc)):
+            fallback = provider_busy_response()
+            print(
+                f"[AI_DEBUG] rid={getattr(request.state, 'request_id', None)} "
+                f"uid={user.uid} role={user.role} institutionId={scoped_institution} "
+                f"endpoint=/api/ai/student provider=gemini status=quota_fallback"
+            )
+            return ok_response(
+                text=fallback,
+                data={
+                    "answer": fallback,
+                    "provider": "gemini",
+                    "model": get_chat_model(),
+                    "error_code": "PROVIDER_RATE_LIMIT",
+                },
+            )
         print(
             f"[AI_DEBUG] rid={getattr(request.state, 'request_id', None)} "
             f"uid={user.uid} role={user.role} institutionId={scoped_institution} "

@@ -8,9 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from ..utils import ProviderTimeoutError, post_json_with_timeout
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash").strip()
+from .model_registry import get_vision_model
 
 
 def _fail(code: str, message: str, status_code: int = 500) -> None:
@@ -59,18 +57,24 @@ def _extract_json_block(text: str) -> dict[str, Any]:
 
 async def analyze_visual_context(
     *,
-    image_data_url: str,
+    image_data_url: str | None = None,
+    image_data_urls: list[str] | None = None,
     prompt: str,
     family: str | None = None,
     app: str | None = None,
 ) -> dict[str, Any]:
-    if not GEMINI_API_KEY:
+    gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not gemini_api_key:
         _fail("MISSING_GEMINI_KEY", "GEMINI_API_KEY is not configured.")
 
-    mime_type, image_b64 = _parse_data_url(image_data_url)
+    image_sources = [value for value in ([image_data_url] if image_data_url else []) + list(image_data_urls or []) if value]
+    if not image_sources:
+        _fail("INVALID_IMAGE", "Expected image data URL.", 400)
+
+    parsed_images = [_parse_data_url(source) for source in image_sources]
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{GEMINI_VISION_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        f"{get_vision_model()}:generateContent?key={gemini_api_key}"
     )
     system = (
         "You analyze screenshots and camera photos for ElimuLink Live. "
@@ -88,7 +92,10 @@ async def analyze_visual_context(
                 "role": "user",
                 "parts": [
                     {"text": user_text},
-                    {"inlineData": {"mimeType": mime_type, "data": image_b64}},
+                    *[
+                        {"inlineData": {"mimeType": mime_type, "data": image_b64}}
+                        for mime_type, image_b64 in parsed_images
+                    ],
                 ],
             }
         ],
@@ -116,5 +123,5 @@ async def analyze_visual_context(
         "answer": str(parsed.get("answer", "")),
         "highlights": highlights,
         "provider": "gemini",
-        "model": GEMINI_VISION_MODEL,
+        "model": get_vision_model(),
     }

@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 
 from ..auth import CurrentUser, get_current_user
+from ..services.model_registry import get_tts_model
 from ..utils import (
     ProviderTimeoutError,
     err_response,
@@ -63,7 +64,7 @@ async def tts(request: Request, user: CurrentUser = Depends(get_current_user)) -
     voice_name = str((body or {}).get("voiceName") or "Kore")
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash-preview-tts:generateContent?key={gemini_key}"
+        f"{get_tts_model()}:generateContent?key={gemini_key}"
     )
     payload = {
         "contents": [{"parts": [{"text": text[:300]}]}],

@@ -7,6 +7,8 @@ from typing import Any, AsyncIterator
 import httpx
 
 from ..utils import ProviderTimeoutError, post_json_with_timeout
+from .assistant_style import build_assistant_style_instruction, normalize_assistant_style
+from .model_registry import get_chat_model
 
 STUDENT_SYSTEM_PROMPT = """You are ElimuLink AI, an intelligent academic assistant for students and universities.
 
@@ -73,7 +75,11 @@ Important rules:
 DEFAULT_SYSTEM_PROMPT = STUDENT_SYSTEM_PROMPT
 
 
-def resolve_system_prompt(mode: str | None = None, workspace_context: dict[str, Any] | None = None) -> str:
+def resolve_system_prompt(
+    mode: str | None = None,
+    workspace_context: dict[str, Any] | None = None,
+    assistant_style: str | None = None,
+) -> str:
     normalized_mode = str(mode or "").strip().lower()
 
     if normalized_mode == "admin":
@@ -82,7 +88,8 @@ def resolve_system_prompt(mode: str | None = None, workspace_context: dict[str, 
     if workspace_context and str(workspace_context.get("scope", "")).strip().lower() == "admin":
         return ADMIN_SYSTEM_PROMPT
 
-    return STUDENT_SYSTEM_PROMPT
+    style_instruction = build_assistant_style_instruction(assistant_style)
+    return f"{STUDENT_SYSTEM_PROMPT}\n\n{style_instruction}"
 
 
 def build_context_prefix(mode: str | None = None, workspace_context: dict[str, Any] | None = None) -> str:
@@ -117,6 +124,7 @@ async def call_gemini_text(
     system_instruction: str | None = None,
     mode: str | None = None,
     workspace_context: dict[str, Any] | None = None,
+    assistant_style: str | None = None,
 ) -> str:
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not gemini_key:
@@ -124,9 +132,10 @@ async def call_gemini_text(
 
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={gemini_key}"
+        f"{get_chat_model()}:generateContent?key={gemini_key}"
     )
-    system_text = system_instruction or resolve_system_prompt(mode, workspace_context)
+    resolved_style = normalize_assistant_style(assistant_style or context.get("assistantStyle") or context.get("assistant_style"))
+    system_text = system_instruction or resolve_system_prompt(mode, workspace_context, resolved_style)
     context_prefix = build_context_prefix(mode, workspace_context)
     final_user_message = f"{context_prefix}{message}".strip()
 
@@ -163,7 +172,10 @@ async def stream_gemini_text(
     system_instruction: str | None = None,
     mode: str | None = None,
     workspace_context: dict[str, Any] | None = None,
+    assistant_style: str | None = None,
     timeout_seconds: float = 25.0,
+    max_output_tokens: int = 900,
+    temperature: float = 0.4,
 ) -> AsyncIterator[str]:
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not gemini_key:
@@ -171,9 +183,10 @@ async def stream_gemini_text(
 
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:streamGenerateContent?alt=sse&key={gemini_key}"
+        f"{get_chat_model()}:streamGenerateContent?alt=sse&key={gemini_key}"
     )
-    system_text = system_instruction or resolve_system_prompt(mode, workspace_context)
+    resolved_style = normalize_assistant_style(assistant_style or context.get("assistantStyle") or context.get("assistant_style"))
+    system_text = system_instruction or resolve_system_prompt(mode, workspace_context, resolved_style)
     context_prefix = build_context_prefix(mode, workspace_context)
     final_user_message = f"{context_prefix}{message}".strip()
     payload = {
@@ -188,8 +201,8 @@ async def stream_gemini_text(
             }
         ],
         "generationConfig": {
-            "temperature": 0.4,
-            "maxOutputTokens": 900,
+            "temperature": temperature,
+            "maxOutputTokens": max_output_tokens,
             "topP": 0.9,
         },
     }

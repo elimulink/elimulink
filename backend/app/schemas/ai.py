@@ -10,6 +10,7 @@ class AIChatRequest(BaseModel):
     session_id: Optional[str] = None
     app_type: Optional[str] = None
     mode: Optional[str] = None
+    assistantStyle: Optional[str] = None
     workspaceContext: Optional[Dict[str, Any]] = None
     context: Optional[Dict[str, Any]] = None
     attachments: Optional[List[Dict[str, Any]]] = None

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
 from ..auth import CurrentUser, get_current_user
+from ..services.model_registry import get_image_edit_model_candidates, get_image_model_candidates
 from ..utils import (
     ProviderTimeoutError,
     err_response,
@@ -17,15 +17,6 @@ from ..utils import (
 
 
 router = APIRouter()
-
-DEFAULT_GENERATION_MODELS = (
-    "gemini-3-pro-image-preview",
-    "gemini-2.5-flash-image",
-)
-DEFAULT_EDIT_MODELS = (
-    "gemini-3-pro-image-preview",
-    "gemini-2.5-flash-image",
-)
 
 
 def _extract_image_output(raw: dict[str, Any]) -> tuple[str | None, str]:
@@ -40,15 +31,6 @@ def _extract_image_output(raw: dict[str, Any]) -> tuple[str | None, str]:
             mime_type = inline_data.get("mimeType") or inline_data.get("mime_type") or "image/png"
             image_data_url = f"data:{mime_type};base64,{inline_data['data']}"
     return image_data_url, response_text
-
-
-def _resolve_model_candidates(env_name: str, defaults: tuple[str, ...]) -> list[str]:
-    configured = [
-        item.strip()
-        for item in str(os.getenv(env_name, "") or "").split(",")
-        if item.strip()
-    ]
-    return list(dict.fromkeys([*defaults, *configured]))
 
 
 async def _request_image_generation(
@@ -125,7 +107,7 @@ async def image(request: Request, user: CurrentUser = Depends(get_current_user))
     if not gemini_key:
         return err_response("MISSING_PROVIDER_KEY", 500)
 
-    models = _resolve_model_candidates("GEMINI_IMAGE_MODEL", DEFAULT_GENERATION_MODELS)
+    models = get_image_model_candidates()
 
     try:
         if compare:
@@ -258,7 +240,7 @@ async def edit_image(request: Request, user: CurrentUser = Depends(get_current_u
     except ValueError as exc:
         return err_response("INVALID_IMAGE", 400, str(exc))
 
-    models = _resolve_model_candidates("GEMINI_IMAGE_EDIT_MODEL", DEFAULT_EDIT_MODELS)
+    models = get_image_edit_model_candidates()
     payload = {
         "contents": [
             {
