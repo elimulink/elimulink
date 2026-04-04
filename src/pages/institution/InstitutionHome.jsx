@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
+  Paperclip,
   Search as SearchIcon,
   Send,
   PhoneCall,
@@ -23,8 +24,12 @@ import {
   formatAiServiceError,
   resolveContinuationPrompt,
 } from "../../shared/chat/chatResponseBehavior";
+import AttachmentChipsTray from "../../shared/chat-media/AttachmentChipsTray.jsx";
+import ChatMediaPreviewModal from "../../shared/chat-media/ImagePreviewModal.jsx";
+import useCapturedMedia from "../../shared/chat-media/useCapturedMedia.js";
 import ImageComparisonPicker from "../../shared/chat-media/ImageComparisonPicker.jsx";
 import LiveMultimodalSessionContainerV2 from "../../shared/live/LiveMultimodalSessionContainerV2.jsx";
+import "../../shared/chat-media/chat-media.css";
 
 function getGreetingByHour(date = new Date()) {
   const h = date.getHours();
@@ -110,6 +115,23 @@ async function readInstitutionStream(response, onDelta) {
   return finalText || accumulatedText;
 }
 
+function getAttachmentGridClass(count) {
+  if (count <= 1) return "grid-cols-1";
+  if (count === 2) return "grid-cols-2";
+  if (count <= 4) return "grid-cols-2";
+  return "grid-cols-2 sm:grid-cols-3";
+}
+
+async function readFileAsDataUrl(file) {
+  if (!file) return "";
+  return await new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function InstitutionHome({
   user,
   userProfile,
@@ -125,6 +147,18 @@ export default function InstitutionHome({
   const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState([]);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const fileInputRef = useRef(null);
+  const {
+    mediaItems: attachments,
+    previewItem,
+    addFiles,
+    removeMedia,
+    clearMedia,
+    openPreview,
+    closePreview,
+    handlePaste,
+    mediaNotice,
+  } = useCapturedMedia();
 
   const quickFill = (text) => {
     setQuery(text);
@@ -138,6 +172,12 @@ export default function InstitutionHome({
   const openLiveSession = () => {
     setStatus("");
     setVoiceOpen(true);
+  };
+
+  const canSend = query.trim().length > 0 || attachments.length > 0;
+
+  const handleFileUpload = () => {
+    fileInputRef.current?.click?.();
   };
 
   const requestLiveVoiceReply = async ({ text, context }) => {
@@ -195,8 +235,10 @@ export default function InstitutionHome({
   };
 
   const sendMessage = async (rawText) => {
+    const pendingAttachments = attachments;
     const text = String(rawText || "").trim();
-    if (!text || isThinking) return;
+    if (!text && pendingAttachments.length === 0) return;
+    if (isThinking) return;
     const frontendTimingStarted = performance.now();
     console.debug("[AI_TIMING][institution] frontend_send_start", {
       at: frontendTimingStarted,
@@ -209,7 +251,7 @@ export default function InstitutionHome({
     const effectiveRequestText = isImageClarificationQuestion(latestAssistantText)
       ? `Generate an image of ${text}`
       : requestText;
-    const shouldGenerateImage = isImageGenerationPrompt(effectiveRequestText);
+    const shouldGenerateImage = pendingAttachments.length === 0 && isImageGenerationPrompt(effectiveRequestText);
     const imageGenerationClarification = shouldGenerateImage
       ? getVagueImageRequestClarification(effectiveRequestText)
       : "";
@@ -218,9 +260,19 @@ export default function InstitutionHome({
     setIsThinking(true);
     const userMessageId = Date.now();
     const assistantMessageId = userMessageId + 1;
+    const messageText = text || `Sent ${pendingAttachments.length} image${pendingAttachments.length === 1 ? "" : "s"}`;
+    const attachmentDisplayItems = await Promise.all(
+      pendingAttachments.map(async (item) => ({
+        ...item,
+        previewUrl: item.previewUrl || (item.file ? await readFileAsDataUrl(item.file) : item.url || ""),
+      }))
+    );
+    attachmentDisplayItems.forEach((item) => {
+      if (!item.url && item.previewUrl) item.url = item.previewUrl;
+    });
     setMessages((prev) => [
       ...prev,
-      { id: userMessageId, role: "user", text },
+      { id: userMessageId, role: "user", text: messageText, attachments: attachmentDisplayItems },
       {
         id: assistantMessageId,
         role: "ai",
@@ -234,6 +286,48 @@ export default function InstitutionHome({
     try {
       if (!user) throw new Error("Please sign in");
       const idToken = await user.getIdToken();
+
+      clearMedia();
+
+      if (pendingAttachments.length > 0) {
+        const formData = new FormData();
+        formData.append("message", text || `Sent ${pendingAttachments.length} image${pendingAttachments.length === 1 ? "" : "s"}`);
+        formData.append("institutionId", userProfile?.institutionId || "");
+        formData.append("departmentId", activeDepartmentId || "general");
+        pendingAttachments.forEach((item) => {
+          if (item?.file instanceof File) {
+            formData.append("files", item.file, item.name);
+          }
+        });
+        const response = await fetch(apiUrl("/api/chat/upload"), {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: formData,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const error = new Error(data?.message || data?.error || `Request failed (${response.status})`);
+          error.status = response.status;
+          error.body = data;
+          throw error;
+        }
+        const aiText = data?.text || "I could not generate a response.";
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? { ...message, text: aiText, type: "text" }
+              : message
+          )
+        );
+        requestAnimationFrame(() => {
+          console.debug("[AI_TIMING][institution] frontend_render_complete", {
+            elapsedMs: Math.round(performance.now() - frontendTimingStarted),
+          });
+        });
+        return;
+      }
 
       if (shouldGenerateImage) {
         if (imageGenerationClarification) {
@@ -401,6 +495,11 @@ export default function InstitutionHome({
     }
   };
 
+  const handleAttachmentUpload = (event) => {
+    addFiles(event.target.files, "file");
+    event.target.value = "";
+  };
+
   return (
     <div className="bg-slate-50 text-slate-900">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
@@ -412,36 +511,61 @@ export default function InstitutionHome({
         </div>
 
         <form onSubmit={handleSubmit} className="mt-6">
-          <div className="w-full bg-white border border-slate-200 rounded-full shadow-sm flex items-center gap-3 px-4 sm:px-5 py-3">
-            <SearchIcon className="h-5 w-5 text-slate-400" />
-            <input
-              id="institution-ai-input"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="flex-1 outline-none text-sm sm:text-base placeholder:text-slate-400"
-              placeholder="Ask about policies, draft a memo, generate report..."
-            />
-            <button
-              type="submit"
-              disabled={isThinking}
-              className="h-10 w-12 sm:h-12 sm:w-14 rounded-full bg-sky-600 hover:bg-sky-500 transition flex items-center justify-center"
-              aria-label="Send"
-            >
-              <Send className="h-5 w-5 text-white" />
-            </button>
-            <button
-              type="button"
-              onClick={openLiveSession}
-              className="h-10 px-3 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition flex items-center gap-2 text-xs font-semibold"
-              aria-label="Open live voice chat"
-              title="Open live voice chat"
-            >
-              <PhoneCall className="h-4 w-4" />
-              Live
-            </button>
+          <AttachmentChipsTray
+            items={attachments}
+            onPreview={openPreview}
+            onRemove={removeMedia}
+          />
+          <div className="w-full bg-white border border-slate-200 rounded-[28px] shadow-sm px-4 sm:px-5 py-3">
+            <div className="flex items-start gap-3">
+              <SearchIcon className="mt-1 h-5 w-5 text-slate-400" />
+              <textarea
+                id="institution-ai-input"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onPaste={handlePaste}
+                rows={1}
+                className="flex-1 resize-none outline-none text-sm sm:text-base placeholder:text-slate-400 bg-transparent pt-0.5 min-h-[34px]"
+                placeholder="Ask about policies, draft a memo, generate report..."
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleFileUpload}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+                title="Attach images"
+              >
+                <Paperclip size={14} />
+                Images
+              </button>
+              <button
+                type="button"
+                onClick={openLiveSession}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+                aria-label="Open live voice chat"
+                title="Open live voice chat"
+              >
+                <PhoneCall className="h-4 w-4" />
+                Live
+              </button>
+              <div className="flex-1" />
+              <button
+                type="submit"
+                disabled={isThinking || !canSend}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-sky-600 px-4 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Send"
+              >
+                <Send className="h-5 w-5" />
+                Send
+              </button>
+            </div>
           </div>
           {status ? (
             <div className="mt-3 text-sm text-slate-600">{status}</div>
+          ) : null}
+          {mediaNotice ? (
+            <div className="mt-2 text-xs font-medium text-sky-700">{mediaNotice}</div>
           ) : null}
         </form>
 
@@ -468,6 +592,26 @@ export default function InstitutionHome({
                       onChoose={(choiceIndex) => handleImageComparisonChoice(message.id, choiceIndex)}
                       onSkip={() => handleImageComparisonChoice(message.id, null, { skipped: true })}
                     />
+                  </div>
+                ) : null}
+                {Array.isArray(message.attachments) && message.attachments.length > 0 ? (
+                  <div className={`mb-3 grid gap-2 ${getAttachmentGridClass(message.attachments.length)}`}>
+                    {message.attachments.map((attachment, index) => (
+                      <button
+                        key={attachment.id || `${message.id}-attachment-${index}`}
+                        type="button"
+                        onClick={() => openPreview(attachment)}
+                        className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                      >
+                        <img
+                          src={attachment.previewUrl || attachment.url}
+                          alt={attachment.name || `Attachment ${index + 1}`}
+                          className={`w-full object-cover ${
+                            message.attachments.length === 1 ? "aspect-[4/3] max-h-[320px]" : "aspect-square max-h-[220px]"
+                          }`}
+                        />
+                      </button>
+                    ))}
                   </div>
                 ) : null}
                 {message.role === "ai" && message.imageUrl ? (
@@ -599,6 +743,15 @@ export default function InstitutionHome({
         language={getStoredLanguage("en-US", user?.uid || null)}
         onAskAI={requestLiveVoiceReply}
       />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={handleAttachmentUpload}
+      />
+      <ChatMediaPreviewModal item={previewItem} onClose={closePreview} />
     </div>
   );
 }
