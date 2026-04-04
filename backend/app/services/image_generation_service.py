@@ -129,7 +129,25 @@ def _is_retryable_openai_error(message: str) -> bool:
     text = str(message or "").strip().lower()
     if not text:
         return False
-    if any(marker in text for marker in ("rate limit", "quota", "too many requests", "timeout", "service unavailable", "temporarily unavailable", "internal server error", "connection error")):
+    if any(
+        marker in text
+        for marker in (
+            "rate limit",
+            "quota",
+            "too many requests",
+            "timeout",
+            "service unavailable",
+            "temporarily unavailable",
+            "internal server error",
+            "connection error",
+            "model not found",
+            "not found",
+            "not supported",
+            "unsupported",
+            "does not exist",
+            "unavailable",
+        )
+    ):
         return True
     status = _parse_status_from_message(text)
     if status is not None and (status == 429 or 500 <= status < 600):
