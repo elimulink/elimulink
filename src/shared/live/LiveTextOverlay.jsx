@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Camera, ImagePlus, Monitor } from "lucide-react";
 
 export default function LiveTextOverlay({
   open,
@@ -6,6 +7,12 @@ export default function LiveTextOverlay({
   onSend,
   placeholder = "Type a message",
   busy = false,
+  title = "Live",
+  subtitle = "Talk naturally with AI",
+  mode = "idle",
+  onTakePhoto,
+  onUploadPhoto,
+  onTakeScreenshot,
 }) {
   const [value, setValue] = useState("");
   const inputRef = useRef(null);
@@ -41,15 +48,29 @@ export default function LiveTextOverlay({
 
   return (
     <div className="el-live-text-overlay-backdrop" onClick={onClose}>
-      <div
-        className="el-live-text-overlay"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="el-live-text-overlay" onClick={(e) => e.stopPropagation()}>
         <div className="el-live-text-overlay-header">
-          <span>Chat</span>
-          <button type="button" onClick={onClose} aria-label="Close text input">
-            ✕
+          <div className="min-w-0">
+            <div className="el-live-text-overlay-title">{title}</div>
+            <div className="el-live-text-overlay-subtitle">
+              {mode === "listening" ? "Listening" : mode === "thinking" ? "Thinking" : subtitle}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close text input" className="el-live-text-overlay-close">
+            ×
           </button>
+        </div>
+
+        <div className="el-live-text-overlay-tools">
+          {typeof onTakePhoto === "function" ? (
+            <ToolChip icon={<Camera size={14} />} label="Photo" onClick={onTakePhoto} />
+          ) : null}
+          {typeof onUploadPhoto === "function" ? (
+            <ToolChip icon={<ImagePlus size={14} />} label="Upload" onClick={onUploadPhoto} />
+          ) : null}
+          {typeof onTakeScreenshot === "function" ? (
+            <ToolChip icon={<Monitor size={14} />} label="Shot" onClick={onTakeScreenshot} />
+          ) : null}
         </div>
 
         <div className="el-live-text-overlay-composer">
@@ -72,5 +93,14 @@ export default function LiveTextOverlay({
         </div>
       </div>
     </div>
+  );
+}
+
+function ToolChip({ icon, label, onClick }) {
+  return (
+    <button type="button" className="el-live-text-tool" onClick={onClick}>
+      <span className="el-live-text-tool-icon">{icon}</span>
+      <span>{label}</span>
+    </button>
   );
 }

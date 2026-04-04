@@ -134,7 +134,7 @@ export default function LiveVoiceOverlayV2({
               </aside>
             ) : null}
 
-            <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center lg:hidden">
+            <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center lg:hidden">
               <div className="pointer-events-auto">
                 <MobileUtilityStack
                   cameraEnabled={cameraEnabled}
@@ -196,6 +196,12 @@ export default function LiveVoiceOverlayV2({
         onClose={onCloseTextOverlay}
         onSend={onSendTextOverlay || onSubmitTextMessage}
         busy={false}
+        title={title}
+        subtitle={subtitle}
+        mode={mode}
+        onTakePhoto={onTakePhoto}
+        onUploadPhoto={onUploadPhoto}
+        onTakeScreenshot={onTakeScreenshot}
       />
     </div>
   );
@@ -540,7 +546,7 @@ function MobileUtilityStack({
   onToggleScreenRecording,
 }) {
   return (
-    <div className="flex flex-col gap-2.5 rounded-[24px] bg-black/12 p-1.5 backdrop-blur-sm ring-1 ring-white/8">
+    <div className="flex flex-col gap-2 rounded-[22px] bg-black/14 p-1.25 backdrop-blur-sm ring-1 ring-white/10 shadow-[0_12px_30px_rgba(2,6,23,0.18)]">
       <UtilityIconButton
         label={
           !screenShareSupported
@@ -619,7 +625,7 @@ function UtilityIconButton({ icon, label, onClick, active = false, dimmed = fals
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-[54px] w-[56px] flex-col items-center justify-center gap-1 rounded-[18px] px-1.5 backdrop-blur-xl transition ${
+      className={`flex min-h-[50px] w-[52px] flex-col items-center justify-center gap-1 rounded-[17px] px-1 backdrop-blur-xl transition ${
         active
           ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(59,130,246,0.32)]"
           : "bg-black/24 text-white shadow-[0_14px_26px_rgba(2,6,23,0.24)] ring-1 ring-white/10"
@@ -640,7 +646,7 @@ function DesktopUtilityButton({ icon, label, onClick, active = false, dimmed = f
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-[64px] min-w-[76px] flex-col items-center justify-center rounded-[22px] px-2 py-2.5 text-center transition ${
+      className={`flex min-h-[60px] min-w-[72px] flex-col items-center justify-center rounded-[20px] px-2 py-2 text-center transition ${
         active
           ? "bg-blue-600 text-white shadow-[0_8px_24px_rgba(59,130,246,0.35)]"
           : "bg-white/8 text-white ring-1 ring-white/10 hover:bg-white/12"
