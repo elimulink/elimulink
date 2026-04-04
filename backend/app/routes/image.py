@@ -21,13 +21,10 @@ router = APIRouter()
 DEFAULT_GENERATION_MODELS = (
     "gemini-3-pro-image-preview",
     "gemini-2.5-flash-image",
-    "gemini-2.5-flash-image-preview",
-    "gemini-2.0-flash-preview-image-generation",
 )
 DEFAULT_EDIT_MODELS = (
     "gemini-3-pro-image-preview",
     "gemini-2.5-flash-image",
-    "gemini-2.5-flash-image-preview",
 )
 
 
@@ -51,7 +48,7 @@ def _resolve_model_candidates(env_name: str, defaults: tuple[str, ...]) -> list[
         for item in str(os.getenv(env_name, "") or "").split(",")
         if item.strip()
     ]
-    return list(dict.fromkeys([*configured, *defaults]))
+    return list(dict.fromkeys([*defaults, *configured]))
 
 
 async def _request_image_generation(
