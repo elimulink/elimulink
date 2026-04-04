@@ -11,6 +11,8 @@ DEFAULT_VISION_MODEL = "gemini-2.5-flash"
 DEFAULT_LIVE_MODEL = DEFAULT_CHAT_MODEL
 DEFAULT_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 DEFAULT_TRANSCRIBE_MODEL = "gemini-2.5-flash"
+DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1.5"
+DEFAULT_OPENAI_IMAGE_FALLBACKS = ("gpt-image-1", "gpt-image-1-mini")
 
 
 def _clean(value: str | None) -> str:
@@ -63,3 +65,15 @@ def get_tts_model() -> str:
 
 def get_transcribe_model() -> str:
     return _env("GEMINI_TRANSCRIBE_MODEL", DEFAULT_TRANSCRIBE_MODEL)
+
+
+def get_openai_image_model_candidates() -> list[str]:
+    primary = _env("OPENAI_IMAGE_MODEL", DEFAULT_OPENAI_IMAGE_MODEL)
+    fallbacks = _env_list("OPENAI_IMAGE_MODEL_FALLBACKS") or list(DEFAULT_OPENAI_IMAGE_FALLBACKS)
+    return _dedupe([primary, *fallbacks])
+
+
+def get_openai_image_edit_model_candidates() -> list[str]:
+    primary = _env("OPENAI_IMAGE_EDIT_MODEL", _env("OPENAI_IMAGE_MODEL", DEFAULT_OPENAI_IMAGE_MODEL))
+    fallbacks = _env_list("OPENAI_IMAGE_EDIT_MODEL_FALLBACKS") or list(DEFAULT_OPENAI_IMAGE_FALLBACKS)
+    return _dedupe([primary, *fallbacks])
