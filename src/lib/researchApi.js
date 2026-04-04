@@ -1,6 +1,31 @@
 import { apiUrl } from "./apiUrl";
 import { auth } from "./firebase";
 
+function logInstitutionBackgroundTiming(label, startedAt, meta = {}) {
+  console.debug("[AI_TIMING][institution][background]", {
+    label,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    ...meta,
+  });
+}
+
+async function timedInstitutionBackgroundCall(label, fn, meta = {}) {
+  const startedAt = performance.now();
+  try {
+    const result = await fn();
+    logInstitutionBackgroundTiming(label, startedAt, { ok: true, ...meta });
+    return result;
+  } catch (error) {
+    logInstitutionBackgroundTiming(label, startedAt, {
+      ok: false,
+      status: error?.status || null,
+      code: error?.code || null,
+      ...meta,
+    });
+    throw error;
+  }
+}
+
 async function apiFetch(path, options = {}) {
   const response = await fetch(apiUrl(path), {
     headers: {
@@ -93,78 +118,113 @@ export async function createConversation({ family, app, title = "New conversatio
 }
 
 export async function createInstitutionConversation({ title = "New conversation", ownerUid = null }) {
-  return apiFetch("/api/v1/ai/institution/conversations", {
-    method: "POST",
-    body: JSON.stringify({ title, owner_uid: ownerUid }),
-  });
+  return timedInstitutionBackgroundCall("createInstitutionConversation", () =>
+    apiFetch("/api/v1/ai/institution/conversations", {
+      method: "POST",
+      body: JSON.stringify({ title, owner_uid: ownerUid }),
+    })
+  );
 }
 
 export async function fetchInstitutionConversation(conversationId) {
-  return apiFetch(`/api/v1/ai/institution/conversations/${conversationId}`);
+  return timedInstitutionBackgroundCall(
+    "fetchInstitutionConversation",
+    () => apiFetch(`/api/v1/ai/institution/conversations/${conversationId}`),
+    { conversationId }
+  );
 }
 
 export async function createInstitutionConversationMessage(conversationId, payload) {
-  return apiFetch(`/api/v1/ai/institution/conversations/${conversationId}/messages`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return timedInstitutionBackgroundCall(
+    "createInstitutionConversationMessage",
+    () =>
+      apiFetch(`/api/v1/ai/institution/conversations/${conversationId}/messages`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    { conversationId }
+  );
 }
 
 export async function fetchInstitutionNotebookWorkspace({ baseUrl } = {}) {
   const query = baseUrl ? `?base_url=${encodeURIComponent(baseUrl)}` : "";
-  return apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace${query}`);
+  return timedInstitutionBackgroundCall("fetchInstitutionNotebookWorkspace", () =>
+    apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace${query}`)
+  );
 }
 
 export async function updateInstitutionNotebookWorkspace(payload, { baseUrl } = {}) {
   const query = baseUrl ? `?base_url=${encodeURIComponent(baseUrl)}` : "";
-  return apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace${query}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
+  return timedInstitutionBackgroundCall("updateInstitutionNotebookWorkspace", () =>
+    apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace${query}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    })
+  );
 }
 
 export async function deleteInstitutionNotebookWorkspace() {
-  return apiFetchWithAuth("/api/v1/ai/institution/notebook-workspace", {
-    method: "DELETE",
-  });
+  return timedInstitutionBackgroundCall("deleteInstitutionNotebookWorkspace", () =>
+    apiFetchWithAuth("/api/v1/ai/institution/notebook-workspace", {
+      method: "DELETE",
+    })
+  );
 }
 
 export async function fetchInstitutionNotebookItems({ includeArchived = false } = {}) {
   const params = new URLSearchParams();
   if (includeArchived) params.set("include_archived", "true");
   const query = params.toString() ? `?${params.toString()}` : "";
-  return apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace/items${query}`);
+  return timedInstitutionBackgroundCall("fetchInstitutionNotebookItems", () =>
+    apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace/items${query}`)
+  );
 }
 
 export async function createInstitutionNotebookItem(payload) {
-  return apiFetchWithAuth("/api/v1/ai/institution/notebook-workspace/items", {
-    method: "POST",
-    body: JSON.stringify({
-      title: payload?.title,
-      content: payload?.content ?? "",
-    }),
-  });
+  return timedInstitutionBackgroundCall("createInstitutionNotebookItem", () =>
+    apiFetchWithAuth("/api/v1/ai/institution/notebook-workspace/items", {
+      method: "POST",
+      body: JSON.stringify({
+        title: payload?.title,
+        content: payload?.content ?? "",
+      }),
+    })
+  );
 }
 
 export async function fetchInstitutionNotebookItem(itemId) {
-  return apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace/items/${itemId}`);
+  return timedInstitutionBackgroundCall(
+    "fetchInstitutionNotebookItem",
+    () => apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace/items/${itemId}`),
+    { itemId }
+  );
 }
 
 export async function updateInstitutionNotebookItem(itemId, payload) {
-  return apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace/items/${itemId}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      title: payload?.title,
-      content: payload?.content,
-      archived: payload?.archived,
-    }),
-  });
+  return timedInstitutionBackgroundCall(
+    "updateInstitutionNotebookItem",
+    () =>
+      apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace/items/${itemId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: payload?.title,
+          content: payload?.content,
+          archived: payload?.archived,
+        }),
+      }),
+    { itemId }
+  );
 }
 
 export async function deleteInstitutionNotebookItem(itemId) {
-  return apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace/items/${itemId}`, {
-    method: "DELETE",
-  });
+  return timedInstitutionBackgroundCall(
+    "deleteInstitutionNotebookItem",
+    () =>
+      apiFetchWithAuth(`/api/v1/ai/institution/notebook-workspace/items/${itemId}`, {
+        method: "DELETE",
+      }),
+    { itemId }
+  );
 }
 
 export async function fetchInstitutionSubgroups({ query = "", limit = 20 } = {}) {
@@ -176,32 +236,48 @@ export async function fetchInstitutionSubgroups({ query = "", limit = 20 } = {})
 
 export async function fetchInstitutionArchivedChats({ limit = 50 } = {}) {
   const query = new URLSearchParams({ limit: String(limit) });
-  return apiFetchWithAuth(`/api/v1/ai/institution/archived-chats?${query.toString()}`);
+  return timedInstitutionBackgroundCall("fetchInstitutionArchivedChats", () =>
+    apiFetchWithAuth(`/api/v1/ai/institution/archived-chats?${query.toString()}`)
+  );
 }
 
 export async function archiveInstitutionConversation(conversationId) {
-  return apiFetchWithAuth(`/api/v1/ai/institution/conversations/${conversationId}/archive`, {
-    method: "PATCH",
-    body: JSON.stringify({ archived: true }),
-  });
+  return timedInstitutionBackgroundCall(
+    "archiveInstitutionConversation",
+    () =>
+      apiFetchWithAuth(`/api/v1/ai/institution/conversations/${conversationId}/archive`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived: true }),
+      }),
+    { conversationId }
+  );
 }
 
 export async function restoreInstitutionConversation(conversationId) {
-  return apiFetchWithAuth(`/api/v1/ai/institution/conversations/${conversationId}/restore`, {
-    method: "PATCH",
-  });
+  return timedInstitutionBackgroundCall(
+    "restoreInstitutionConversation",
+    () =>
+      apiFetchWithAuth(`/api/v1/ai/institution/conversations/${conversationId}/restore`, {
+        method: "PATCH",
+      }),
+    { conversationId }
+  );
 }
 
 export async function archiveAllInstitutionConversations() {
-  return apiFetchWithAuth("/api/v1/ai/institution/conversations/archive-all", {
-    method: "PATCH",
-  });
+  return timedInstitutionBackgroundCall("archiveAllInstitutionConversations", () =>
+    apiFetchWithAuth("/api/v1/ai/institution/conversations/archive-all", {
+      method: "PATCH",
+    })
+  );
 }
 
 export async function deleteAllInstitutionConversations() {
-  return apiFetchWithAuth("/api/v1/ai/institution/conversations", {
-    method: "DELETE",
-  });
+  return timedInstitutionBackgroundCall("deleteAllInstitutionConversations", () =>
+    apiFetchWithAuth("/api/v1/ai/institution/conversations", {
+      method: "DELETE",
+    })
+  );
 }
 
 export async function exportInstitutionData({ baseUrl } = {}) {
@@ -212,11 +288,19 @@ export async function exportInstitutionData({ baseUrl } = {}) {
 }
 
 export async function fetchInstitutionMessageSources(messageId) {
-  return apiFetch(`/api/v1/ai/institution/messages/${messageId}/sources`);
+  return timedInstitutionBackgroundCall(
+    "fetchInstitutionMessageSources",
+    () => apiFetch(`/api/v1/ai/institution/messages/${messageId}/sources`),
+    { messageId }
+  );
 }
 
 export async function fetchInstitutionSourceById(sourceId) {
-  return apiFetch(`/api/v1/ai/institution/sources/${sourceId}`);
+  return timedInstitutionBackgroundCall(
+    "fetchInstitutionSourceById",
+    () => apiFetch(`/api/v1/ai/institution/sources/${sourceId}`),
+    { sourceId }
+  );
 }
 
 export async function createInstitutionShareLink({
@@ -232,20 +316,22 @@ export async function createInstitutionShareLink({
   baseUrl,
 }) {
   const query = baseUrl ? `?base_url=${encodeURIComponent(baseUrl)}` : "";
-  return apiFetchWithAuth(`/api/v1/ai/institution/share-links${query}`, {
-    method: "POST",
-    body: JSON.stringify({
-      conversation_id: conversationId,
-      message_ids: messageIds,
-      visibility,
-      access_level: accessLevel,
-      invited_emails: invitedEmails,
-      subgroup_id: subgroupId,
-      subgroup_name: subgroupName || null,
-      allow_continue_chat: allowContinueChat,
-      expires_in_days: expiresInDays,
+  return timedInstitutionBackgroundCall("createInstitutionShareLink", () =>
+    apiFetchWithAuth(`/api/v1/ai/institution/share-links${query}`, {
+      method: "POST",
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        message_ids: messageIds,
+        visibility,
+        access_level: accessLevel,
+        invited_emails: invitedEmails,
+        subgroup_id: subgroupId,
+        subgroup_name: subgroupName || null,
+        allow_continue_chat: allowContinueChat,
+        expires_in_days: expiresInDays,
+      }),
     }),
-  });
+  );
 }
 
 export async function fetchInstitutionShareLinks({ limit = 100, baseUrl } = {}) {
@@ -253,30 +339,46 @@ export async function fetchInstitutionShareLinks({ limit = 100, baseUrl } = {}) 
   if (limit) params.set("limit", String(limit));
   if (baseUrl) params.set("base_url", String(baseUrl));
   const query = params.toString() ? `?${params.toString()}` : "";
-  return apiFetchWithAuth(`/api/v1/ai/institution/share-links${query}`);
+  return timedInstitutionBackgroundCall("fetchInstitutionShareLinks", () =>
+    apiFetchWithAuth(`/api/v1/ai/institution/share-links${query}`)
+  );
 }
 
 export async function fetchInstitutionShareLink(shareId) {
-  return apiFetch(`/api/v1/ai/institution/share-links/${shareId}`);
+  return timedInstitutionBackgroundCall(
+    "fetchInstitutionShareLink",
+    () => apiFetch(`/api/v1/ai/institution/share-links/${shareId}`),
+    { shareId }
+  );
 }
 
 export async function deleteInstitutionShareLink(shareId) {
-  return apiFetchWithAuth(`/api/v1/ai/institution/share-links/${shareId}`, {
-    method: "DELETE",
-  });
+  return timedInstitutionBackgroundCall(
+    "deleteInstitutionShareLink",
+    () =>
+      apiFetchWithAuth(`/api/v1/ai/institution/share-links/${shareId}`, {
+        method: "DELETE",
+      }),
+    { shareId }
+  );
 }
 
 export async function updateInstitutionShareLink(shareId, payload, { baseUrl } = {}) {
   const query = baseUrl ? `?base_url=${encodeURIComponent(baseUrl)}` : "";
-  return apiFetchWithAuth(`/api/v1/ai/institution/share-links/${shareId}${query}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      access_level: payload?.accessLevel,
-      invited_emails: payload?.invitedEmails,
-      subgroup_id: payload?.subgroupId,
-      subgroup_name: payload?.subgroupName,
-    }),
-  });
+  return timedInstitutionBackgroundCall(
+    "updateInstitutionShareLink",
+    () =>
+      apiFetchWithAuth(`/api/v1/ai/institution/share-links/${shareId}${query}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          access_level: payload?.accessLevel,
+          invited_emails: payload?.invitedEmails,
+          subgroup_id: payload?.subgroupId,
+          subgroup_name: payload?.subgroupName,
+        }),
+      }),
+    { shareId }
+  );
 }
 
 export async function fetchConversation(conversationId) {
