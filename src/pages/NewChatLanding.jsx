@@ -69,6 +69,7 @@ import { getImageSearchQuery, searchWebImages } from "../shared/image-search/sea
 import {
   getVagueImageEditClarification,
   getVagueImageRequestClarification,
+  isImageClarificationQuestion,
   isImageEditFollowUpPrompt,
   isImageGenerationPrompt,
 } from "../shared/image-generation/imageGenerationIntent.js";
@@ -3325,7 +3326,16 @@ export default function NewChatLanding({
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
     const continuationPrompt = clean ? resolveContinuationPrompt(clean, messages) : "";
-    const requestPrompt = continuationPrompt || clean;
+    const latestAssistantText = String(
+      [...(Array.isArray(messages) ? messages : [])]
+        .reverse()
+        .find((message) => message?.role === "assistant")?.text || ""
+    ).trim();
+    const awaitingImageDescription =
+      pendingAttachments.length === 0 &&
+      !continuationPrompt &&
+      isImageClarificationQuestion(latestAssistantText);
+    const requestPrompt = continuationPrompt || (awaitingImageDescription ? `Generate an image of ${clean}` : clean);
     const shouldExtractLinks = isLinkExtractionPrompt(requestPrompt);
     const shouldGenerateImage =
       !shouldExtractLinks &&

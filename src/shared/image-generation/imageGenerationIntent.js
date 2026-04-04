@@ -8,6 +8,11 @@ const VAGUE_IMAGE_EDIT_PATTERNS = [
   /^(?:make it|make this)(?:\s+(?:better|different))?\s*\.?$/i,
 ];
 
+const IMAGE_CLARIFICATION_PROMPTS = new Set([
+  "what image would you like me to generate?",
+  "what should it show?",
+]);
+
 const IMAGE_GENERATION_PATTERNS = [
   /^(?:generate|create|make|draw|design|illustrate|render)(?:\s+me)?\s+(?:an?\s+)?(?:image|picture|photo|illustration|graphic|visual|diagram|something)\s*\.?$/i,
   /^(?:generate|create|make|draw|design|illustrate|render)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|graphic|visual)\s+(?:of|for)?\s*(.+)$/i,
@@ -46,6 +51,11 @@ export function getVagueImageEditClarification(text) {
   if (!value) return "";
   if (!VAGUE_IMAGE_EDIT_PATTERNS.some((pattern) => pattern.test(value))) return "";
   return "What would you like me to change in the image?";
+}
+
+export function isImageClarificationQuestion(text) {
+  const value = String(text || "").trim().toLowerCase();
+  return IMAGE_CLARIFICATION_PROMPTS.has(value);
 }
 
 export function isImageEditFollowUpPrompt(text) {

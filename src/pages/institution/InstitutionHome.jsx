@@ -11,6 +11,7 @@ import {
 import { apiUrl } from "../../lib/apiUrl";
 import imageAPI from "../../services/imageAPI";
 import {
+  isImageClarificationQuestion,
   getVagueImageRequestClarification,
   isImageGenerationPrompt,
 } from "../../shared/image-generation/imageGenerationIntent";
@@ -131,9 +132,15 @@ export default function InstitutionHome({
   const sendMessage = async (rawText) => {
     const text = String(rawText || "").trim();
     if (!text || isThinking) return;
-    const shouldGenerateImage = isImageGenerationPrompt(text);
+    const latestAssistantText = String(
+      [...messages].reverse().find((message) => message?.role === "ai")?.text || ""
+    ).trim();
+    const requestText = isImageClarificationQuestion(latestAssistantText)
+      ? `Generate an image of ${text}`
+      : text;
+    const shouldGenerateImage = isImageGenerationPrompt(requestText);
     const imageGenerationClarification = shouldGenerateImage
-      ? getVagueImageRequestClarification(text)
+      ? getVagueImageRequestClarification(requestText)
       : "";
 
     setStatus("");
@@ -173,7 +180,7 @@ export default function InstitutionHome({
           );
           return;
         }
-        const imageUrl = await imageAPI.generateImage(text, { idToken });
+        const imageUrl = await imageAPI.generateImage(requestText, { idToken });
         setMessages((prev) =>
           prev.map((message) =>
             message.id === assistantMessageId
