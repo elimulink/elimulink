@@ -21,6 +21,7 @@ from ..services.memory_service import get_recent_history
 from ..repositories.chat_repository import create_session, get_session, save_message
 from ..services.intent_router import detect_intent
 from ..utils.ids import new_session_id
+from ..services.model_registry import get_chat_model
 from ..utils import (
     enforce_payload_limits,
     err_response,
@@ -89,18 +90,35 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
     trace_id = getattr(request.state, "request_id", None)
     stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}
 
-    with get_db() as db:
-        answer, session_id, intent, tool_used = await run_orchestrator(
-            db,
-            user,
-            payload.message,
-            payload.session_id,
-            payload.app_type,
-            mode=mode,
-            workspace_context=workspace_context if isinstance(workspace_context, dict) else {},
-            assistant_style=normalize_assistant_style(payload.assistantStyle or assistant_style),
-            trace_id=trace_id,
-        )
+    try:
+        with get_db() as db:
+            answer, session_id, intent, tool_used = await run_orchestrator(
+                db,
+                user,
+                payload.message,
+                payload.session_id,
+                payload.app_type,
+                mode=mode,
+                workspace_context=workspace_context if isinstance(workspace_context, dict) else {},
+                assistant_style=normalize_assistant_style(payload.assistantStyle or assistant_style),
+                trace_id=trace_id,
+            )
+    except Exception as exc:  # noqa: BLE001
+        if str(exc) == "MISSING_PROVIDER_KEY":
+            return err_response("MISSING_PROVIDER_KEY", 500)
+        if is_provider_quota_error(str(exc)):
+            fallback_text = provider_busy_response()
+            return ok_response(
+                text=fallback_text,
+                data={
+                    "answer": fallback_text,
+                    "provider": "gemini",
+                    "model": get_chat_model(),
+                    "error_code": "PROVIDER_RATE_LIMIT",
+                },
+            )
+        detail = str(exc) if str((os.getenv("APP_ENV") or os.getenv("ENV") or "")).strip().lower() != "production" else None
+        return err_response("PROVIDER_ERROR", 502, detail)
 
     stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}
     if stream_requested:
