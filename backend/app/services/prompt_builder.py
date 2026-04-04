@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from .compound_question import build_compound_request_context
+
 
 def build_context_prompt(
     message: str,
@@ -10,6 +12,9 @@ def build_context_prompt(
     history: List[Dict[str, str]] | None,
 ) -> str:
     sections = [f"INTENT: {intent}"]
+    compound_context = build_compound_request_context(message)
+    if compound_context:
+        sections.append(compound_context)
     if history:
         history_text = "\n".join(f"{m['role']}: {m['content']}" for m in history)
         sections.append(f"HISTORY:\n{history_text}")
