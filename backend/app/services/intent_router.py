@@ -6,7 +6,7 @@ import re
 IMAGE_GENERATION_PATTERNS = (
     re.compile(
         r"^(?:generate|create|make|draw|design|illustrate|render)\s+(?:me\s+)?(?:an?\s+)?"
-        r"(?:image|picture|photo|illustration|graphic|visual)\s+(?:of|for)?\s*.+$",
+        r"(?:the\s+)?(?:image|picture|photo|illustration|graphic|visual)\s+(?:of|for)?\s*.+$",
         re.IGNORECASE,
     ),
     re.compile(
