@@ -1,5 +1,6 @@
 const URL_PATTERN = /(https?:\/\/[^\s)]+|www\.[^\s)]+)/gi;
 const HEADING_PATTERN = /^#{1,4}\s+\S+/m;
+const HEADING_OR_LIST_PATTERN = /^(?:\s*#{1,6}\s+\S+|\s{0,6}[-*•]\s+|\s{0,6}\d+[.)]\s+)/m;
 const MARKDOWN_LINK_PATTERN = /\[[^\]]+\]\((https?:\/\/[^)]+)\)/;
 const MARKDOWN_BOLD_PATTERN = /(\*\*[^*]+\*\*|__[^_]+__)/;
 const MATH_PATTERN = /(\$\$[\s\S]+?\$\$|\$[^$\n]+\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\))/;
@@ -72,6 +73,7 @@ function isSimpleDirectAnswer(value) {
   const shape = getTextShape(value);
   if (!shape.text || shape.hasCodeFence) return false;
   if (EXPLICIT_NOTE_PREFIX_PATTERN.test(shape.text) || EXPLICIT_ACTION_PREFIX_PATTERN.test(shape.text)) return false;
+  if (HEADING_OR_LIST_PATTERN.test(shape.text)) return false;
   if (shape.lineCount <= 3 && shape.paragraphCount <= 2 && shape.listItemCount <= 2 && shape.text.length <= 520) {
     return true;
   }
@@ -168,7 +170,10 @@ function isMarkdownBlock(value) {
   const hasBold = MARKDOWN_BOLD_PATTERN.test(text);
   const hasQuote = /^\s*>\s+/m.test(text);
   const hasList = /^(\s{0,6}[-*•]\s+|\s{0,6}\d+[.)]\s+)/m.test(text);
-  if (hasHeading && (hasList || hasBold || hasQuote || hasLink || text.length >= 60)) return true;
+  if (hasHeading) return true;
+  if (hasList && text.length >= 24) return true;
+  if (hasQuote && text.length >= 24) return true;
+  if (hasLink && (hasBold || hasQuote || hasList)) return true;
   return [hasLink, hasBold, hasQuote, hasList].filter(Boolean).length >= 2;
 }
 
@@ -416,6 +421,26 @@ function buildTextBlock(segment, index) {
   };
 }
 
+function mergeAdjacentBlocks(blocks = []) {
+  const merged = [];
+  const canMerge = (type) => ["normal_text", "plain_text", "note", "markdown", "list"].includes(type);
+
+  for (const block of blocks || []) {
+    const previous = merged[merged.length - 1];
+    if (previous && block && previous.type === block.type && canMerge(previous.type)) {
+      if (previous.type === "list") {
+        previous.items = [...(previous.items || []), ...(block.items || [])];
+      } else {
+        previous.text = [previous.text, block.text].filter(Boolean).join("\n\n").trim();
+      }
+      continue;
+    }
+    merged.push(block);
+  }
+
+  return merged;
+}
+
 export function parseAssistantResponseBlocks({
   text = "",
   imageUrl = "",
@@ -467,5 +492,5 @@ export function parseAssistantResponseBlocks({
     });
   }
 
-  return blocks;
+  return mergeAdjacentBlocks(blocks);
 }

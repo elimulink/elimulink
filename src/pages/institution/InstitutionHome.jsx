@@ -15,6 +15,10 @@ import {
   getVagueImageRequestClarification,
   isImageGenerationPrompt,
 } from "../../shared/image-generation/imageGenerationIntent";
+import {
+  formatAiServiceError,
+  resolveContinuationPrompt,
+} from "../../shared/chat/chatResponseBehavior";
 
 function getGreetingByHour(date = new Date()) {
   const h = date.getHours();
@@ -132,15 +136,16 @@ export default function InstitutionHome({
   const sendMessage = async (rawText) => {
     const text = String(rawText || "").trim();
     if (!text || isThinking) return;
+    const requestText = resolveContinuationPrompt(text, messages);
     const latestAssistantText = String(
       [...messages].reverse().find((message) => message?.role === "ai")?.text || ""
     ).trim();
-    const requestText = isImageClarificationQuestion(latestAssistantText)
+    const effectiveRequestText = isImageClarificationQuestion(latestAssistantText)
       ? `Generate an image of ${text}`
-      : text;
-    const shouldGenerateImage = isImageGenerationPrompt(requestText);
+      : requestText;
+    const shouldGenerateImage = isImageGenerationPrompt(effectiveRequestText);
     const imageGenerationClarification = shouldGenerateImage
-      ? getVagueImageRequestClarification(requestText)
+      ? getVagueImageRequestClarification(effectiveRequestText)
       : "";
 
     setStatus("");
@@ -180,7 +185,7 @@ export default function InstitutionHome({
           );
           return;
         }
-        const imageUrl = await imageAPI.generateImage(requestText, { idToken });
+        const imageUrl = await imageAPI.generateImage(effectiveRequestText, { idToken });
         setMessages((prev) =>
           prev.map((message) =>
             message.id === assistantMessageId
@@ -197,7 +202,7 @@ export default function InstitutionHome({
       }
 
       const requestBody = {
-        message: text,
+        message: effectiveRequestText,
         text,
         hostMode: "institution",
         institutionId: userProfile?.institutionId || null,
@@ -257,12 +262,22 @@ export default function InstitutionHome({
           message.id === assistantMessageId
             ? {
                 ...message,
-                text: `Error${status}: ${error?.message || "Failed to fetch AI response."}`,
+                text: formatAiServiceError({
+                  backendHealthy: true,
+                  status: error?.status || null,
+                  message: error?.message || "Failed to fetch AI response.",
+                }),
               }
             : message
         )
       );
-      setStatus(`Error${status}: ${error?.message || "Failed to fetch"}`);
+      setStatus(
+        formatAiServiceError({
+          backendHealthy: true,
+          status: error?.status || null,
+          message: error?.message || "Failed to fetch",
+        })
+      );
     } finally {
       setIsThinking(false);
     }

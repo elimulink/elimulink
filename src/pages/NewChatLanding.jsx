@@ -74,6 +74,10 @@ import {
   isImageGenerationPrompt,
 } from "../shared/image-generation/imageGenerationIntent.js";
 import {
+  formatAiServiceError,
+  resolveContinuationPrompt,
+} from "../shared/chat/chatResponseBehavior.js";
+import {
   extractLinksFromText,
   formatExtractedLinksMessage,
   isLinkExtractionPrompt,
@@ -325,12 +329,6 @@ const EMPTY_ACADEMIC_CONTEXT = Object.freeze({
   studyMode: "",
 });
 
-const FOLLOW_UP_ACCEPTANCE_PATTERN =
-  /^(yes|yeah|yep|okay|ok|sure|continue|continue please|go on|go ahead|proceed|do that|show me|explain more|tell me more)$/i;
-const FOLLOW_UP_DETAIL_PATTERN = /^(explain more|tell me more|more details|expand|go deeper)$/i;
-const CONTINUATION_SENTENCE_PATTERN =
-  /\b(?:next(?:,)?\s+)?(?:i can|i'll|i will|let me|next step is|the next useful step is)\s+([^.!?\n]+[.!?]?)/gi;
-
 function timeGreeting(date = new Date()) {
   const hour = date.getHours();
   if (hour < 12) return "Good morning";
@@ -364,54 +362,6 @@ function initialsOf(name) {
 
 function buildWelcomeMessage(name) {
   return `${timeGreeting()}, ${firstNameOf(name)}! I'm ElimuLink AI. What would you like to research today?`;
-}
-
-function getLastAssistantMessageText(items = []) {
-  for (let index = (Array.isArray(items) ? items.length : 0) - 1; index >= 0; index -= 1) {
-    const message = items[index] || {};
-    if (message.role === "assistant" && String(message.text || "").trim()) {
-      return String(message.text || "").trim();
-    }
-  }
-  return "";
-}
-
-function extractLastOfferedContinuation(text = "") {
-  const value = String(text || "").trim();
-  if (!value) return "";
-
-  const matches = [...value.matchAll(CONTINUATION_SENTENCE_PATTERN)]
-    .map((match) => String(match?.[0] || "").trim())
-    .filter(Boolean);
-  if (matches.length) return matches[matches.length - 1].replace(/\s+/g, " ");
-
-  const sentences = value
-    .split(/(?<=[.!?])\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const fallback = sentences
-    .slice(-3)
-    .find((sentence) =>
-      /\b(next|continue|step by step|notes|flashcards|diagram|compare|summarize|simpler|detail|explain)\b/i.test(
-        sentence,
-      ),
-    );
-  return fallback || "";
-}
-
-function resolveContinuationPrompt(userText, items = []) {
-  const clean = String(userText || "").trim();
-  if (!FOLLOW_UP_ACCEPTANCE_PATTERN.test(clean)) return clean;
-
-  const lastAssistantText = getLastAssistantMessageText(items);
-  const offeredStep = extractLastOfferedContinuation(lastAssistantText);
-  if (offeredStep) {
-    return `Please continue with the last suggested next step from your previous answer: ${offeredStep}`;
-  }
-  if (FOLLOW_UP_DETAIL_PATTERN.test(clean)) {
-    return "Please expand your previous answer with a clearer, more detailed explanation and practical examples.";
-  }
-  return "Please continue directly from your previous answer and carry out the most relevant next step you just proposed.";
 }
 
 function getDefaultAssistantMessage(mode = "student", name = "Scholar") {
@@ -3211,9 +3161,7 @@ export default function NewChatLanding({
       const backendHealthy = response.status === 404 ? await isBackendHealthy() : true;
       return {
         ok: false,
-        text: backendHealthy
-          ? `I couldn't reach the AI service (status ${response.status}). ${message}`
-          : "Backend is unavailable (health check failed). Please try again later.",
+        text: formatAiServiceError({ backendHealthy, status: response.status, message }),
       };
     }
 
@@ -3662,9 +3610,7 @@ export default function NewChatLanding({
         finalizeStreamingAssistant(streamId, fallback.text, { sources: fallback.sources || [] });
     } catch {
       const backendHealthy = await isBackendHealthy();
-      const errorText = backendHealthy
-        ? "Failed to reach AI service."
-        : "Backend is unavailable (health check failed). Please try again later.";
+      const errorText = formatAiServiceError({ backendHealthy });
       if (streamId) {
         finalizeStreamingAssistant(streamId, errorText);
       } else {
@@ -3743,9 +3689,7 @@ export default function NewChatLanding({
       return assistantText;
     } catch {
       const backendHealthy = await isBackendHealthy();
-      const errorText = backendHealthy
-        ? "Failed to reach AI service."
-        : "Backend is unavailable (health check failed). Please try again later.";
+      const errorText = formatAiServiceError({ backendHealthy });
       updateActiveChatMessages(
         (messages) => [
           ...messages,

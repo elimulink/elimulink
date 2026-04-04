@@ -68,6 +68,10 @@ import {
   isImageEditFollowUpPrompt,
   isImageGenerationPrompt,
 } from "../shared/image-generation/imageGenerationIntent.js";
+import {
+  formatAiServiceError,
+  resolveContinuationPrompt,
+} from "../shared/chat/chatResponseBehavior.js";
 import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
 import ResponseBlockRenderer from "../shared/assistant-blocks/ResponseBlockRenderer.jsx";
@@ -1139,22 +1143,23 @@ export default function StudentLanding() {
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
+    const requestText = resolveContinuationPrompt(clean, messages);
     const shouldGenerateImage =
-      pendingAttachments.length === 0 && isImageGenerationPrompt(clean);
+      pendingAttachments.length === 0 && isImageGenerationPrompt(requestText);
     const imageGenerationClarification = shouldGenerateImage
-      ? getVagueImageRequestClarification(clean)
+      ? getVagueImageRequestClarification(requestText)
       : "";
     const shouldEditLatestImage =
       pendingAttachments.length === 0 &&
       !shouldGenerateImage &&
-      (isImageEditFollowUpPrompt(clean) || Boolean(getVagueImageEditClarification(clean)));
+      (isImageEditFollowUpPrompt(requestText) || Boolean(getVagueImageEditClarification(requestText)));
     const imageEditClarification = shouldEditLatestImage
-      ? getVagueImageEditClarification(clean)
+      ? getVagueImageEditClarification(requestText)
       : "";
     const latestImageUrl = shouldEditLatestImage
       ? imageAPI.getLatestImageFromMessages(messages)
       : "";
-    const imageSearchQuery = getImageSearchQuery(clean, {
+    const imageSearchQuery = getImageSearchQuery(requestText, {
       hasAttachments: pendingAttachments.length > 0,
       shouldGenerateImage,
       shouldEditImage: shouldEditLatestImage,
@@ -1188,7 +1193,7 @@ export default function StudentLanding() {
         return;
       }
       try {
-        const imageUrl = await imageAPI.generateImage(clean);
+        const imageUrl = await imageAPI.generateImage(requestText);
         updateActiveChatMessages(
           (messages) => [
             ...messages,
@@ -1348,7 +1353,13 @@ export default function StudentLanding() {
         const code = result?.code || result?.error || `HTTP_${response.status}`;
         const message = result?.message || code;
         updateActiveChatMessages(
-          (m) => [...m, { role: "assistant", text: `Error (${response.status}): ${message}` }],
+          (m) => [
+            ...m,
+            {
+              role: "assistant",
+              text: formatAiServiceError({ backendHealthy: true, status: response.status, message }),
+            },
+          ],
           clean || "Error"
         );
         return;
@@ -1361,7 +1372,10 @@ export default function StudentLanding() {
       );
     } catch {
       updateActiveChatMessages(
-        (m) => [...m, { role: "assistant", text: "Failed to reach AI service." }],
+        (m) => [
+          ...m,
+          { role: "assistant", text: formatAiServiceError({ backendHealthy: true }) },
+        ],
         clean || "Request failed"
       );
     }
@@ -1379,7 +1393,7 @@ export default function StudentLanding() {
 
     try {
       const result = await askStudentLiveChat({
-        text: clean,
+        text: resolveContinuationPrompt(clean, messages),
         context: {
           ...liveContext,
           preferredLanguage: String(settingsPrefs?.language || "en"),
@@ -1395,7 +1409,7 @@ export default function StudentLanding() {
       );
       return reply;
     } catch {
-      const errorText = "Failed to reach AI service.";
+      const errorText = formatAiServiceError({ backendHealthy: true });
       updateActiveChatMessages(
         (messages) => [...messages, { role: "assistant", text: errorText }],
         "Request failed"

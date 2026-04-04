@@ -27,10 +27,10 @@ function blockShellClass(tone = "default") {
   return ["bg-transparent", tones[tone] || tones.default].join(" ");
 }
 
-function ResponseBlockShell({ icon: Icon, label, action, children, tone = "default" }) {
+function ResponseBlockShell({ icon: Icon, label, action, children, tone = "default", showHeader = true }) {
   return (
     <section className={blockShellClass(tone)}>
-      {label || action ? (
+      {showHeader && (label || action) ? (
         <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
           <div className="inline-flex min-w-0 items-center gap-2">
             {Icon ? <Icon size={14} className="shrink-0 text-slate-500 dark:text-slate-400" /> : null}
@@ -110,6 +110,32 @@ function parseInlineMarkdown(text, keyPrefix = "inline") {
       }
       return <span key={key}>{part}</span>;
     });
+}
+
+function normalizeLooseLine(value) {
+  return String(value || "")
+    .replace(/^\s{0,3}#{1,6}\s+/, "")
+    .replace(/^\s*>\s?/, "")
+    .replace(/^\s{0,6}[-*•]\s+/, "")
+    .replace(/^\s{0,6}\d+[.)]\s+/, "");
+}
+
+function renderLooseText(text, keyPrefix = "loose") {
+  const paragraphs = String(text || "")
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return (
+    <div className="space-y-3.5">
+      {paragraphs.map((paragraph, index) => (
+        <p key={`${keyPrefix}-${index}`} className="text-[14px] leading-7 text-slate-700 dark:text-slate-200">
+          {parseInlineMarkdown(normalizeLooseLine(paragraph), `${keyPrefix}-${index}`)}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 function renderMarkdownDocument(text) {
@@ -211,12 +237,8 @@ function renderMarkdownDocument(text) {
 
 export function PlainTextBlock({ block }) {
   return (
-    <ResponseBlockShell
-      icon={FileText}
-      label="Plain text"
-      action={<CopyButton text={block.text} label="Copy" />}
-    >
-      <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800 dark:text-slate-100">{block.text}</div>
+    <ResponseBlockShell icon={FileText} action={<CopyButton text={block.text} label="Copy" />} showHeader={false}>
+      {renderLooseText(block.text, "plain")}
     </ResponseBlockShell>
   );
 }
@@ -265,7 +287,7 @@ export function ListBlock({ block, compact = false }) {
 
   if (compact) return content;
   return (
-    <ResponseBlockShell icon={ListChecks} label="List">
+    <ResponseBlockShell icon={ListChecks} label="List" showHeader={false}>
       {content}
     </ResponseBlockShell>
   );
@@ -397,8 +419,8 @@ export function LinkSourceBlock({ block }) {
 
 export function NoteBlock({ block }) {
   return (
-    <ResponseBlockShell icon={FileText} label="Note" tone="note">
-      <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800 dark:text-slate-100">{block.text}</div>
+    <ResponseBlockShell icon={FileText} tone="note" showHeader={false}>
+      {renderLooseText(block.text, "note")}
     </ResponseBlockShell>
   );
 }
@@ -449,7 +471,7 @@ export function JsonDataBlock({ block }) {
 
 export function MarkdownBlock({ block }) {
   return (
-    <ResponseBlockShell icon={FileText} label="Markdown" action={<CopyButton text={block.text} label="Copy" />}>
+    <ResponseBlockShell icon={FileText} action={<CopyButton text={block.text} label="Copy" />} showHeader={false}>
       {renderMarkdownDocument(block.text)}
     </ResponseBlockShell>
   );
@@ -474,20 +496,7 @@ export function ActionBlock({ block }) {
 }
 
 function NormalTextSegment({ block }) {
-  const paragraphs = String(block.text || "")
-    .split(/\n{2,}/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  return (
-    <div className="space-y-3.5">
-      {paragraphs.map((paragraph, index) => (
-        <p key={`normal-${index}`} className="text-[14px] leading-7 text-slate-700 dark:text-slate-200">
-          {parseInlineMarkdown(paragraph, `normal-${index}`)}
-        </p>
-      ))}
-    </div>
-  );
+  return renderLooseText(block.text, "normal");
 }
 
 export default function ResponseBlockRenderer({
