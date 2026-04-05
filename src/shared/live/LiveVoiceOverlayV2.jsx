@@ -134,27 +134,6 @@ export default function LiveVoiceOverlayV2({
               </aside>
             ) : null}
 
-            <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center lg:hidden">
-              <div className="pointer-events-auto">
-                <MobileUtilityStack
-                  cameraEnabled={cameraEnabled}
-                  recordingScreen={recordingScreen}
-                  isSharing={isSharing}
-                  screenShareSupported={screenShareSupported}
-                  screenRecordingSupported={screenRecordingSupported}
-                  cameraFacingMode={cameraFacingMode}
-                  onStartScreenShare={onStartScreenShare}
-                  onStopScreenShare={onStopScreenShare}
-                  onToggleCamera={onToggleCamera}
-                  onSwitchCamera={onSwitchCamera}
-                  onTakePhoto={onTakePhoto}
-                  onUploadPhoto={onUploadPhoto}
-                  onTakeScreenshot={onTakeScreenshot}
-                  onToggleScreenRecording={onToggleScreenRecording}
-                />
-              </div>
-            </div>
-
             {captures.length > 0 ? (
               <div className="absolute bottom-40 left-4 right-24 md:hidden">
                 <MobileCaptureRail
@@ -180,6 +159,23 @@ export default function LiveVoiceOverlayV2({
             screenShareSupported={screenShareSupported}
             screenRecordingSupported={screenRecordingSupported}
             cameraFacingMode={cameraFacingMode}
+            onStartScreenShare={onStartScreenShare}
+            onStopScreenShare={onStopScreenShare}
+            onToggleCamera={onToggleCamera}
+            onSwitchCamera={onSwitchCamera}
+            onTakePhoto={onTakePhoto}
+            onUploadPhoto={onUploadPhoto}
+          onTakeScreenshot={onTakeScreenshot}
+          onToggleScreenRecording={onToggleScreenRecording}
+        />
+
+          <MobileToolDock
+            cameraEnabled={cameraEnabled}
+            cameraFacingMode={cameraFacingMode}
+            recordingScreen={recordingScreen}
+            isSharing={isSharing}
+            screenShareSupported={screenShareSupported}
+            screenRecordingSupported={screenRecordingSupported}
             onStartScreenShare={onStartScreenShare}
             onStopScreenShare={onStopScreenShare}
             onToggleCamera={onToggleCamera}
@@ -287,7 +283,7 @@ function MainStage({
 }) {
   if (cameraEnabled) {
     return (
-      <div className="relative flex min-h-screen flex-1 flex-col overflow-hidden bg-black lg:min-h-[44vh] lg:rounded-[40px] lg:bg-[#0a0f1d] lg:ring-1 lg:ring-white/10 lg:shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+      <div className="relative flex min-h-[58vh] flex-1 flex-col overflow-hidden bg-black lg:min-h-[44vh] lg:rounded-[40px] lg:bg-[#0a0f1d] lg:ring-1 lg:ring-white/10 lg:shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
         <div className="el-live-premium-edge-glow" />
         <div className="relative flex-1 overflow-hidden">
           <video
@@ -321,7 +317,7 @@ function MainStage({
   }
 
   return (
-    <div className="relative flex min-h-screen flex-1 flex-col items-center justify-center overflow-hidden bg-[#04070f] px-6 py-10 text-center lg:min-h-[44vh] lg:rounded-[40px] lg:bg-[#0a0f1d] lg:ring-1 lg:ring-white/10 lg:shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+    <div className="relative flex min-h-[58vh] flex-1 flex-col items-center justify-center overflow-hidden bg-[#04070f] px-6 py-10 text-center lg:min-h-[44vh] lg:rounded-[40px] lg:bg-[#0a0f1d] lg:ring-1 lg:ring-white/10 lg:shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
       <div className="el-live-premium-edge-glow" />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom,rgba(96,165,250,0.25)_0%,rgba(59,130,246,0.13)_24%,rgba(59,130,246,0.05)_44%,transparent_72%)]" />
       {isSharing ? (
@@ -529,7 +525,7 @@ function BottomControls({
   );
 }
 
-function MobileUtilityStack({
+function MobileToolDock({
   cameraEnabled,
   cameraFacingMode,
   recordingScreen,
@@ -546,41 +542,59 @@ function MobileUtilityStack({
   onToggleScreenRecording,
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-[22px] bg-black/14 p-1.25 backdrop-blur-sm ring-1 ring-white/10 shadow-[0_12px_30px_rgba(2,6,23,0.18)]">
-      <UtilityIconButton
-        label={
-          !screenShareSupported
-            ? "No share"
-            : isSharing
-            ? "Stop share"
-            : "Share"
-        }
-        icon={isSharing ? <Monitor size={18} /> : <MonitorUp size={18} />}
-        onClick={isSharing ? onStopScreenShare : onStartScreenShare}
-        active={isSharing}
-        dimmed={!screenShareSupported}
-      />
-      <UtilityIconButton
-        label={cameraEnabled ? "Camera off" : "Camera"}
-        icon={<Camera size={18} />}
-        onClick={onToggleCamera}
-        active={cameraEnabled}
-      />
-      <UtilityIconButton
-        label={cameraFacingMode === "user" ? "Back cam" : "Front cam"}
-        icon={<RotateCw size={18} />}
-        onClick={onSwitchCamera}
-      />
-      <UtilityIconButton label="Snap" icon={<ImagePlus size={18} />} onClick={onTakePhoto} />
-      <UtilityIconButton label="Upload" icon={<Upload size={18} />} onClick={onUploadPhoto} />
-      <UtilityIconButton label="Shot" icon={<Monitor size={18} />} onClick={onTakeScreenshot} />
-      <UtilityIconButton
-        label={!screenRecordingSupported ? "No record" : recordingScreen ? "Stop rec" : "Record"}
-        icon={<Square size={18} />}
-        onClick={onToggleScreenRecording}
-        active={recordingScreen}
-        dimmed={!screenRecordingSupported}
-      />
+    <div className="pointer-events-auto mx-auto w-full max-w-md rounded-[24px] border border-white/10 bg-black/20 p-3 shadow-[0_14px_34px_rgba(2,6,23,0.22)] backdrop-blur-xl lg:hidden">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">
+            Live tools
+          </div>
+          <div className="mt-0.5 text-[11px] text-white/60">
+            Quick capture and upload controls
+          </div>
+        </div>
+        <div className="rounded-full bg-white/8 px-2.5 py-1 text-[10px] font-medium text-white/68 ring-1 ring-white/8">
+          Live mode
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        <UtilityIconButton
+          label={
+            !screenShareSupported
+              ? "No share"
+              : isSharing
+              ? "Stop share"
+              : "Share"
+          }
+          icon={isSharing ? <Monitor size={18} /> : <MonitorUp size={18} />}
+          onClick={isSharing ? onStopScreenShare : onStartScreenShare}
+          active={isSharing}
+          dimmed={!screenShareSupported}
+        />
+        <UtilityIconButton
+          label={cameraEnabled ? "Camera off" : "Camera"}
+          icon={<Camera size={18} />}
+          onClick={onToggleCamera}
+          active={cameraEnabled}
+        />
+        <UtilityIconButton
+          label={cameraFacingMode === "user" ? "Back cam" : "Front cam"}
+          icon={<RotateCw size={18} />}
+          onClick={onSwitchCamera}
+        />
+        <UtilityIconButton
+          label={!screenRecordingSupported ? "No record" : recordingScreen ? "Stop rec" : "Record"}
+          icon={<Square size={18} />}
+          onClick={onToggleScreenRecording}
+          active={recordingScreen}
+          dimmed={!screenRecordingSupported}
+        />
+        <UtilityIconButton label="Snap" icon={<ImagePlus size={18} />} onClick={onTakePhoto} />
+        <UtilityIconButton label="Upload" icon={<Upload size={18} />} onClick={onUploadPhoto} />
+        <UtilityIconButton label="Shot" icon={<Monitor size={18} />} onClick={onTakeScreenshot} />
+        <div className="flex min-h-[54px] items-center justify-center rounded-[17px] border border-white/8 bg-white/6 px-2 py-2 text-center text-[10px] font-medium leading-tight text-white/58">
+          Capture
+        </div>
+      </div>
     </div>
   );
 }
@@ -625,10 +639,10 @@ function UtilityIconButton({ icon, label, onClick, active = false, dimmed = fals
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-[50px] w-[52px] flex-col items-center justify-center gap-1 rounded-[17px] px-1 backdrop-blur-xl transition ${
+      className={`flex min-h-[54px] w-full flex-col items-center justify-center gap-1 rounded-[17px] px-1 backdrop-blur-xl transition ${
         active
           ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(59,130,246,0.32)]"
-          : "bg-black/24 text-white shadow-[0_14px_26px_rgba(2,6,23,0.24)] ring-1 ring-white/10"
+          : "bg-black/24 text-white shadow-[0_14px_26px_rgba(2,6,23,0.24)] ring-1 ring-white/10 hover:bg-black/30"
       } ${dimmed && !active ? "opacity-55" : ""}`}
       aria-label={label}
       title={label}

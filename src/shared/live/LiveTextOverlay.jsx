@@ -49,8 +49,10 @@ export default function LiveTextOverlay({
   return (
     <div className="el-live-text-overlay-backdrop" onClick={onClose}>
       <div className="el-live-text-overlay" onClick={(e) => e.stopPropagation()}>
+        <div className="el-live-text-overlay-handle" />
         <div className="el-live-text-overlay-header">
           <div className="min-w-0">
+            <div className="el-live-text-overlay-kicker">Live composer</div>
             <div className="el-live-text-overlay-title">{title}</div>
             <div className="el-live-text-overlay-subtitle">
               {mode === "listening" ? "Listening" : mode === "thinking" ? "Thinking" : subtitle}
@@ -61,7 +63,12 @@ export default function LiveTextOverlay({
           </button>
         </div>
 
-        <div className="el-live-text-overlay-tools">
+        <div className="el-live-text-overlay-tools-shell">
+          <div className="el-live-text-overlay-section-header">
+            <div className="el-live-text-overlay-section-title">Quick tools</div>
+            <div className="el-live-text-overlay-section-subtitle">Keep the live session in one place</div>
+          </div>
+          <div className="el-live-text-overlay-tools">
           {typeof onTakePhoto === "function" ? (
             <ToolChip icon={<Camera size={14} />} label="Photo" onClick={onTakePhoto} />
           ) : null}
@@ -71,25 +78,34 @@ export default function LiveTextOverlay({
           {typeof onTakeScreenshot === "function" ? (
             <ToolChip icon={<Monitor size={14} />} label="Shot" onClick={onTakeScreenshot} />
           ) : null}
+          </div>
         </div>
 
-        <div className="el-live-text-overlay-composer">
-          <textarea
-            ref={inputRef}
-            rows={2}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholder}
-          />
-          <button
-            type="button"
-            className="el-live-text-send"
-            onClick={handleSend}
-            disabled={busy || !value.trim()}
-          >
-            Send
-          </button>
+        <div className="el-live-text-overlay-composer-shell">
+          <div className="el-live-text-overlay-section-header">
+            <div className="el-live-text-overlay-section-title">Message live</div>
+            <div className="el-live-text-overlay-section-subtitle">
+              Press Enter to send, Shift+Enter for a new line
+            </div>
+          </div>
+          <div className="el-live-text-overlay-composer">
+            <textarea
+              ref={inputRef}
+              rows={2}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholder}
+            />
+            <button
+              type="button"
+              className="el-live-text-send"
+              onClick={handleSend}
+              disabled={busy || !value.trim()}
+            >
+              {busy ? "Sending" : "Send"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
