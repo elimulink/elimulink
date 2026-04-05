@@ -11,6 +11,8 @@ DEFAULT_VISION_MODEL = "gemini-2.5-flash"
 DEFAULT_LIVE_MODEL = DEFAULT_CHAT_MODEL
 DEFAULT_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 DEFAULT_TRANSCRIBE_MODEL = "gemini-2.5-flash"
+DEFAULT_OPENAI_LIVE_MODEL = "gpt-4o-mini"
+DEFAULT_OPENAI_LIVE_FALLBACKS = ("gpt-4o",)
 DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1.5"
 DEFAULT_OPENAI_IMAGE_FALLBACKS = ("gpt-image-1", "gpt-image-1-mini")
 
@@ -76,4 +78,10 @@ def get_openai_image_model_candidates() -> list[str]:
 def get_openai_image_edit_model_candidates() -> list[str]:
     primary = _env("OPENAI_IMAGE_EDIT_MODEL", _env("OPENAI_IMAGE_MODEL", DEFAULT_OPENAI_IMAGE_MODEL))
     fallbacks = _env_list("OPENAI_IMAGE_EDIT_MODEL_FALLBACKS") or list(DEFAULT_OPENAI_IMAGE_FALLBACKS)
+    return _dedupe([primary, *fallbacks])
+
+
+def get_openai_live_model_candidates() -> list[str]:
+    primary = _env("OPENAI_LIVE_MODEL", DEFAULT_OPENAI_LIVE_MODEL)
+    fallbacks = _env_list("OPENAI_LIVE_MODEL_FALLBACKS") or list(DEFAULT_OPENAI_LIVE_FALLBACKS)
     return _dedupe([primary, *fallbacks])
