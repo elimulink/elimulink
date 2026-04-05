@@ -599,57 +599,64 @@ export default function InstitutionHome({
 
         {messages.length > 0 ? (
           <div className="mt-6 space-y-3">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`rounded-xl border p-3 ${
-                  message.role === "user"
-                    ? "bg-sky-50 border-sky-200 text-slate-900"
-                    : "bg-white border-slate-200 text-slate-800"
-                }`}
-              >
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1 text-slate-500">
-                {message.role === "user" ? "You" : "ElimuLink AI"}
-              </div>
-                {message.role === "ai" && Array.isArray(message.imageOptions) && message.imageOptions.length >= 2 && !message.selectedImageUrl && !message.comparisonSkipped ? (
-                  <div className="mb-3">
-                    <ImageComparisonPicker
-                      title={message.comparisonTitle || "Which image do you like more?"}
-                      images={message.imageOptions}
-                      selectedIndex={message.comparisonSelectedIndex ?? null}
-                      onChoose={(choiceIndex) => handleImageComparisonChoice(message.id, choiceIndex)}
-                      onSkip={() => handleImageComparisonChoice(message.id, null, { skipped: true })}
-                    />
-                  </div>
-                ) : null}
-                {Array.isArray(message.attachments) && message.attachments.length > 0 ? (
-                  <div className={`mb-3 grid grid-flow-dense gap-2 ${getAttachmentGridClass(message.attachments.length)}`}>
-                    {message.attachments.map((attachment, index) => (
-                      <button
-                        key={attachment.id || `${message.id}-attachment-${index}`}
-                        type="button"
-                        onClick={() => openPreview(attachment)}
-                        className={getAttachmentItemClass(message.attachments.length, index)}
-                      >
-                        <img
-                          src={attachment.previewUrl || attachment.url}
-                          alt={attachment.name || `Attachment ${index + 1}`}
-                          className="h-full w-full object-cover"
+            {messages.map((message) => {
+              const isUser = message.role === "user";
+              return (
+                <div
+                  key={message.id}
+                  className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`w-full max-w-[92%] sm:max-w-[78%] md:max-w-[68%] lg:max-w-[620px] rounded-2xl border p-3 text-left ${
+                      isUser
+                        ? "bg-sky-50 border-sky-200 text-slate-900 ml-auto rounded-br-md"
+                        : "bg-white border-slate-200 text-slate-800 mr-auto rounded-bl-md"
+                    }`}
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide mb-1 text-slate-500">
+                      {isUser ? "You" : "ElimuLink AI"}
+                    </div>
+                    {message.role === "ai" && Array.isArray(message.imageOptions) && message.imageOptions.length >= 2 && !message.selectedImageUrl && !message.comparisonSkipped ? (
+                      <div className="mb-3">
+                        <ImageComparisonPicker
+                          title={message.comparisonTitle || "Which image do you like more?"}
+                          images={message.imageOptions}
+                          selectedIndex={message.comparisonSelectedIndex ?? null}
+                          onChoose={(choiceIndex) => handleImageComparisonChoice(message.id, choiceIndex)}
+                          onSkip={() => handleImageComparisonChoice(message.id, null, { skipped: true })}
                         />
-                      </button>
-                    ))}
+                      </div>
+                    ) : null}
+                    {Array.isArray(message.attachments) && message.attachments.length > 0 ? (
+                      <div className={`mb-3 grid grid-flow-dense gap-2 ${getAttachmentGridClass(message.attachments.length)}`}>
+                        {message.attachments.map((attachment, index) => (
+                          <button
+                            key={attachment.id || `${message.id}-attachment-${index}`}
+                            type="button"
+                            onClick={() => openPreview(attachment)}
+                            className={getAttachmentItemClass(message.attachments.length, index)}
+                          >
+                            <img
+                              src={attachment.previewUrl || attachment.url}
+                              alt={attachment.name || `Attachment ${index + 1}`}
+                              className="h-full w-full object-cover"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {message.role === "ai" && message.imageUrl ? (
+                      <img
+                        src={message.imageUrl}
+                        alt={message.text || "Generated image"}
+                        className="mb-3 w-full max-w-xl rounded-lg border border-slate-200 object-contain"
+                      />
+                    ) : null}
+                    <div className="text-sm whitespace-pre-wrap">{message.text}</div>
                   </div>
-                ) : null}
-                {message.role === "ai" && message.imageUrl ? (
-                  <img
-                    src={message.imageUrl}
-                    alt={message.text || "Generated image"}
-                    className="mb-3 w-full max-w-xl rounded-lg border border-slate-200 object-contain"
-                  />
-                ) : null}
-                <div className="text-sm whitespace-pre-wrap">{message.text}</div>
-              </div>
-            ))}
+                </div>
+              );
+            })}
             {isThinking ? (
               <div className="text-sm text-slate-500">
                 {messages[messages.length - 1]?.type === "image" ? "Generating image..." : "AI is thinking..."}
