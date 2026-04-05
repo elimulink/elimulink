@@ -473,7 +473,7 @@ function BottomControls({
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-3 px-4 pb-[max(16px,env(safe-area-inset-bottom))] lg:static lg:mt-5 lg:flex-col lg:gap-4 lg:px-0 lg:pb-0">
-      <div className="pointer-events-auto mx-auto hidden w-full max-w-3xl items-center justify-center gap-3 overflow-x-auto rounded-[34px] bg-white/6 px-3 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.10)] ring-1 ring-white/10 backdrop-blur-xl lg:flex">
+      <div className="pointer-events-auto mx-auto hidden w-full max-w-3xl items-center justify-center gap-3 overflow-x-auto rounded-[34px] border border-slate-200/80 bg-white/92 px-3 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/72 lg:flex">
         <DesktopUtilityRow
           cameraEnabled={cameraEnabled}
           cameraFacingMode={cameraFacingMode}
@@ -542,17 +542,17 @@ function MobileToolDock({
   onToggleScreenRecording,
 }) {
   return (
-    <div className="pointer-events-auto mx-auto w-full max-w-md rounded-[24px] border border-white/10 bg-black/20 p-3 shadow-[0_14px_34px_rgba(2,6,23,0.22)] backdrop-blur-xl lg:hidden">
+    <div className="pointer-events-auto mx-auto w-full max-w-md rounded-[24px] border border-slate-200/80 bg-white/94 p-3 shadow-[0_14px_34px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/72 lg:hidden">
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-white/45">
             Live tools
           </div>
-          <div className="mt-0.5 text-[11px] text-white/60">
+          <div className="mt-0.5 text-[11px] text-slate-500 dark:text-white/60">
             Quick capture and upload controls
           </div>
         </div>
-        <div className="rounded-full bg-white/8 px-2.5 py-1 text-[10px] font-medium text-white/68 ring-1 ring-white/8">
+        <div className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600 ring-1 ring-slate-200/80 dark:bg-white/8 dark:text-white/68 dark:ring-white/8">
           Live mode
         </div>
       </div>
@@ -591,7 +591,7 @@ function MobileToolDock({
         <UtilityIconButton label="Snap" icon={<ImagePlus size={18} />} onClick={onTakePhoto} />
         <UtilityIconButton label="Upload" icon={<Upload size={18} />} onClick={onUploadPhoto} />
         <UtilityIconButton label="Shot" icon={<Monitor size={18} />} onClick={onTakeScreenshot} />
-        <div className="flex min-h-[54px] items-center justify-center rounded-[17px] border border-white/8 bg-white/6 px-2 py-2 text-center text-[10px] font-medium leading-tight text-white/58">
+        <div className="flex min-h-[54px] items-center justify-center rounded-[17px] border border-slate-200/70 bg-white/78 px-2 py-2 text-center text-[10px] font-medium leading-tight text-slate-500 dark:border-white/8 dark:bg-white/6 dark:text-white/58">
           Capture
         </div>
       </div>
@@ -642,13 +642,13 @@ function UtilityIconButton({ icon, label, onClick, active = false, dimmed = fals
       className={`flex min-h-[54px] w-full flex-col items-center justify-center gap-1 rounded-[17px] px-1 backdrop-blur-xl transition ${
         active
           ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(59,130,246,0.32)]"
-          : "bg-black/24 text-white shadow-[0_14px_26px_rgba(2,6,23,0.24)] ring-1 ring-white/10 hover:bg-black/30"
+          : "bg-white/92 text-slate-700 shadow-[0_14px_26px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/80 hover:bg-white dark:bg-white/8 dark:text-white dark:ring-white/10 dark:hover:bg-white/12"
       } ${dimmed && !active ? "opacity-55" : ""}`}
       aria-label={label}
       title={label}
     >
       {icon}
-      <span className="max-w-full truncate text-[9px] font-medium leading-none text-white/75">
+      <span className="max-w-full truncate text-[9px] font-medium leading-none text-current/75">
         {label}
       </span>
     </button>
@@ -663,7 +663,7 @@ function DesktopUtilityButton({ icon, label, onClick, active = false, dimmed = f
       className={`flex min-h-[60px] min-w-[72px] flex-col items-center justify-center rounded-[20px] px-2 py-2 text-center transition ${
         active
           ? "bg-blue-600 text-white shadow-[0_8px_24px_rgba(59,130,246,0.35)]"
-          : "bg-white/8 text-white ring-1 ring-white/10 hover:bg-white/12"
+          : "bg-white/92 text-slate-700 ring-1 ring-slate-200/80 hover:bg-white dark:bg-white/8 dark:text-white dark:ring-white/10 dark:hover:bg-white/12"
       } ${dimmed && !active ? "opacity-60" : ""}`}
       title={label}
       aria-label={label}
@@ -686,8 +686,8 @@ function MainMicButton({ mode, label, onClick }) {
         active
           ? "bg-blue-600 shadow-[0_16px_36px_rgba(59,130,246,0.34)]"
           : thinking
-          ? "bg-white/12 ring-1 ring-white/10"
-          : "bg-white/10 ring-1 ring-white/10 backdrop-blur-xl"
+          ? "bg-white/92 text-slate-800 ring-1 ring-slate-200/80 dark:bg-white/12 dark:text-white dark:ring-white/10"
+          : "bg-white/92 text-slate-800 ring-1 ring-slate-200/80 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:bg-white/10 dark:text-white dark:ring-white/10"
       }`}
       aria-label={active ? "Stop listening and send your voice turn" : "Start talking"}
     >
@@ -705,7 +705,7 @@ function DockIconButton({ icon, label, onClick, active = false }) {
       className={`flex h-[60px] w-[60px] items-center justify-center rounded-full backdrop-blur-xl transition ${
         active
           ? "bg-white/16 text-white shadow-[0_12px_28px_rgba(15,23,42,0.24)] ring-1 ring-white/12"
-          : "bg-white/10 text-white ring-1 ring-white/10"
+          : "bg-white/92 text-slate-800 ring-1 ring-slate-200/80 shadow-[0_10px_26px_rgba(15,23,42,0.08)] dark:bg-white/10 dark:text-white dark:ring-white/10"
       }`}
       aria-label={label}
       title={label}
@@ -723,7 +723,7 @@ function ActionChip({ children, onClick, emphasized = false }) {
       className={`rounded-full px-3.5 py-2 text-xs font-medium transition ${
         emphasized
           ? "bg-blue-600 text-white shadow-[0_8px_24px_rgba(59,130,246,0.28)]"
-          : "bg-black/24 text-white/88 ring-1 ring-white/10 backdrop-blur-xl"
+          : "bg-white/92 text-slate-700 ring-1 ring-slate-200/80 shadow-[0_10px_22px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:bg-black/24 dark:text-white/88 dark:ring-white/10"
       }`}
     >
       {children}
@@ -747,7 +747,7 @@ function DangerDockButton({ onClick }) {
 
 function MobileCaptureRail({ captures, selectedCaptureId, onSelect }) {
   return (
-    <div className="flex gap-2 overflow-x-auto rounded-3xl bg-black/28 px-2.5 py-2 backdrop-blur-xl">
+    <div className="flex gap-2 overflow-x-auto rounded-3xl bg-white/88 px-2.5 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/80 backdrop-blur-xl dark:bg-black/28 dark:ring-white/10">
       {captures.map((item) => {
         const active = item.id === selectedCaptureId;
         return (
@@ -766,7 +766,7 @@ function MobileCaptureRail({ captures, selectedCaptureId, onSelect }) {
                 className="h-full w-full object-cover"
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center bg-white/10 text-white/75">
+              <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-white/75">
                 <ImagePlus size={16} />
               </div>
             )}
