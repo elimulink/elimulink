@@ -18,11 +18,30 @@ export async function textToSpeechWithFallback({
   });
 
   if (!res.ok) {
-    const data = await res.json().catch(() => null);
+    const data = await res.clone().json().catch(() => null);
     throw new Error(
       data?.detail?.error?.message || data?.error?.message || "Speech generation failed"
     );
   }
 
-  return await res.blob();
+  const contentType = (res.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
+  const blob = await res.blob();
+  console.debug("[AI_AUDIO][tts]", {
+    ok: res.ok,
+    status: res.status,
+    contentType,
+    blobType: blob?.type || "",
+    blobSize: blob?.size || 0,
+  });
+
+  if (!blob || blob.size <= 0) {
+    throw new Error("Speech generation returned empty audio.");
+  }
+
+  const normalizedType = String(blob.type || contentType || "").toLowerCase();
+  if (!normalizedType.startsWith("audio/")) {
+    throw new Error(`Speech generation returned unsupported audio type: ${normalizedType || "unknown"}`);
+  }
+
+  return blob;
 }

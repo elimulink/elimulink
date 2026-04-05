@@ -49,11 +49,31 @@ def _extract_audio_part(payload: dict) -> tuple[bytes, str]:
         inline_data = part.get("inlineData") or {}
         data = inline_data.get("data")
         if data:
-            return base64.b64decode(data), inline_data.get("mimeType", "audio/wav")
+            audio_bytes = base64.b64decode(data)
+            mime_type = _normalize_audio_mime_type(inline_data.get("mimeType", "audio/wav"))
+            if not audio_bytes:
+                raise HTTPException(
+                    status_code=502,
+                    detail={"ok": False, "error": {"code": "TTS_FAILED", "message": "Empty audio returned."}},
+                )
+            return audio_bytes, mime_type
     raise HTTPException(
         status_code=502,
         detail={"ok": False, "error": {"code": "TTS_FAILED", "message": "No audio returned."}},
     )
+
+
+def _normalize_audio_mime_type(mime_type: str) -> str:
+    raw = str(mime_type or "").strip().lower()
+    if not raw:
+        return "audio/wav"
+    raw = raw.split(";", 1)[0].strip()
+    aliases = {
+        "audio/x-wav": "audio/wav",
+        "audio/wave": "audio/wav",
+        "audio/mp3": "audio/mpeg",
+    }
+    return aliases.get(raw, raw)
 
 
 def _extract_text(payload: dict) -> str:
@@ -161,6 +181,10 @@ async def speak(body: SpeakRequest):
         ) from None
 
     audio_bytes, mime_type = _extract_audio_part(raw)
+    print(
+        f"[TTS_AUDIO] mime={mime_type} bytes={len(audio_bytes)} provider_voice={provider_voice}",
+        flush=True,
+    )
     return Response(
         content=audio_bytes,
         media_type=mime_type,

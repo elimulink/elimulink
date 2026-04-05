@@ -29,6 +29,63 @@ export function useVoiceConversation({
   const mountedRef = useRef(true);
   const awaitingAIRef = useRef(false);
 
+  const playSpeechSynthesisFallback = useCallback(
+    async (text) => {
+      if (!text || typeof window === "undefined" || !("speechSynthesis" in window)) {
+        return false;
+      }
+
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        // ignore
+      }
+
+      const voiceSettings = loadVoiceSettings(settingsUid);
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = language;
+      utterance.rate = voiceSettings.speechRate || 1;
+
+      return await new Promise((resolve) => {
+        utterance.onstart = () => {
+          speakingRef.current = true;
+          setMode("speaking");
+        };
+        utterance.onend = () => {
+          speakingRef.current = false;
+          if (!mountedRef.current) {
+            resolve(true);
+            return;
+          }
+          setMode("idle");
+          if (autoRestartListening && !stoppedManuallyRef.current) {
+            startRecognition();
+          }
+          resolve(true);
+        };
+        utterance.onerror = () => {
+          speakingRef.current = false;
+          if (!mountedRef.current) {
+            resolve(false);
+            return;
+          }
+          setMode("idle");
+          if (autoRestartListening && !stoppedManuallyRef.current) {
+            startRecognition();
+          }
+          resolve(false);
+        };
+
+        try {
+          window.speechSynthesis?.speak(utterance);
+        } catch {
+          resolve(false);
+        }
+      });
+    },
+    [autoRestartListening, language, settingsUid, startRecognition]
+  );
+
   useEffect(() => {
     mountedRef.current = true;
 
@@ -215,6 +272,28 @@ export function useVoiceConversation({
           voiceId: voiceSettings.voiceId,
           speed: voiceSettings.speechRate,
         });
+        const blobType = String(blob?.type || "").trim().toLowerCase();
+        const blobSize = Number(blob?.size || 0);
+        const audioProbe = typeof Audio !== "undefined" ? new Audio() : null;
+        const canPlayType =
+          audioProbe && typeof audioProbe.canPlayType === "function"
+            ? audioProbe.canPlayType(blobType)
+            : "";
+        console.debug("[AI_AUDIO][live_reply_blob]", {
+          blobType,
+          blobSize,
+          canPlayType,
+        });
+        if (!blob || blobSize <= 0 || !blobType.startsWith("audio/")) {
+          const fallbackPlayed = await playSpeechSynthesisFallback(text);
+          if (fallbackPlayed) return;
+          throw new Error("Speech generation returned an invalid audio blob.");
+        }
+        if (canPlayType === "no") {
+          const fallbackPlayed = await playSpeechSynthesisFallback(text);
+          if (fallbackPlayed) return;
+          throw new Error(`Unsupported audio source type: ${blobType || "unknown"}`);
+        }
         if (audioUrlRef.current) {
           URL.revokeObjectURL(audioUrlRef.current);
           audioUrlRef.current = "";
@@ -254,14 +333,28 @@ export function useVoiceConversation({
           }
         };
 
-        await audio.play();
+        try {
+          await audio.play();
+        } catch (playbackError) {
+          console.error("[AI_AUDIO][live_reply_play_failed]", {
+            message: playbackError?.message || null,
+            blobType,
+            blobSize,
+          });
+          const fallbackPlayed = await playSpeechSynthesisFallback(text);
+          if (fallbackPlayed) return;
+          throw playbackError;
+        }
       } catch (err) {
         speakingRef.current = false;
+        console.error("[AI_AUDIO][live_reply_error]", {
+          message: err?.message || null,
+        });
         setError(err?.message || "Failed to play AI voice response.");
         setMode("error");
       }
     },
-    [autoRestartListening, muted, settingsUid, startRecognition]
+    [autoRestartListening, muted, playSpeechSynthesisFallback, settingsUid, startRecognition]
   );
 
   const interruptSpeaking = useCallback(() => {
