@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import {
   Paperclip,
   Search as SearchIcon,
@@ -28,8 +28,11 @@ import AttachmentChipsTray from "../../shared/chat-media/AttachmentChipsTray.jsx
 import ChatMediaPreviewModal from "../../shared/chat-media/ImagePreviewModal.jsx";
 import useCapturedMedia from "../../shared/chat-media/useCapturedMedia.js";
 import ImageComparisonPicker from "../../shared/chat-media/ImageComparisonPicker.jsx";
-import LiveMultimodalSessionContainerV2 from "../../shared/live/LiveMultimodalSessionContainerV2.jsx";
 import "../../shared/chat-media/chat-media.css";
+
+const LiveMultimodalSessionContainerV2 = React.lazy(() =>
+  import("../../shared/live/LiveMultimodalSessionContainerV2.jsx")
+);
 
 function getGreetingByHour(date = new Date()) {
   const h = date.getHours();
@@ -160,6 +163,79 @@ async function readFileAsDataUrl(file) {
   });
 }
 
+const InstitutionAttachmentGrid = React.memo(function InstitutionAttachmentGrid({
+  items,
+  messageId,
+  onPreview,
+}) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return (
+    <div className={`mb-3 grid grid-flow-dense gap-2 ${getAttachmentGridClass(items.length)}`}>
+      {items.map((attachment, index) => (
+        <button
+          key={attachment.id || `${messageId}-attachment-${index}`}
+          type="button"
+          onClick={() => onPreview(attachment)}
+          className={getAttachmentItemClass(items.length, index)}
+        >
+          <img
+            src={attachment.previewUrl || attachment.url}
+            alt={attachment.name || `Attachment ${index + 1}`}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
+          />
+        </button>
+      ))}
+    </div>
+  );
+});
+
+const InstitutionMessageRow = React.memo(function InstitutionMessageRow({
+  message,
+  onPreview,
+  onImageChoice,
+}) {
+  const isUser = message.role === "user";
+  return (
+    <div className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}>
+      <div
+        className={`w-full max-w-[92%] sm:max-w-[78%] md:max-w-[68%] lg:max-w-[620px] rounded-2xl border p-3 text-left ${
+          isUser
+            ? "bg-sky-50 border-sky-200 text-slate-900 ml-auto rounded-br-md"
+            : "bg-white border-slate-200 text-slate-800 mr-auto rounded-bl-md"
+        }`}
+      >
+        <div className="text-xs font-semibold uppercase tracking-wide mb-1 text-slate-500">
+          {isUser ? "You" : "ElimuLink AI"}
+        </div>
+        {message.role === "ai" && Array.isArray(message.imageOptions) && message.imageOptions.length >= 2 && !message.selectedImageUrl && !message.comparisonSkipped ? (
+          <div className="mb-3">
+            <ImageComparisonPicker
+              title={message.comparisonTitle || "Which image do you like more?"}
+              images={message.imageOptions}
+              selectedIndex={message.comparisonSelectedIndex ?? null}
+              onChoose={(choiceIndex) => onImageChoice(message.id, choiceIndex)}
+              onSkip={() => onImageChoice(message.id, null, { skipped: true })}
+            />
+          </div>
+        ) : null}
+        <InstitutionAttachmentGrid items={message.attachments} messageId={message.id} onPreview={onPreview} />
+        {message.role === "ai" && message.imageUrl ? (
+          <img
+            src={message.imageUrl}
+            alt={message.text || "Generated image"}
+            className="mb-3 w-full max-w-xl rounded-lg border border-slate-200 object-contain"
+            loading="lazy"
+            decoding="async"
+          />
+        ) : null}
+        <div className="text-sm whitespace-pre-wrap">{message.text}</div>
+      </div>
+    </div>
+  );
+}, (prev, next) => prev.message === next.message && prev.onPreview === next.onPreview && prev.onImageChoice === next.onImageChoice);
+
 export default function InstitutionHome({
   user,
   userProfile,
@@ -204,9 +280,9 @@ export default function InstitutionHome({
 
   const canSend = query.trim().length > 0 || attachments.length > 0;
 
-  const handleFileUpload = () => {
+  const handleFileUpload = useCallback(() => {
     fileInputRef.current?.click?.();
-  };
+  }, []);
 
   const requestLiveVoiceReply = async ({ text, context }) => {
     const liveContext = {
@@ -221,7 +297,7 @@ export default function InstitutionHome({
     return { text: String(data?.text || "Connection error.").trim() || "Connection error." };
   };
 
-  const handleImageComparisonChoice = (messageId, choiceIndex, { skipped = false } = {}) => {
+  const handleImageComparisonChoice = useCallback((messageId, choiceIndex, { skipped = false } = {}) => {
     if (!messageId) return;
     setMessages((currentMessages) =>
       currentMessages.map((message) => {
@@ -255,7 +331,11 @@ export default function InstitutionHome({
         };
       })
     );
-  };
+  }, []);
+
+  const handlePreviewAttachment = useCallback((item) => {
+    openPreview(item);
+  }, [openPreview]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -313,11 +393,12 @@ export default function InstitutionHome({
 
     try {
       if (!user) throw new Error("Please sign in");
-      const idToken = await user.getIdToken();
+      const idTokenPromise = user.getIdToken();
 
       clearMedia();
 
       if (pendingAttachments.length > 0) {
+        const idToken = await idTokenPromise;
         const formData = new FormData();
         formData.append("message", text || `Sent ${pendingAttachments.length} image${pendingAttachments.length === 1 ? "" : "s"}`);
         formData.append("institutionId", userProfile?.institutionId || "");
@@ -358,6 +439,7 @@ export default function InstitutionHome({
       }
 
       if (shouldGenerateImage) {
+        const idToken = await idTokenPromise;
         if (imageGenerationClarification) {
           setMessages((prev) =>
             prev.map((message) =>
@@ -439,7 +521,7 @@ export default function InstitutionHome({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
+          Authorization: `Bearer ${await idTokenPromise}`,
         },
         body: JSON.stringify(requestBody),
       });
@@ -599,64 +681,14 @@ export default function InstitutionHome({
 
         {messages.length > 0 ? (
           <div className="mt-6 space-y-3">
-            {messages.map((message) => {
-              const isUser = message.role === "user";
-              return (
-                <div
-                  key={message.id}
-                  className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`w-full max-w-[92%] sm:max-w-[78%] md:max-w-[68%] lg:max-w-[620px] rounded-2xl border p-3 text-left ${
-                      isUser
-                        ? "bg-sky-50 border-sky-200 text-slate-900 ml-auto rounded-br-md"
-                        : "bg-white border-slate-200 text-slate-800 mr-auto rounded-bl-md"
-                    }`}
-                  >
-                    <div className="text-xs font-semibold uppercase tracking-wide mb-1 text-slate-500">
-                      {isUser ? "You" : "ElimuLink AI"}
-                    </div>
-                    {message.role === "ai" && Array.isArray(message.imageOptions) && message.imageOptions.length >= 2 && !message.selectedImageUrl && !message.comparisonSkipped ? (
-                      <div className="mb-3">
-                        <ImageComparisonPicker
-                          title={message.comparisonTitle || "Which image do you like more?"}
-                          images={message.imageOptions}
-                          selectedIndex={message.comparisonSelectedIndex ?? null}
-                          onChoose={(choiceIndex) => handleImageComparisonChoice(message.id, choiceIndex)}
-                          onSkip={() => handleImageComparisonChoice(message.id, null, { skipped: true })}
-                        />
-                      </div>
-                    ) : null}
-                    {Array.isArray(message.attachments) && message.attachments.length > 0 ? (
-                      <div className={`mb-3 grid grid-flow-dense gap-2 ${getAttachmentGridClass(message.attachments.length)}`}>
-                        {message.attachments.map((attachment, index) => (
-                          <button
-                            key={attachment.id || `${message.id}-attachment-${index}`}
-                            type="button"
-                            onClick={() => openPreview(attachment)}
-                            className={getAttachmentItemClass(message.attachments.length, index)}
-                          >
-                            <img
-                              src={attachment.previewUrl || attachment.url}
-                              alt={attachment.name || `Attachment ${index + 1}`}
-                              className="h-full w-full object-cover"
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                    {message.role === "ai" && message.imageUrl ? (
-                      <img
-                        src={message.imageUrl}
-                        alt={message.text || "Generated image"}
-                        className="mb-3 w-full max-w-xl rounded-lg border border-slate-200 object-contain"
-                      />
-                    ) : null}
-                    <div className="text-sm whitespace-pre-wrap">{message.text}</div>
-                  </div>
-                </div>
-              );
-            })}
+            {messages.map((message) => (
+              <InstitutionMessageRow
+                key={message.id}
+                message={message}
+                onPreview={handlePreviewAttachment}
+                onImageChoice={handleImageComparisonChoice}
+              />
+            ))}
             {isThinking ? (
               <div className="text-sm text-slate-500">
                 {messages[messages.length - 1]?.type === "image" ? "Generating image..." : "AI is thinking..."}
@@ -765,17 +797,19 @@ export default function InstitutionHome({
         </div>
       </div>
 
-      <LiveMultimodalSessionContainerV2
-        open={voiceOpen}
-        onClose={() => setVoiceOpen(false)}
-        family="ai"
-        app="institution"
-        settingsUid={user?.uid || null}
-        title="Institution Live"
-        subtitle="Talk through study support and institution tasks with AI."
-        language={getStoredLanguage("en-US", user?.uid || null)}
-        onAskAI={requestLiveVoiceReply}
-      />
+      <Suspense fallback={null}>
+        <LiveMultimodalSessionContainerV2
+          open={voiceOpen}
+          onClose={() => setVoiceOpen(false)}
+          family="ai"
+          app="institution"
+          settingsUid={user?.uid || null}
+          title="Institution Live"
+          subtitle="Talk through study support and institution tasks with AI."
+          language={getStoredLanguage("en-US", user?.uid || null)}
+          onAskAI={requestLiveVoiceReply}
+        />
+      </Suspense>
       <input
         ref={fileInputRef}
         type="file"
