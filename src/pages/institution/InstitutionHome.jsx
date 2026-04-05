@@ -118,8 +118,36 @@ async function readInstitutionStream(response, onDelta) {
 function getAttachmentGridClass(count) {
   if (count <= 1) return "grid-cols-1";
   if (count === 2) return "grid-cols-2";
-  if (count <= 4) return "grid-cols-2";
+  if (count === 3) return "grid-cols-2";
+  if (count === 4) return "grid-cols-2";
   return "grid-cols-2 sm:grid-cols-3";
+}
+
+function getAttachmentItemClass(count, index) {
+  const base =
+    "overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-[0_8px_20px_rgba(15,23,42,0.05)] transition hover:shadow-[0_12px_26px_rgba(15,23,42,0.08)] dark:border-slate-700 dark:bg-slate-900 dark:hover:shadow-[0_12px_26px_rgba(0,0,0,0.24)]";
+
+  if (count <= 1) {
+    return `${base} aspect-[4/3] max-h-[340px]`;
+  }
+
+  if (count === 2) {
+    return `${base} aspect-[4/5] sm:aspect-square max-h-[260px]`;
+  }
+
+  if (count === 3) {
+    return index === 0
+      ? `${base} col-span-2 aspect-[16/9] max-h-[300px]`
+      : `${base} aspect-[4/5] max-h-[220px]`;
+  }
+
+  if (count === 4) {
+    return `${base} aspect-square max-h-[220px]`;
+  }
+
+  return index === 0
+    ? `${base} col-span-2 sm:col-span-2 sm:row-span-2 aspect-[4/3] sm:aspect-auto min-h-[220px] sm:min-h-[320px]`
+    : `${base} aspect-square min-h-[140px] sm:min-h-[180px]`;
 }
 
 async function readFileAsDataUrl(file) {
@@ -595,20 +623,18 @@ export default function InstitutionHome({
                   </div>
                 ) : null}
                 {Array.isArray(message.attachments) && message.attachments.length > 0 ? (
-                  <div className={`mb-3 grid gap-2 ${getAttachmentGridClass(message.attachments.length)}`}>
+                  <div className={`mb-3 grid grid-flow-dense gap-2 ${getAttachmentGridClass(message.attachments.length)}`}>
                     {message.attachments.map((attachment, index) => (
                       <button
                         key={attachment.id || `${message.id}-attachment-${index}`}
                         type="button"
                         onClick={() => openPreview(attachment)}
-                        className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                        className={getAttachmentItemClass(message.attachments.length, index)}
                       >
                         <img
                           src={attachment.previewUrl || attachment.url}
                           alt={attachment.name || `Attachment ${index + 1}`}
-                          className={`w-full object-cover ${
-                            message.attachments.length === 1 ? "aspect-[4/3] max-h-[320px]" : "aspect-square max-h-[220px]"
-                          }`}
+                          className="h-full w-full object-cover"
                         />
                       </button>
                     ))}
