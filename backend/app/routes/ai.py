@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from time import perf_counter
 from typing import Optional
 
@@ -101,7 +102,6 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
                 mode=mode,
                 workspace_context=workspace_context if isinstance(workspace_context, dict) else {},
                 assistant_style=normalize_assistant_style(payload.assistantStyle or assistant_style),
-                trace_id=trace_id,
             )
     except Exception as exc:  # noqa: BLE001
         if str(exc) == "MISSING_PROVIDER_KEY":
