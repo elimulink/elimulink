@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { Suspense, useState, useEffect, useRef } from 'react';
 import InstitutionAdminDashboard from "./pages/institution/InstitutionAdminDashboard";
 import InstitutionNotebook from "./pages/institution/InstitutionNotebook";
 import InstitutionAssignments from "./pages/institution/InstitutionAssignments";
@@ -62,7 +62,6 @@ import ImageAnnotationEditor from './shared/chat-media/ImageAnnotationEditor.jsx
 import AIImageEditModal from './shared/chat-media/AIImageEditModal.jsx';
 import ScreenshotPreviewToast from './shared/chat-media/ScreenshotPreviewToast.jsx';
 import useCapturedMedia from './shared/chat-media/useCapturedMedia.js';
-import LiveMultimodalSessionContainerV2 from './shared/live/LiveMultimodalSessionContainerV2.jsx';
 import {
   getVagueImageRequestClarification,
   isImageGenerationPrompt,
@@ -70,6 +69,10 @@ import {
 import DesktopSettingsLauncher from './shared/settings/DesktopSettingsLauncher.jsx';
 import './shared/audio/audio-ui.css';
 import './shared/chat-media/chat-media.css';
+
+const LiveMultimodalSessionContainerV2 = React.lazy(() =>
+  import('./shared/live/LiveMultimodalSessionContainerV2.jsx')
+);
 
 const appId = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const INSTITUTION_EMAIL_DOMAIN = String(import.meta.env.VITE_INSTITUTION_EMAIL_DOMAIN || 'elimulink.co.ke').toLowerCase();
@@ -261,6 +264,18 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
   const [onboardInstitutions, setOnboardInstitutions] = useState([]);
   const [onboardSelectedInst, setOnboardSelectedInst] = useState('');
   const [onboardError, setOnboardError] = useState('');
+  const deferInstitutionBootstrapWork = (work, timeout = 1200) => {
+    if (hostMode !== 'institution') {
+      const timer = window.setTimeout(() => { void work(); }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      const handle = window.requestIdleCallback(() => { void work(); }, { timeout });
+      return () => window.cancelIdleCallback(handle);
+    }
+    const timer = window.setTimeout(() => { void work(); }, 0);
+    return () => window.clearTimeout(timer);
+  };
   const isInstitutionHost =
     hostMode === 'institution' ||
     (typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('institution.'));
@@ -442,21 +457,34 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
       setUserProfile(null);
       return;
     }
-    const q = collection(db, 'artifacts', appId, 'users', user.uid, 'chats');
-    return onSnapshot(q, (snapshot) => {
-      const history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setChatHistory(history.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
+    let unsubscribe = null;
+    let cancelled = false;
+    const cancelTimer = deferInstitutionBootstrapWork(() => {
+      if (cancelled) return;
+      const q = collection(db, 'artifacts', appId, 'users', user.uid, 'chats');
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setChatHistory(history.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
+      });
     });
+    return () => {
+      cancelled = true;
+      cancelTimer?.();
+      unsubscribe?.();
+    };
   }, [user]);
 
   // Load persisted user region preference and extended role profile
   useEffect(() => {
     if (!user) return;
 
-    (async () => {
+    let cancelled = false;
+    const cancelTimer = deferInstitutionBootstrapWork(async () => {
       try {
         const uDoc = doc(db, 'artifacts', appId, 'users', user.uid);
         const snap = await getDoc(uDoc);
+
+        if (cancelled) return;
 
         if (snap.exists()) {
           let data = snap.data();
@@ -515,10 +543,15 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
           });
         }
       } catch (e) {
+        if (cancelled) return;
         console.error('Error reading user prefs', e);
         setUserRole('student_general');
       }
-    })();
+    });
+    return () => {
+      cancelled = true;
+      cancelTimer?.();
+    };
   }, [user, appId, hostMode]);
 
   const runPostLoginSync = async (firebaseUser) => {
@@ -687,10 +720,20 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
   // Load saved images from Firestore
   useEffect(() => {
     if (!user) return;
-    const col = collection(db, 'artifacts', appId, 'users', user.uid, 'savedImages');
-    return onSnapshot(col, snap => {
-      setSavedImages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    let unsubscribe = null;
+    let cancelled = false;
+    const cancelTimer = deferInstitutionBootstrapWork(() => {
+      if (cancelled) return;
+      const col = collection(db, 'artifacts', appId, 'users', user.uid, 'savedImages');
+      unsubscribe = onSnapshot(col, snap => {
+        setSavedImages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
     });
+    return () => {
+      cancelled = true;
+      cancelTimer?.();
+      unsubscribe?.();
+    };
   }, [user]);
 
   // Handle online/offline status and install prompt
@@ -2044,24 +2087,26 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
           ) : null}
         </div>
       )}
-      <LiveMultimodalSessionContainerV2
-        open={voiceOpen}
-        onClose={() => setVoiceOpen(false)}
-        family="ai"
-        app={hostMode === 'institution' ? 'institution' : 'public'}
-        settingsUid={user?.uid || null}
-        title={hostMode === "institution" ? "Institution Live" : "Live AI"}
-        subtitle={
-          hostMode === "institution"
-            ? "Talk through study support and institution tasks with AI."
-            : "Talk naturally with AI in a calm live session."
-        }
-        language={getStoredLanguage('en-US', user?.uid || null)}
-        onAskAI={async ({ text, context }) => {
-          const reply = await requestLiveVoiceReply(text, context);
-          return { text: reply };
-        }}
-      />
+      <Suspense fallback={null}>
+        <LiveMultimodalSessionContainerV2
+          open={voiceOpen}
+          onClose={() => setVoiceOpen(false)}
+          family="ai"
+          app={hostMode === 'institution' ? 'institution' : 'public'}
+          settingsUid={user?.uid || null}
+          title={hostMode === "institution" ? "Institution Live" : "Live AI"}
+          subtitle={
+            hostMode === "institution"
+              ? "Talk through study support and institution tasks with AI."
+              : "Talk naturally with AI in a calm live session."
+          }
+          language={getStoredLanguage('en-US', user?.uid || null)}
+          onAskAI={async ({ text, context }) => {
+            const reply = await requestLiveVoiceReply(text, context);
+            return { text: reply };
+          }}
+        />
+      </Suspense>
 
       {/* Settings Modal */}
       {/* Institution Staff Code Modal */}

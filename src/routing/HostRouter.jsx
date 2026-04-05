@@ -347,6 +347,10 @@ export default function HostRouter() {
     () => getResolvedHostMode(window.location.hostname, window.location.pathname),
     [],
   );
+  const getBootstrapRetryDelayMs = (failureCount) =>
+    hostMode === 'institution'
+      ? 2000 * Math.max(1, failureCount)
+      : BOOTSTRAP_RETRY_DELAY_MS * Math.max(1, failureCount);
   const devAuthBypassActive = DEV_AUTH_BYPASS_ENABLED && isLocalHostname(window.location.hostname);
   const devBypassUser = useMemo(
     () =>
@@ -616,7 +620,9 @@ export default function HostRouter() {
       try {
         hostDebug('bootstrap:verify_begin', { attempt, uid: user.uid, hostMode });
         const familySession = await verifyFamilySession(user, hostMode, {
-          timeoutMs: getStartupVerifyTimeoutMs(),
+          timeoutMs: hostMode === 'institution' ? Math.min(getStartupVerifyTimeoutMs(), 20000) : getStartupVerifyTimeoutMs(),
+          networkRetryCount: hostMode === 'institution' ? 1 : undefined,
+          networkRetryDelayMs: hostMode === 'institution' ? 1200 : undefined,
         });
         if (cancelled || attempt !== bootAttemptRef.current) {
           hostDebug('bootstrap:stale_success_ignored', { attempt, uid: user.uid });
@@ -688,7 +694,7 @@ export default function HostRouter() {
             bootstrapRetryTimerRef.current = window.setTimeout(() => {
               bootstrapRetryTimerRef.current = null;
               setBootstrapNonce((value) => value + 1);
-            }, BOOTSTRAP_RETRY_DELAY_MS * temporaryBootstrapFailureRef.current);
+            }, getBootstrapRetryDelayMs(temporaryBootstrapFailureRef.current));
           }
         } else {
           hostDebug('bootstrap:error_no_fallback', { attempt, uid: user.uid });

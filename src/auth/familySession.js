@@ -49,13 +49,23 @@ function buildInFlightVerifyKey(firebaseUser, normalizedApp, forceRefreshToken) 
   ].join(":");
 }
 
-async function runVerifyFamilySession(firebaseUser, normalizedApp, { timeoutMs, forceRefreshToken }) {
+async function runVerifyFamilySession(
+  firebaseUser,
+  normalizedApp,
+  { timeoutMs, forceRefreshToken, networkRetryCount, networkRetryDelayMs }
+) {
+  const maxRetries = Number.isFinite(networkRetryCount)
+    ? Math.max(0, Number(networkRetryCount))
+    : VERIFY_NETWORK_RETRY_COUNT;
+  const retryDelayMs = Number.isFinite(networkRetryDelayMs)
+    ? Math.max(0, Number(networkRetryDelayMs))
+    : VERIFY_NETWORK_RETRY_DELAY_MS;
   const token = await getFirebaseIdToken(forceRefreshToken);
   if (!token) throw new Error("Missing Firebase ID token");
   const verifyUrl = apiUrl("/api/auth/verify-app-access");
   let response;
 
-  for (let attempt = 0; attempt <= VERIFY_NETWORK_RETRY_COUNT; attempt += 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timeoutId = controller
       ? window.setTimeout(() => controller.abort(new Error("Verify session timed out")), timeoutMs)
@@ -79,7 +89,7 @@ async function runVerifyFamilySession(firebaseUser, normalizedApp, { timeoutMs, 
         verifyUrl,
         appName: normalizedApp,
       });
-      const canRetry = attempt < VERIFY_NETWORK_RETRY_COUNT;
+      const canRetry = attempt < maxRetries;
       console.error("[FAMILY_SESSION] verify:network_error", {
         app: normalizedApp,
         verifyUrl,
@@ -90,7 +100,7 @@ async function runVerifyFamilySession(firebaseUser, normalizedApp, { timeoutMs, 
       if (!canRetry) {
         throw err;
       }
-      await wait(VERIFY_NETWORK_RETRY_DELAY_MS * (attempt + 1));
+      await wait(retryDelayMs * (attempt + 1));
       continue;
     }
 
@@ -131,7 +141,7 @@ async function runVerifyFamilySession(firebaseUser, normalizedApp, { timeoutMs, 
       error.verifyUrl = verifyUrl;
       error.appName = normalizedApp;
       error.temporary = isRetryableVerifyStatus(response.status);
-      const canRetry = error.temporary && attempt < VERIFY_NETWORK_RETRY_COUNT;
+      const canRetry = error.temporary && attempt < maxRetries;
       console.error("[FAMILY_SESSION] verify:failed", {
         app: normalizedApp,
         status: response.status,
@@ -144,7 +154,7 @@ async function runVerifyFamilySession(firebaseUser, normalizedApp, { timeoutMs, 
       if (!canRetry) {
         throw error;
       }
-      await wait(VERIFY_NETWORK_RETRY_DELAY_MS * (attempt + 1));
+      await wait(retryDelayMs * (attempt + 1));
       continue;
     }
 
@@ -293,6 +303,12 @@ export async function verifyFamilySession(firebaseUser, appName, options = {}) {
   const normalizedApp = resolveAppName(appName);
   const timeoutMs = Number(options.timeoutMs || VERIFY_SESSION_TIMEOUT_MS);
   const forceRefreshToken = options.forceRefreshToken !== false;
+  const networkRetryCount = Number.isFinite(options.networkRetryCount)
+    ? Math.max(0, Number(options.networkRetryCount))
+    : VERIFY_NETWORK_RETRY_COUNT;
+  const networkRetryDelayMs = Number.isFinite(options.networkRetryDelayMs)
+    ? Math.max(0, Number(options.networkRetryDelayMs))
+    : VERIFY_NETWORK_RETRY_DELAY_MS;
   console.info("[FAMILY_SESSION] verify:start", {
     uid: firebaseUser.uid,
     email: firebaseUser.email || null,
@@ -308,6 +324,8 @@ export async function verifyFamilySession(firebaseUser, appName, options = {}) {
   const requestPromise = runVerifyFamilySession(firebaseUser, normalizedApp, {
     timeoutMs,
     forceRefreshToken,
+    networkRetryCount,
+    networkRetryDelayMs,
   }).finally(() => {
     inFlightVerifyRequests.delete(inFlightKey);
   });
