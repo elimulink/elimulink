@@ -71,6 +71,24 @@ function isUltraShortGreetingPrompt(text) {
   ]).has(normalized);
 }
 
+function isLightInstitutionPrompt(text) {
+  const normalized = String(text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9'\s?]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized || normalized.includes("\n")) return false;
+  if (normalized.length > 110) return false;
+  const words = normalized.match(/[a-z0-9']+/g) || [];
+  if (!words.length || words.length > 14) return false;
+  if (/(?:\bthen\b|\balso\b|\bcompare\b|\bcontrast\b|\bversus\b|\bvs\b|\bdifference between\b|\band then\b)/.test(normalized)) {
+    return false;
+  }
+  if ((normalized.match(/\?/g) || []).length > 1) return false;
+  return true;
+}
+
 const Card = ({ icon: Icon, title, subtitle, onClick }) => (
   <button
     type="button"
@@ -373,7 +391,8 @@ export default function InstitutionHome({
       at: frontendTimingStarted,
       textLength: text.length,
     });
-    const requestText = isUltraShortGreetingPrompt(text) ? text : resolveContinuationPrompt(text, messages);
+    const useLightPromptPath = isLightInstitutionPrompt(text);
+    const requestText = useLightPromptPath ? text : resolveContinuationPrompt(text, messages);
     const latestAssistantText = String(
       [...messages].reverse().find((message) => message?.role === "ai")?.text || ""
     ).trim();
@@ -390,6 +409,8 @@ export default function InstitutionHome({
     const userMessageId = Date.now();
     const assistantMessageId = userMessageId + 1;
     const messageText = text || `Sent ${pendingAttachments.length} image${pendingAttachments.length === 1 ? "" : "s"}`;
+    const idTokenPromise = user.getIdToken();
+
     const attachmentDisplayItems = await Promise.all(
       pendingAttachments.map(async (item) => ({
         ...item,
@@ -405,7 +426,7 @@ export default function InstitutionHome({
       {
         id: assistantMessageId,
         role: "ai",
-        text: shouldGenerateImage ? "Generating image..." : "",
+        text: shouldGenerateImage ? "Generating image..." : (useLightPromptPath ? "" : "Typing..."),
         type: shouldGenerateImage ? "image" : "text",
         imageUrl: "",
       },
@@ -414,7 +435,6 @@ export default function InstitutionHome({
 
     try {
       if (!user) throw new Error("Please sign in");
-      const idTokenPromise = user.getIdToken();
 
       clearMedia();
 

@@ -89,6 +89,24 @@ def _get_ultra_short_greeting_reply(message: str) -> Optional[str]:
     return _ULTRA_SHORT_GREETING_REPLIES[normalized]
 
 
+def _is_light_simple_prompt(message: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(message or "").strip().lower())
+    if not normalized or "\n" in normalized:
+        return False
+    if len(normalized) > 110:
+        return False
+    word_count = len(re.findall(r"[a-z0-9']+", normalized))
+    if word_count == 0 or word_count > 14:
+        return False
+    if re.search(r"\b(?:then|also|compare|contrast|versus|vs|difference between|and then)\b", normalized):
+        return False
+    if normalized.count(";") > 0:
+        return False
+    if normalized.count("?") > 1:
+        return False
+    return True
+
+
 def _sse_event(event_name: str, payload: dict) -> str:
     return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -270,7 +288,7 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                     "departmentName": (body or {}).get("departmentName") or "General",
                     "hostMode": "institution",
                 }
-                simple_fast_prompt = intent == "general_chat" and len(message.strip()) <= 120 and "\n" not in message.strip()
+                simple_fast_prompt = intent == "general_chat" and _is_light_simple_prompt(message)
                 ultra_short_greeting_reply = None
                 if simple_fast_prompt:
                     ultra_short_greeting_reply = _get_ultra_short_greeting_reply(message)
@@ -322,8 +340,8 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                     flush=True,
                 )
                 model_started = perf_counter()
-                max_output_tokens = 280 if simple_fast_prompt else 520
-                temperature = 0.25 if simple_fast_prompt else 0.35
+                max_output_tokens = 180 if simple_fast_prompt else 520
+                temperature = 0.2 if simple_fast_prompt else 0.35
                 try:
                     async for delta in stream_gemini_text(
                         prompt,
