@@ -266,6 +266,7 @@ export function buildFamilySession(verifyData, { firebaseUser } = {}) {
     default_app: verifyData.default_app,
     access_mode: verifyData.access_mode,
     temporary_reason: verifyData.temporary_reason,
+    username: firebaseUser?.displayName || "",
     displayName: firebaseUser?.displayName || "",
   };
 

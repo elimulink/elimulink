@@ -32,6 +32,7 @@ import {
 import useSecureSessionLock from '../hooks/useSecureSessionLock';
 import { getResolvedHostMode } from './hostMode';
 import { subscribeAppSessionChanges } from '../auth/appSession';
+import { resolveInstitutionDisplayName } from '../institution/institutionIdentity';
 
 const APP_ID = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const DEBUG_HOST_ROUTER = import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_HOST_ROUTER || '').trim() === '1';
@@ -54,6 +55,13 @@ function hostDebug(step, payload = {}) {
 function profileDisplayName(profile, user) {
   const value = profile?.displayName || profile?.name || user?.displayName || '';
   return String(value).trim();
+}
+
+function institutionDisplayName(profile, user) {
+  return resolveInstitutionDisplayName(profile, user, {
+    preferUsername: true,
+    fallback: 'Guest Scholar',
+  });
 }
 
 function isProfileComplete(profile, user) {
@@ -242,7 +250,11 @@ function PublicApp({ modeUrls }) {
 }
 
 function OnboardingPage({ hostMode, user, authReady, onCompleteOnboarding }) {
-  const [fullName, setFullName] = useState(profileDisplayName(null, user));
+  const [fullName, setFullName] = useState(
+    hostMode === 'institution'
+      ? resolveInstitutionDisplayName(null, user, { preferUsername: true, fallback: '' })
+      : profileDisplayName(null, user),
+  );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [returnTo, setReturnTo] = useState('');
@@ -352,7 +364,7 @@ export default function HostRouter() {
     hostMode === 'institution'
       ? 2000 * Math.max(1, failureCount)
       : BOOTSTRAP_RETRY_DELAY_MS * Math.max(1, failureCount);
-  const devAuthBypassActive = DEV_AUTH_BYPASS_ENABLED && isLocalHostname(window.location.hostname);
+  const devAuthBypassActive = (DEV_AUTH_BYPASS_ENABLED || isLocalHostname(window.location.hostname)) && hostMode === 'institution';
   const devBypassUser = useMemo(
     () =>
       devAuthBypassActive
@@ -1214,7 +1226,11 @@ export default function HostRouter() {
   }
 
   if (hostMode === 'institution' && pathname === '/institution/activate') {
-    return <InstitutionActivatePage />;
+    if (devAuthBypassActive) {
+      replacePath('/institution', setPathname);
+    } else {
+      return <InstitutionActivatePage />;
+    }
   }
 
   if (hostMode === 'student' && pathname === '/login') {
@@ -1248,12 +1264,13 @@ export default function HostRouter() {
       <InstitutionLogin
         hostMode={hostMode}
         user={user}
-        profileDisplayName={profileDisplayName(profile, user)}
+        profileDisplayName={resolveInstitutionDisplayName(profile, user, { preferUsername: true, fallback: '' })}
         onAuthSuccess={async (syncedProfile, returnTo) => {
           const merged = {
             ...(profile || {}),
             ...(syncedProfile || {}),
-            displayName: profileDisplayName(profile, auth?.currentUser),
+            displayName: resolveInstitutionDisplayName(profile, auth?.currentUser, { preferUsername: true, fallback: '' }),
+            username: resolveInstitutionDisplayName(profile, auth?.currentUser, { preferUsername: true, fallback: '' }),
           };
           setProfile(merged);
           const complete = isProfileComplete(merged, auth?.currentUser);
@@ -1323,6 +1340,9 @@ export default function HostRouter() {
             name: normalizedName,
             updatedAt: serverTimestamp(),
           };
+          if (hostMode === 'institution') {
+            profilePatch.username = normalizedName;
+          }
           hostLog('[ONBOARDING_SAVE] start', {
             uid: activeUser.uid,
             path: `artifacts/${APP_ID}/users/${activeUser.uid}`,

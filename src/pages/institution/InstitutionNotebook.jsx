@@ -13,6 +13,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { resolveInstitutionDisplayName } from "../../institution/institutionIdentity";
 
 function fmtTimestamp(value) {
   const d = value?.toDate?.();
@@ -99,7 +100,10 @@ export default function InstitutionNotebook({
     try {
       const payload = {
         ownerUid: user.uid,
-        ownerName: user?.displayName || "",
+        ownerName: resolveInstitutionDisplayName(userProfile, user, {
+          preferUsername: true,
+          fallback: "",
+        }),
         departmentId,
         title: title || "Untitled note",
         content: content || "",

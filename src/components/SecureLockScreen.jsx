@@ -123,7 +123,7 @@ export default function SecureLockScreen({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const displayName = String(profile?.displayName || profile?.name || user?.displayName || "").trim();
+  const displayName = String(profile?.username || profile?.displayName || profile?.name || user?.displayName || "").trim();
   const email = String(user?.email || profile?.email || "").trim();
   const firstName = getFirstName(displayName, email);
   const initials = getInitials(displayName, email);

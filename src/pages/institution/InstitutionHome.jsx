@@ -29,6 +29,7 @@ import ChatMediaPreviewModal from "../../shared/chat-media/ImagePreviewModal.jsx
 import useCapturedMedia from "../../shared/chat-media/useCapturedMedia.js";
 import ImageComparisonPicker from "../../shared/chat-media/ImageComparisonPicker.jsx";
 import "../../shared/chat-media/chat-media.css";
+import { resolveInstitutionDisplayName } from "../../institution/institutionIdentity";
 
 const LiveMultimodalSessionContainerV2 = React.lazy(() =>
   import("../../shared/live/LiveMultimodalSessionContainerV2.jsx")
@@ -42,12 +43,10 @@ function getGreetingByHour(date = new Date()) {
 }
 
 function getDisplayName(user, userProfile) {
-  return (
-    userProfile?.fullName ||
-    userProfile?.name ||
-    user?.displayName ||
-    "Guest Scholar"
-  );
+  return resolveInstitutionDisplayName(userProfile, user, {
+    preferUsername: true,
+    fallback: "Guest Scholar",
+  });
 }
 
 function isUltraShortGreetingPrompt(text) {
