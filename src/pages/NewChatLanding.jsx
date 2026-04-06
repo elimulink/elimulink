@@ -5411,7 +5411,7 @@ export default function NewChatLanding({
               </div>
             </div>
 
-            <div className={[hasConversation ? "px-4 pt-1 pb-2" : "px-4 pt-1 pb-2", "flex-1 min-h-0 flex flex-col"].join(" ")}>
+            <div className={[hasConversation ? "px-4 pt-1 pb-2" : "px-4 pt-4 pb-2 md:pt-5", "flex-1 min-h-0 flex flex-col"].join(" ")}>
               <div className="max-w-[1180px] w-full mx-auto flex-1 min-h-0 flex flex-col">
               {messages.length === 0 && !isEmbeddedAdminChat ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3">
