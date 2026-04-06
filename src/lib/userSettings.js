@@ -57,7 +57,8 @@ export function getStoredPreferences(defaults = {}, uid = null) {
 
 export function saveStoredPreferences(preferences, uid = null) {
   const effectiveUid = resolveUid(uid);
-  const next = { ...(preferences || {}) };
+  const current = getStoredPreferences({}, effectiveUid);
+  const next = { ...current, ...(preferences || {}) };
   if (effectiveUid) {
     writeScopedJson(effectiveUid, PREFS_SETTINGS_KEY, next);
   } else {

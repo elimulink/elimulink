@@ -102,10 +102,30 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
 
   useEffect(() => {
     const root = document.getElementById("root");
-    document.documentElement.classList.add("login-viewport-lock");
-    document.body.classList.add("login-viewport-lock");
-    root?.classList.add("login-viewport-lock");
+    const desktopLockQuery = window.matchMedia("(min-width: 981px)");
+
+    const applyViewportLock = () => {
+      const shouldLock = desktopLockQuery.matches;
+      document.documentElement.classList.toggle("login-viewport-lock", shouldLock);
+      document.body.classList.toggle("login-viewport-lock", shouldLock);
+      root?.classList.toggle("login-viewport-lock", shouldLock);
+    };
+
+    applyViewportLock();
+
+    const handleChange = () => applyViewportLock();
+    if (desktopLockQuery.addEventListener) {
+      desktopLockQuery.addEventListener("change", handleChange);
+    } else if (desktopLockQuery.addListener) {
+      desktopLockQuery.addListener(handleChange);
+    }
+
     return () => {
+      if (desktopLockQuery.removeEventListener) {
+        desktopLockQuery.removeEventListener("change", handleChange);
+      } else if (desktopLockQuery.removeListener) {
+        desktopLockQuery.removeListener(handleChange);
+      }
       document.documentElement.classList.remove("login-viewport-lock");
       document.body.classList.remove("login-viewport-lock");
       root?.classList.remove("login-viewport-lock");

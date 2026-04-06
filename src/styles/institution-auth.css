@@ -18,36 +18,71 @@ html {
 body {
   font-family: Inter, "Segoe UI", Roboto, system-ui, sans-serif;
   color: #0f172a;
+  background-color: #eef4fb;
   background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.10), transparent 30%),
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 28%),
+    radial-gradient(circle at 80% 18%, rgba(14, 165, 233, 0.08), transparent 24%),
     radial-gradient(circle at bottom left, rgba(20, 184, 166, 0.08), transparent 26%),
-    linear-gradient(180deg, #f7fbff 0%, #eef5ff 100%);
+    linear-gradient(180deg, #f8fbff 0%, #edf4fb 100%);
 }
 
 .inst-auth-page {
   min-height: 100dvh;
   height: 100dvh;
+  width: 100%;
+  position: fixed;
+  inset: 0;
   overflow: hidden;
   display: grid;
   grid-template-columns: 1.08fr 480px;
+  isolation: isolate;
+}
+
+.inst-auth-page::before,
+.inst-auth-page::after {
+  content: "";
+  position: absolute;
+  inset: auto;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(14px);
+}
+
+.inst-auth-page::before {
+  top: 48px;
+  right: 420px;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.10) 0%, rgba(37, 99, 235, 0) 72%);
+}
+
+.inst-auth-page::after {
+  left: 180px;
+  bottom: 34px;
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.08) 0%, rgba(14, 165, 233, 0) 70%);
 }
 
 .inst-auth-brand {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px 56px;
+  padding: clamp(28px, 3vw, 52px) clamp(32px, 3vw, 60px);
+  position: relative;
+  z-index: 1;
 }
 
 .inst-auth-brand-inner {
-  max-width: 620px;
+  max-width: 660px;
 }
 
 .inst-auth-logo-row {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 26px;
+  margin-bottom: 22px;
 }
 
 .inst-auth-logo {
@@ -60,11 +95,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
 }
 
 .inst-auth-brand-name {
-  font-size: 32px;
+  font-size: 31px;
   font-weight: 700;
   line-height: 1.05;
   letter-spacing: -0.03em;
@@ -79,52 +114,57 @@ body {
   font-size: 12px;
   letter-spacing: 0.18em;
   color: #64748b;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .inst-auth-title {
-  margin: 0 0 18px;
-  font-size: clamp(42px, 5vw, 64px);
-  line-height: 0.98;
-  letter-spacing: -0.05em;
-  max-width: 620px;
+  margin: 0 0 16px;
+  font-size: clamp(40px, 4.7vw, 62px);
+  line-height: 0.95;
+  letter-spacing: -0.06em;
+  max-width: 660px;
+  color: #0b1730;
 }
 
 .inst-auth-subtitle {
-  margin: 0 0 28px;
-  font-size: 18px;
-  line-height: 1.7;
-  color: #475569;
-  max-width: 580px;
+  margin: 0 0 22px;
+  font-size: 16px;
+  line-height: 1.62;
+  color: #41556f;
+  max-width: 610px;
 }
 
 .inst-auth-trust-grid {
   display: grid;
-  gap: 14px;
-  margin-top: 26px;
-  max-width: 560px;
+  gap: 12px;
+  margin-top: 18px;
+  max-width: 600px;
 }
 
 .inst-auth-trust-card {
   display: flex;
   gap: 14px;
   align-items: flex-start;
-  padding: 18px;
+  padding: 16px 18px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.70);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .inst-auth-trust-card h3 {
   margin: 0 0 4px;
   font-size: 16px;
+  letter-spacing: -0.02em;
+  color: #0b1730;
 }
 
 .inst-auth-trust-card p {
   margin: 0;
-  color: #64748b;
-  line-height: 1.55;
+  color: #52657d;
+  line-height: 1.58;
   font-size: 14px;
 }
 
@@ -137,8 +177,8 @@ body {
 }
 
 .inst-auth-footer-note {
-  margin-top: 26px;
-  color: #64748b;
+  margin-top: 20px;
+  color: #5b6f88;
   font-size: 14px;
 }
 
@@ -146,20 +186,22 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 18px 20px;
+  padding: 20px 20px 20px 0;
+  position: relative;
+  z-index: 1;
 }
 
 .inst-auth-card {
   width: min(480px, 100%);
-  max-height: calc(100dvh - 36px);
+  max-height: calc(100dvh - 32px);
   overflow: hidden;
-  padding: 20px 22px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.84);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.10);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  padding: 18px 20px 18px;
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 22px 58px rgba(15, 23, 42, 0.09);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .inst-auth-card-top {
@@ -167,32 +209,35 @@ body {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .inst-auth-card-top h2 {
   margin: 0 0 6px;
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1.02;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.035em;
+  color: #0b1730;
 }
 
 .inst-auth-card-top p {
   margin: 0;
-  color: #64748b;
-  line-height: 1.5;
+  color: #52657d;
+  line-height: 1.58;
   font-size: 14px;
+  max-width: 330px;
 }
 
 .inst-auth-chip {
   flex-shrink: 0;
   border-radius: 999px;
-  padding: 7px 11px;
-  background: rgba(37, 99, 235, 0.08);
+  padding: 8px 12px;
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.06));
   color: #1d4ed8;
-  border: 1px solid rgba(37, 99, 235, 0.10);
+  border: 1px solid rgba(37, 99, 235, 0.12);
   font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .inst-auth-notice,
@@ -229,22 +274,23 @@ body {
 
 .inst-auth-socials {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .inst-auth-socials.compact-two-col {
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px;
 }
 
 .inst-auth-social-btn {
   width: 100%;
   min-height: 44px;
   height: 44px;
-  padding: 0 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.09);
-  background: #fff;
+  padding: 0 14px;
+  border-radius: 15px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
   color: #0f172a;
   display: flex;
   align-items: center;
@@ -253,12 +299,17 @@ body {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .inst-auth-social-btn:hover {
-  background: #f8fafc;
-  border-color: rgba(15, 23, 42, 0.14);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  border-color: rgba(37, 99, 235, 0.16);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
 }
 
 .inst-auth-social-btn:active {
@@ -303,7 +354,7 @@ body {
 .inst-auth-form,
 .staff-entry-form {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .inst-auth-form.compact-form {
@@ -312,26 +363,30 @@ body {
 
 .inst-auth-field {
   display: grid;
-  gap: 5px;
+  gap: 7px;
 }
 
 .inst-auth-field span {
   font-size: 12px;
   font-weight: 600;
   color: #475569;
+  letter-spacing: 0.01em;
 }
 
 .inst-auth-field input {
   width: 100%;
-  height: 46px;
-  border-radius: 14px;
+  height: 44px;
+  border-radius: 15px;
   border: 1px solid rgba(15, 23, 42, 0.10);
   background: rgba(255, 255, 255, 0.98);
   color: #0f172a;
   padding: 0 14px;
   font-size: 14px;
   outline: none;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
 }
 
 .inst-auth-field input::placeholder {
@@ -339,17 +394,18 @@ body {
 }
 
 .inst-auth-field input:focus {
-  border-color: rgba(37, 99, 235, 0.34);
+  border-color: rgba(37, 99, 235, 0.36);
+  background: #fff;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.10);
 }
 
 .inst-auth-primary {
   margin-top: 4px;
   width: 100%;
-  height: 52px;
+  height: 50px;
   border: none;
   border-radius: 16px;
-  background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%);
+  background: linear-gradient(135deg, #1d4ed8 0%, #0ea5e9 100%);
   color: #fff;
   font-size: 15px;
   font-weight: 700;
@@ -358,18 +414,23 @@ body {
   justify-content: center;
   gap: 8px;
   cursor: pointer;
-  transition: transform 0.18s ease, filter 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    filter 0.18s ease,
+    box-shadow 0.18s ease;
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.20);
 }
 
 .inst-auth-primary.compact-primary {
   margin-top: 2px;
   height: 46px;
-  border-radius: 14px;
+  border-radius: 15px;
   font-size: 14px;
 }
 
 .inst-auth-primary:hover {
   filter: brightness(1.03);
+  box-shadow: 0 16px 32px rgba(37, 99, 235, 0.24);
 }
 
 .inst-auth-primary:active {
@@ -378,16 +439,16 @@ body {
 
 .inst-auth-phone-panel {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .inst-auth-phone-head {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px;
-  border-radius: 18px;
-  background: rgba(248, 250, 252, 0.9);
+  padding: 14px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(255, 255, 255, 0.92));
   border: 1px solid rgba(15, 23, 42, 0.08);
 }
 
@@ -415,19 +476,26 @@ body {
 
 .inst-auth-secondary-btn {
   width: 100%;
-  min-height: 50px;
-  border-radius: 16px;
+  min-height: 46px;
+  border-radius: 15px;
   border: 1px solid rgba(15, 23, 42, 0.10);
   background: #fff;
   color: #475569;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.inst-auth-secondary-btn:hover {
+  background: #f8fbff;
+  border-color: rgba(37, 99, 235, 0.16);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
 }
 
 .inst-auth-links,
 .inst-auth-sub-actions {
-  margin-top: 16px;
+  margin-top: 14px;
   display: flex;
   justify-content: space-between;
   gap: 14px;
@@ -436,19 +504,20 @@ body {
 
 .compact-links {
   margin-top: 12px;
-  gap: 8px 14px;
+  gap: 10px 14px;
 }
 
 .inst-auth-link-button,
 .inst-auth-links a,
 .inst-auth-secondary-link {
-  color: #475569;
+  color: #4b5e79;
   text-decoration: none;
   font-size: 13px;
   background: transparent;
   border: none;
   padding: 0;
   cursor: pointer;
+  font-weight: 500;
 }
 
 .inst-auth-link-button:hover,
@@ -603,6 +672,8 @@ body {
     grid-template-columns: 1fr;
     min-height: 100dvh;
     height: auto;
+    position: relative;
+    inset: auto;
     overflow-y: auto;
   }
 
@@ -638,8 +709,8 @@ body {
   }
 
   .inst-auth-social-btn {
-    min-height: 48px;
-    height: 48px;
+    min-height: 50px;
+    height: 50px;
     border-radius: 16px;
     font-size: 15px;
   }
@@ -675,6 +746,66 @@ body {
     max-height: calc(100dvh - 24px);
     padding: 20px 18px;
     border-radius: 24px;
+  }
+}
+
+@media (min-width: 981px) and (max-height: 860px) {
+  .inst-auth-brand {
+    padding: 22px 30px 20px 34px;
+  }
+
+  .inst-auth-logo-row {
+    margin-bottom: 18px;
+  }
+
+  .inst-auth-title {
+    font-size: clamp(36px, 4.2vw, 54px);
+    margin-bottom: 12px;
+  }
+
+  .inst-auth-subtitle {
+    font-size: 15px;
+    margin-bottom: 18px;
+  }
+
+  .inst-auth-trust-grid {
+    margin-top: 14px;
+  }
+
+  .inst-auth-trust-card {
+    padding: 14px 16px;
+  }
+
+  .inst-auth-footer-note {
+    margin-top: 16px;
+    font-size: 13px;
+  }
+
+  .inst-auth-panel {
+    padding: 16px 18px 16px 0;
+  }
+
+  .inst-auth-card {
+    max-height: calc(100dvh - 22px);
+    padding: 16px 18px 16px;
+  }
+
+  .inst-auth-card-top {
+    margin-bottom: 10px;
+  }
+
+  .inst-auth-card-top h2 {
+    font-size: 22px;
+  }
+
+  .inst-auth-form,
+  .staff-entry-form {
+    gap: 10px;
+  }
+
+  .inst-auth-links,
+  .inst-auth-sub-actions {
+    margin-top: 12px;
   }
 }
 

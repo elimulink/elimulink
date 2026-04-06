@@ -68,6 +68,7 @@ import {
   isImageEditFollowUpPrompt,
   isImageGenerationPrompt,
 } from "../shared/image-generation/imageGenerationIntent.js";
+import { shouldOfferImageComparison } from "../shared/image-generation/imageComparisonIntent.js";
 import {
   formatAiServiceError,
   resolveContinuationPrompt,
@@ -76,6 +77,7 @@ import ResearchActionsContainer from "../shared/research/ResearchActionsContaine
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
 import ResponseBlockRenderer from "../shared/assistant-blocks/ResponseBlockRenderer.jsx";
 import imageAPI from "../services/imageAPI.js";
+import ImageComparisonPicker from "../shared/chat-media/ImageComparisonPicker.jsx";
 import DesktopSettingsLauncher from "../shared/settings/DesktopSettingsLauncher.jsx";
 import DesktopSettingsWorkspace from "../shared/settings/DesktopSettingsWorkspace.jsx";
 import SettingsPage from "../pages/SettingsPage";
@@ -310,6 +312,12 @@ function Bubble({
   role,
   text,
   imageUrl = "",
+  comparisonImages = [],
+  comparisonTitle = "Which image do you like more?",
+  comparisonSelectedIndex = null,
+  comparisonSkipped = false,
+  onComparisonChoose,
+  onComparisonSkip,
   imageSearchResults = [],
   imageSearchQuery = "",
   sources = [],
@@ -328,6 +336,8 @@ function Bubble({
 }) {
   const isUser = role === "user";
   const isError = !isUser && isErrorText(text);
+  const hasComparisonChoices = !isUser && Array.isArray(comparisonImages) && comparisonImages.length >= 2;
+  const isComparisonPending = hasComparisonChoices && !String(imageUrl || "").trim() && !comparisonSkipped;
   const researchSources = useMemo(
     () => normalizeResearchSources({ sources, imageSearchResults, text }),
     [imageSearchResults, sources, text]
@@ -349,6 +359,18 @@ function Bubble({
               results={imageSearchResults}
               onPreview={onImagePreview}
               onReuse={onImageReuse}
+            />
+          </div>
+        ) : null}
+
+        {!isUser && isComparisonPending ? (
+          <div className="mb-3">
+            <ImageComparisonPicker
+              title={comparisonTitle}
+              images={comparisonImages}
+              selectedIndex={comparisonSelectedIndex}
+              onChoose={onComparisonChoose}
+              onSkip={onComparisonSkip}
             />
           </div>
         ) : null}
@@ -682,7 +704,7 @@ export default function StudentLanding() {
     };
     document.addEventListener("scroll", onScroll, true);
     return () => document.removeEventListener("scroll", onScroll, true);
-  }, []);
+  }, [updateActiveChatMessages]);
 
   const moreItems = useMemo(() => [...MORE_ITEMS_BASE], []);
 
@@ -1139,6 +1161,42 @@ export default function StudentLanding() {
     }
   }
 
+  const handleImageComparisonChoice = useCallback((messageId, choiceIndex, { skipped = false } = {}) => {
+    if (!messageId) return;
+    updateActiveChatMessages((chatMessages) =>
+      chatMessages.map((message) => {
+        if (message.id !== messageId) return message;
+        if (skipped) {
+          return {
+            ...message,
+            comparisonSkipped: true,
+            comparisonSelectedIndex: null,
+            selectedImageIndex: null,
+            selectedImageUrl: "",
+            imageUrl: "",
+            type: "text",
+            text: "Skipped.",
+          };
+        }
+
+        const options = Array.isArray(message.imageOptions) ? message.imageOptions : [];
+        const selected = options[choiceIndex] || options.find((item) => Number(item?.index) === choiceIndex + 1);
+        const selectedImageUrl = String(selected?.image || "").trim();
+        if (!selectedImageUrl) return message;
+
+        return {
+          ...message,
+          comparisonSelectedIndex: choiceIndex,
+          selectedImageIndex: choiceIndex,
+          selectedImageUrl,
+          imageUrl: selectedImageUrl,
+          type: "image",
+          text: choiceIndex === 0 ? "Thanks — I’ll continue with image 1." : "Got it — using image 2.",
+        };
+      })
+    );
+  }, []);
+
   async function sendMessage(text) {
     const pendingAttachments = attachments;
     const clean = text.trim();
@@ -1193,7 +1251,43 @@ export default function StudentLanding() {
         return;
       }
       try {
-        const imageUrl = await imageAPI.generateImage(requestText);
+        const shouldCompareImage = shouldOfferImageComparison(requestText, {
+          isNewChat: messages.length <= 1,
+          hasExistingDirection: Boolean(imageAPI.getLatestImageFromMessages(messages)),
+          hasShownComparison: messages.some(
+            (message) => Boolean(message?.comparison) || (Array.isArray(message?.imageOptions) && message.imageOptions.length >= 2)
+          ),
+        });
+        const imageResult = await imageAPI.generateImage(requestText, {
+          compare: shouldCompareImage,
+        });
+        if (Array.isArray(imageResult.images) && imageResult.images.length >= 2) {
+          updateActiveChatMessages(
+            (messages) => [
+              ...messages,
+              {
+                id: Date.now(),
+                role: "assistant",
+                text: "",
+                type: "image-comparison",
+                comparison: true,
+                comparisonTitle: imageResult.text || "Which image do you like more?",
+                comparisonSelectedIndex: null,
+                selectedImageIndex: null,
+                selectedImageUrl: "",
+                imageUrl: "",
+                imageOptions: imageResult.images.map((item, index) => ({
+                  index: index + 1,
+                  image: item.image,
+                  model: item.model || "",
+                })),
+              },
+            ],
+            clean || "Image generation"
+          );
+          return;
+        }
+        const imageUrl = imageResult.image;
         updateActiveChatMessages(
           (messages) => [
             ...messages,
@@ -2522,6 +2616,12 @@ export default function StudentLanding() {
                   role={m.role}
                   text={m.text}
                   imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
+                  comparisonImages={m.imageOptions || []}
+                  comparisonTitle={m.comparisonTitle || "Which image do you like more?"}
+                  comparisonSelectedIndex={m.comparisonSelectedIndex ?? null}
+                  comparisonSkipped={Boolean(m.comparisonSkipped)}
+                  onComparisonChoose={(choiceIndex) => handleImageComparisonChoice(m.id, choiceIndex)}
+                  onComparisonSkip={() => handleImageComparisonChoice(m.id, null, { skipped: true })}
                   imageSearchResults={m.imageSearchResults || []}
                   imageSearchQuery={m.imageSearchQuery || ""}
                   sources={m.sources || []}
@@ -2818,11 +2918,17 @@ export default function StudentLanding() {
                 ) : null}
 
                 {messages.map((m, idx) => (
-                  <Bubble
-                    key={idx}
-                    role={m.role}
-                    text={m.text}
+                <Bubble
+                  key={idx}
+                  role={m.role}
+                  text={m.text}
                      imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
+                     comparisonImages={m.imageOptions || []}
+                     comparisonTitle={m.comparisonTitle || "Which image do you like more?"}
+                     comparisonSelectedIndex={m.comparisonSelectedIndex ?? null}
+                     comparisonSkipped={Boolean(m.comparisonSkipped)}
+                     onComparisonChoose={(choiceIndex) => handleImageComparisonChoice(m.id, choiceIndex)}
+                     onComparisonSkip={() => handleImageComparisonChoice(m.id, null, { skipped: true })}
                      imageSearchResults={m.imageSearchResults || []}
                      imageSearchQuery={m.imageSearchQuery || ""}
                      sources={m.sources || []}

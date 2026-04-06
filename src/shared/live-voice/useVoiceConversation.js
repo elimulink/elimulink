@@ -29,6 +29,25 @@ export function useVoiceConversation({
   const mountedRef = useRef(true);
   const awaitingAIRef = useRef(false);
 
+  const startRecognition = useCallback(() => {
+    if (!supported.speechRecognition || !recognitionRef.current) {
+      setError("Speech recognition is not supported on this device/browser.");
+      setMode("error");
+      return;
+    }
+
+    stoppedManuallyRef.current = false;
+    setError("");
+    setTranscript("");
+
+    try {
+      recognitionRef.current.start();
+    } catch (err) {
+      setError(err?.message || "Failed to start listening.");
+      setMode("error");
+    }
+  }, [supported.speechRecognition]);
+
   const playSpeechSynthesisFallback = useCallback(
     async (text) => {
       if (!text || typeof window === "undefined" || !("speechSynthesis" in window)) {
@@ -228,25 +247,6 @@ export function useVoiceConversation({
       // ignore
     }
   }, []);
-
-  const startRecognition = useCallback(() => {
-    if (!supported.speechRecognition || !recognitionRef.current) {
-      setError("Speech recognition is not supported on this device/browser.");
-      setMode("error");
-      return;
-    }
-
-    stoppedManuallyRef.current = false;
-    setError("");
-    setTranscript("");
-
-    try {
-      recognitionRef.current.start();
-    } catch (err) {
-      setError(err?.message || "Failed to start listening.");
-      setMode("error");
-    }
-  }, [supported.speechRecognition]);
 
   const speakText = useCallback(
     async (text) => {

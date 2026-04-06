@@ -360,11 +360,12 @@ export default function HostRouter() {
     () => getResolvedHostMode(window.location.hostname, window.location.pathname),
     [],
   );
+  const isLocalDevHost = useMemo(() => isLocalHostname(window.location.hostname), []);
   const getBootstrapRetryDelayMs = (failureCount) =>
     hostMode === 'institution'
       ? 2000 * Math.max(1, failureCount)
       : BOOTSTRAP_RETRY_DELAY_MS * Math.max(1, failureCount);
-  const devAuthBypassActive = (DEV_AUTH_BYPASS_ENABLED || isLocalHostname(window.location.hostname)) && hostMode === 'institution';
+  const devAuthBypassActive = DEV_AUTH_BYPASS_ENABLED && hostMode === 'institution';
   const devBypassUser = useMemo(
     () =>
       devAuthBypassActive
@@ -965,7 +966,11 @@ export default function HostRouter() {
       return;
     }
 
-    if (loggedIn && profileDone && (pathname === '/login' || pathname === '/onboarding' || pathname === '/institution/activate')) {
+    if (
+      loggedIn &&
+      profileDone &&
+      (pathname === '/login' || pathname === '/onboarding' || (pathname === '/institution/activate' && !isLocalDevHost))
+    ) {
       const params = new URLSearchParams(window.location.search);
       const returnTo = params.get('returnTo') || '';
       const target = resolvePostAuthTarget(profile, returnTo);
@@ -1001,7 +1006,7 @@ export default function HostRouter() {
 
     handledInitialRedirect.current = true;
     hostDebug('route:selected_after_bootstrap', { route: pathname, hostMode, pathname });
-  }, [authReady, profileReady, user, profile, hostMode, pathname, modeUrls, accessAllowed, bootState]);
+  }, [authReady, profileReady, user, profile, hostMode, pathname, modeUrls, accessAllowed, bootState, isLocalDevHost]);
 
   useEffect(() => {
     handledInitialRedirect.current = false;

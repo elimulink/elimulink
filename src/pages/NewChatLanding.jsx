@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   Bell,
@@ -73,6 +73,7 @@ import {
   isImageEditFollowUpPrompt,
   isImageGenerationPrompt,
 } from "../shared/image-generation/imageGenerationIntent.js";
+import { shouldOfferImageComparison } from "../shared/image-generation/imageComparisonIntent.js";
 import {
   formatAiServiceError,
   resolveContinuationPrompt,
@@ -99,6 +100,9 @@ import ResearchActionsContainer from "../shared/research/ResearchActionsContaine
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
 import ResponseBlockRenderer from "../shared/assistant-blocks/ResponseBlockRenderer.jsx";
 import imageAPI from "../services/imageAPI.js";
+import ImageComparisonPicker from "../shared/chat-media/ImageComparisonPicker.jsx";
+import { AssistantStylePromptCard, AssistantStyleSelectorSheet } from "../shared/chat-style/AssistantStylePrompt.jsx";
+import { useAssistantStylePreference } from "../shared/chat-style/useAssistantStylePreference.js";
 import { analyzeVisualContext } from "../lib/visionApi.js";
 import DesktopSettingsLauncher from "../shared/settings/DesktopSettingsLauncher.jsx";
 import DesktopSettingsWorkspace from "../shared/settings/DesktopSettingsWorkspace.jsx";
@@ -111,8 +115,9 @@ import SubgroupRoom from "./SubgroupRoom";
 import CoursesDashboard from "./CoursesDashboard";
 import AssignmentsPage from "./AssignmentsPage";
 import ResultsPage from "./ResultsPage";
-import AdminAnalyticsLanding from "./AdminAnalyticsLanding";
 import StudentAttendancePage from "../student/StudentAttendancePage";
+
+const AdminAnalyticsLanding = lazy(() => import("./AdminAnalyticsLanding"));
 
 const MAIN_ITEMS = [
   { key: "newchat", label: "NewChat", icon: LayoutGrid },
@@ -786,6 +791,12 @@ function Bubble({
   role,
   text,
   imageUrl = "",
+  comparisonImages = [],
+  comparisonTitle = "Which image do you like more?",
+  comparisonSelectedIndex = null,
+  comparisonSkipped = false,
+  onComparisonChoose,
+  onComparisonSkip,
   streaming = false,
   imageSearchResults = [],
   imageSearchQuery = "",
@@ -825,6 +836,8 @@ function Bubble({
   const isError = !isUser && isErrorText(text);
   const isActiveSpeak = !isUser && isSpeaking && speakingText === text;
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const hasComparisonChoices = !isUser && Array.isArray(comparisonImages) && comparisonImages.length >= 2;
+  const isComparisonPending = hasComparisonChoices && !String(imageUrl || "").trim() && !comparisonSkipped;
   const researchSources = useMemo(
     () => normalizeResearchSources({ sources, imageSearchResults, text }),
     [imageSearchResults, sources, text]
@@ -913,6 +926,15 @@ function Bubble({
           <div className="leading-relaxed">{text}</div>
         ) : (
           <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 text-slate-800 md:leading-[1.78] dark:text-slate-100">
+            {isComparisonPending ? (
+              <ImageComparisonPicker
+                title={comparisonTitle}
+                images={comparisonImages}
+                selectedIndex={comparisonSelectedIndex}
+                onChoose={onComparisonChoose}
+                onSkip={onComparisonSkip}
+              />
+            ) : null}
             {imageSearchResults.length ? (
               <ImageSearchResults
                 query={imageSearchQuery}
@@ -1307,6 +1329,9 @@ export default function NewChatLanding({
     INSTITUTION_CHAT_MODEL_OPTIONS[0]?.key || "elimulink-institution-ai",
   );
   const [currentUid, setCurrentUid] = useState(auth.currentUser?.uid || null);
+  const [assistantStyle, setAssistantStyle] = useAssistantStylePreference(currentUid);
+  const [showAssistantStylePrompt, setShowAssistantStylePrompt] = useState(false);
+  const [showAssistantStyleSelector, setShowAssistantStyleSelector] = useState(false);
   const recognitionRef = useRef(null);
   const mobileAttachmentMenuRef = useRef(null);
   const mobileModelMenuRef = useRef(null);
@@ -3269,6 +3294,47 @@ export default function NewChatLanding({
     return { ok: false, reason: "empty_stream" };
   }
 
+  const handleImageComparisonChoice = useCallback(
+    (messageId, choiceIndex, { skipped = false } = {}) => {
+      if (!messageId) return;
+      updateActiveChatMessages(
+        (chatMessages) =>
+          chatMessages.map((message) => {
+            if (message.id !== messageId) return message;
+            if (skipped) {
+              return {
+                ...message,
+                comparisonSkipped: true,
+                comparisonSelectedIndex: null,
+                selectedImageIndex: null,
+                selectedImageUrl: "",
+                imageUrl: "",
+                type: "text",
+                text: "Skipped.",
+              };
+            }
+
+            const options = Array.isArray(message.imageOptions) ? message.imageOptions : [];
+            const selected = options[choiceIndex] || options.find((item) => Number(item?.index) === choiceIndex + 1);
+            const selectedImageUrl = String(selected?.image || "").trim();
+            if (!selectedImageUrl) return message;
+
+            return {
+              ...message,
+              comparisonSelectedIndex: choiceIndex,
+              selectedImageIndex: choiceIndex,
+              selectedImageUrl,
+              imageUrl: selectedImageUrl,
+              type: "image",
+              text: choiceIndex === 0 ? "Thanks — I’ll continue with image 1." : "Got it — using image 2.",
+            };
+          }),
+        untitledChatBase
+      );
+    },
+    [untitledChatBase, updateActiveChatMessages]
+  );
+
   async function sendMessage(text) {
     const pendingAttachments = attachments;
     const clean = text.trim();
@@ -3415,7 +3481,46 @@ export default function NewChatLanding({
         return;
       }
       try {
-        const imageUrl = await imageAPI.generateImage(requestPrompt);
+        const shouldCompareImage = shouldOfferImageComparison(requestPrompt, {
+          isNewChat: messages.length <= 1,
+          hasExistingDirection: Boolean(imageAPI.getLatestImageFromMessages(messages)),
+          hasShownComparison: messages.some(
+            (message) => Boolean(message?.comparison) || (Array.isArray(message?.imageOptions) && message.imageOptions.length >= 2)
+          ),
+        });
+        const imageResult = await imageAPI.generateImage(requestPrompt, {
+          idToken,
+          compare: shouldCompareImage,
+        });
+        if (Array.isArray(imageResult.images) && imageResult.images.length >= 2) {
+          updateActiveChatMessages(
+            (messages) => [
+              ...messages,
+              {
+                id: Date.now(),
+                role: "assistant",
+                text: "",
+                type: "image-comparison",
+                comparison: true,
+                comparisonTitle: imageResult.text || "Which image do you like more?",
+                comparisonSelectedIndex: null,
+                selectedImageIndex: null,
+                selectedImageUrl: "",
+                imageUrl: "",
+                imageOptions: imageResult.images.map((item, index) => ({
+                  index: index + 1,
+                  image: item.image,
+                  model: item.model || "",
+                })),
+                ownerUid: currentUid,
+                createdAt: Date.now(),
+              },
+            ],
+            clean || untitledChatBase
+          );
+          return;
+        }
+        const imageUrl = imageResult.image;
         updateActiveChatMessages(
           (messages) => [
             ...messages,
@@ -4025,7 +4130,11 @@ export default function NewChatLanding({
   }
 
   if (active === "admin") {
-    return <AdminAnalyticsLanding />;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
+        <AdminAnalyticsLanding />
+      </Suspense>
+    );
   }
 
   return (
@@ -5067,6 +5176,12 @@ export default function NewChatLanding({
                       role={m.role}
                       text={m.text}
                       imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
+                      comparisonImages={m.imageOptions || []}
+                      comparisonTitle={m.comparisonTitle || "Which image do you like more?"}
+                      comparisonSelectedIndex={m.comparisonSelectedIndex ?? null}
+                      comparisonSkipped={Boolean(m.comparisonSkipped)}
+                      onComparisonChoose={(choiceIndex) => handleImageComparisonChoice(m.id, choiceIndex)}
+                      onComparisonSkip={() => handleImageComparisonChoice(m.id, null, { skipped: true })}
                       streaming={Boolean(m.streaming)}
                       imageSearchResults={m.imageSearchResults || []}
                       imageSearchQuery={m.imageSearchQuery || ""}
@@ -5462,6 +5577,12 @@ export default function NewChatLanding({
                           role={m.role}
                           text={m.text}
                           imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
+                          comparisonImages={m.imageOptions || []}
+                          comparisonTitle={m.comparisonTitle || "Which image do you like more?"}
+                          comparisonSelectedIndex={m.comparisonSelectedIndex ?? null}
+                          comparisonSkipped={Boolean(m.comparisonSkipped)}
+                          onComparisonChoose={(choiceIndex) => handleImageComparisonChoice(m.id, choiceIndex)}
+                          onComparisonSkip={() => handleImageComparisonChoice(m.id, null, { skipped: true })}
                           streaming={Boolean(m.streaming)}
                           imageSearchResults={m.imageSearchResults || []}
                           imageSearchQuery={m.imageSearchQuery || ""}
@@ -5929,5 +6050,6 @@ export default function NewChatLanding({
     </div>
   );
 }
+
 
 
