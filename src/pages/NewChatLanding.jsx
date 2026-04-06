@@ -5012,7 +5012,7 @@ export default function NewChatLanding({
                 style={{ paddingBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom) + ${kbHeight}px + 28px)` }}
               >
                 {messages.length === 0 ? (
-                  <div className="px-1 pt-1 pb-1">
+                  <div className="px-4 pt-4 pb-2">
                     <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-sky-600 dark:text-slate-300">{timeGreeting()}</div>
                     <div className="mt-2 text-[29px] leading-[1.18] font-semibold text-slate-950 dark:text-white">
                       {modeConfig.title}
@@ -5024,7 +5024,7 @@ export default function NewChatLanding({
                 ) : null}
 
                 {messages.length === 0 ? (
-                  <div className="flex flex-wrap items-start gap-2 pt-2 pb-2">
+                  <div className="flex flex-wrap items-start gap-2 px-4 pt-3 pb-2">
                     {starterSet.map((starter) => {
                       const isActive = selectedStarter === starter.key;
                       return (
@@ -5929,4 +5929,5 @@ export default function NewChatLanding({
     </div>
   );
 }
+
 
