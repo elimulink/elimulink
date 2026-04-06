@@ -5411,10 +5411,10 @@ export default function NewChatLanding({
               </div>
             </div>
 
-            <div className={[hasConversation ? "px-4 pt-1 pb-2" : "px-4 pt-4 pb-2 md:pt-5", "flex-1 min-h-0 flex flex-col"].join(" ")}>
+            <div className={[hasConversation ? "px-4 pt-1 pb-2" : "px-4 pt-12 pb-2 md:pt-20", "flex-1 min-h-0 flex flex-col"].join(" ")}>
               <div className="max-w-[1180px] w-full mx-auto flex-1 min-h-0 flex flex-col">
               {messages.length === 0 && !isEmbeddedAdminChat ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3 md:mt-2">
                   <StatCard title="Next Class" value={user.nextClass} subtitle="From your timetable" />
                   <StatCard title="Balance" value={user.balance} subtitle="Fees portal" />
                   <StatCard title="Attendance" value={user.attendance} subtitle="This month" />
@@ -5422,7 +5422,7 @@ export default function NewChatLanding({
                 </div>
               ) : null}
               {messages.length === 0 && isEmbeddedAdminChat ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3 md:mt-2">
                   {adminOverviewCards.map((item) => (
                     <StatCard key={item.title} title={item.title} value={item.value} subtitle={item.subtitle} />
                   ))}
@@ -5432,9 +5432,9 @@ export default function NewChatLanding({
               <div
                 ref={desktopMessagesRef}
                 onScroll={handleChatScroll}
-                className="chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-4 space-y-3"
+                className="chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pt-6 pb-4 space-y-3 md:pt-8"
               >
-                <div className="max-w-[920px] w-full mx-auto space-y-5 pb-8">
+                <div className="max-w-[920px] w-full mx-auto space-y-5 pb-8 md:pt-2">
                   {messages.length === 0 ? (
                     <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
                       <div className="text-sm text-slate-500 dark:text-slate-300">{timeGreeting()}</div>
@@ -5929,3 +5929,4 @@ export default function NewChatLanding({
     </div>
   );
 }
+
