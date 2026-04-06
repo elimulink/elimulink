@@ -18,9 +18,9 @@ import {
   getStartupVerifyTimeoutMs,
   isTemporaryVerifyFailure,
   isDeferredSessionReusable,
-  isStartupSessionReusable,
   loadFamilySession,
   logoutFamilySession,
+  resolveFamilySessionReuse,
   verifyFamilySession,
 } from '../auth/familySession';
 import {
@@ -31,6 +31,7 @@ import {
 } from '../auth/secureLock';
 import useSecureSessionLock from '../hooks/useSecureSessionLock';
 import { getResolvedHostMode } from './hostMode';
+import { subscribeAppSessionChanges } from '../auth/appSession';
 
 const APP_ID = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const DEBUG_HOST_ROUTER = import.meta.env.DEV && String(import.meta.env.VITE_DEBUG_HOST_ROUTER || '').trim() === '1';
@@ -560,23 +561,19 @@ export default function HostRouter() {
         bootstrapRetryTimerRef.current = null;
       }
       const cachedSession = loadFamilySession(user.uid);
+      const cachedReuse = resolveFamilySessionReuse(user, hostMode);
       hostDebug('bootstrap:cache', {
         attempt,
         hasCachedSession: Boolean(cachedSession),
         hasCachedProfile: Boolean(cachedSession?.profile),
+        reuseKind: cachedReuse.reuseKind,
       });
-      const canReuseCachedSession = isStartupSessionReusable(cachedSession, {
-        firebaseUser: user,
-        appName: hostMode,
-      });
-      const canDeferVerifyWithCachedSession = isDeferredSessionReusable(cachedSession, {
-        firebaseUser: user,
-        appName: hostMode,
-      });
+      const canReuseCachedSession = cachedReuse.reuseKind === 'startup';
+      const canDeferVerifyWithCachedSession = cachedReuse.reuseKind === 'deferred';
 
       if (cachedSession?.profile) {
         setProfile(cachedSession.profile);
-        setAccessAllowed(canAccessApp(cachedSession, hostMode));
+        setAccessAllowed(cachedReuse.allowed);
       }
 
       if (canReuseCachedSession) {
@@ -623,6 +620,7 @@ export default function HostRouter() {
           timeoutMs: hostMode === 'institution' ? Math.min(getStartupVerifyTimeoutMs(), 20000) : getStartupVerifyTimeoutMs(),
           networkRetryCount: hostMode === 'institution' ? 1 : undefined,
           networkRetryDelayMs: hostMode === 'institution' ? 1200 : undefined,
+          forceRefreshToken: false,
         });
         if (cancelled || attempt !== bootAttemptRef.current) {
           hostDebug('bootstrap:stale_success_ignored', { attempt, uid: user.uid });
@@ -660,29 +658,23 @@ export default function HostRouter() {
           status: err?.status ?? null,
           verifyUrl: err?.verifyUrl || null,
         });
-        const fallbackSession = loadFamilySession(user.uid);
         const temporaryFailure = isTemporaryVerifyFailure(err);
-        if (
-          isDeferredSessionReusable(fallbackSession, {
-            firebaseUser: user,
-            appName: hostMode,
-          })
-        ) {
+        const fallbackReuse = resolveFamilySessionReuse(user, hostMode);
+        if (fallbackReuse.reuseKind === 'deferred') {
           hostDebug('bootstrap:fallback_session', {
             attempt,
             uid: user.uid,
-            role: fallbackSession?.role || null,
+            role: fallbackReuse.session?.role || null,
           });
-          setProfile(fallbackSession.profile);
-          const allowed = canAccessApp(fallbackSession, hostMode);
-          setAccessAllowed(allowed);
+          setProfile(fallbackReuse.session?.profile || null);
+          setAccessAllowed(fallbackReuse.allowed);
           setBootstrapError(null);
           setBootstrapStatusMessage('');
           setUsedCachedStartupSession(true);
           setBackgroundVerifyState('refreshing');
           setBackgroundVerifyMessage('Reconnecting to verify your workspace access.');
           temporaryBootstrapFailureRef.current = 0;
-          setBootState(allowed ? 'ready' : 'denied');
+          setBootState(fallbackReuse.allowed ? 'ready' : 'denied');
         } else if (temporaryFailure && temporaryBootstrapFailureRef.current < BOOTSTRAP_MAX_TEMP_FAILURES) {
           temporaryBootstrapFailureRef.current += 1;
           setProfile(null);
@@ -819,6 +811,52 @@ export default function HostRouter() {
       }
     };
   }, [authReady, profileReady, bootState, user, hostMode, bootstrapNonce, usedCachedStartupSession, devAuthBypassActive]);
+
+  useEffect(() => {
+    if (devAuthBypassActive) return undefined;
+    if (typeof window === 'undefined') return undefined;
+
+    const unsubscribe = subscribeAppSessionChanges(({ action, session, source }) => {
+      if (!authReady || !user || user.isAnonymous) return;
+
+      if (action === 'clear') {
+        if (source !== 'storage') return;
+        hostDebug('session_sync:cleared', {
+          source,
+          uid: user.uid,
+          hostMode,
+        });
+        setProfile(null);
+        setAccessAllowed(false);
+        setBootstrapError(null);
+        setBootstrapStatusMessage('');
+        setUsedCachedStartupSession(false);
+        setBackgroundVerifyState('idle');
+        setBackgroundVerifyMessage('');
+        setBootState('loading');
+        setProfileReady(false);
+        handledInitialRedirect.current = false;
+        return;
+      }
+
+      const latestSession = session || loadFamilySession(user.uid);
+      if (!latestSession || latestSession.uid !== user.uid) return;
+      if (!canAccessApp(latestSession, hostMode)) return;
+
+      const currentSession = loadFamilySession(user.uid);
+      const nextVerifiedAt = Number(latestSession.verifiedAt || 0);
+      const currentVerifiedAt = Number(currentSession?.verifiedAt || 0);
+      if (nextVerifiedAt && nextVerifiedAt > currentVerifiedAt) {
+        setProfile(latestSession.profile || null);
+        setAccessAllowed(true);
+        setUsedCachedStartupSession(true);
+        setBootState('ready');
+        setProfileReady(true);
+      }
+    });
+
+    return unsubscribe;
+  }, [authReady, user, hostMode, devAuthBypassActive]);
 
   useEffect(() => {
     if (devAuthBypassActive) return undefined;
@@ -1070,7 +1108,13 @@ export default function HostRouter() {
     if (!activeUser) throw new Error('Your session is no longer available. Please sign in again.');
     await unlockAction(activeUser);
     try {
-      const refreshedSession = await verifyFamilySession(activeUser, hostMode);
+      const cachedReuse = resolveFamilySessionReuse(activeUser, hostMode);
+      const refreshedSession =
+        cachedReuse.allowed && cachedReuse.reuseKind !== 'stale'
+          ? cachedReuse.session
+          : await verifyFamilySession(activeUser, hostMode, {
+              forceRefreshToken: false,
+            });
       const allowed = canAccessApp(refreshedSession, hostMode);
       if (!allowed) {
         setAccessAllowed(false);

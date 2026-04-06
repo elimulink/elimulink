@@ -14,11 +14,8 @@ import {
 import { ArrowRight, Building2, ShieldCheck, Smartphone } from "lucide-react";
 import { auth } from "../lib/firebase";
 import {
-  canAccessApp,
-  isDeferredSessionReusable,
-  isStartupSessionReusable,
-  loadFamilySession,
   resolveAppName,
+  resolveFamilySessionReuse,
   verifyFamilySession,
 } from "../auth/familySession";
 import { requestPostSignupLock } from "../auth/secureLock";
@@ -129,20 +126,16 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
 
   const verifyAccess = async (firebaseUser) => {
     const appName = resolveAppName(hostMode);
-    const cachedSession = loadFamilySession(firebaseUser?.uid);
-    if (cachedSession && canAccessApp(cachedSession, appName)) {
-      const reusable =
-        isStartupSessionReusable(cachedSession, { firebaseUser, appName }) ||
-        isDeferredSessionReusable(cachedSession, { firebaseUser, appName });
-      if (reusable) {
-        return cachedSession.profile;
-      }
+    const cachedReuse = resolveFamilySessionReuse(firebaseUser, appName);
+    if (cachedReuse.allowed && cachedReuse.reuseKind !== "stale" && cachedReuse.session?.profile) {
+      return cachedReuse.session.profile;
     }
 
     const session = await verifyFamilySession(firebaseUser, appName, {
       timeoutMs: 20000,
       networkRetryCount: 1,
       networkRetryDelayMs: 1200,
+      forceRefreshToken: false,
     });
     if (!session?.allowed) {
       throw new Error("You do not have access to this workspace.");

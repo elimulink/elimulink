@@ -50,6 +50,27 @@ function getDisplayName(user, userProfile) {
   );
 }
 
+function isUltraShortGreetingPrompt(text) {
+  const normalized = String(text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z'\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized || normalized.length > 20) return false;
+  return new Set([
+    "hello",
+    "hi",
+    "hey",
+    "morning",
+    "good morning",
+    "afternoon",
+    "good afternoon",
+    "evening",
+    "good evening",
+  ]).has(normalized);
+}
+
 const Card = ({ icon: Icon, title, subtitle, onClick }) => (
   <button
     type="button"
@@ -352,7 +373,7 @@ export default function InstitutionHome({
       at: frontendTimingStarted,
       textLength: text.length,
     });
-    const requestText = resolveContinuationPrompt(text, messages);
+    const requestText = isUltraShortGreetingPrompt(text) ? text : resolveContinuationPrompt(text, messages);
     const latestAssistantText = String(
       [...messages].reverse().find((message) => message?.role === "ai")?.text || ""
     ).trim();

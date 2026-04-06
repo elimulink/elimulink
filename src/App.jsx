@@ -49,7 +49,7 @@ import { getStoredLanguage } from './lib/userSettings';
 import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword } from 'firebase/auth';
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 import { logoutFamilySession } from './auth/familySession';
-import { verifyFamilySession } from './auth/familySession';
+import { resolveFamilySessionReuse, verifyFamilySession } from './auth/familySession';
 import AudioPlaybackBar from './shared/audio/AudioPlaybackBar.jsx';
 import AudioSettingsPanel from './shared/audio/AudioSettingsPanel.jsx';
 import { useAudioPlayer } from './shared/audio/useAudioPlayer.js';
@@ -556,7 +556,13 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
 
   const runPostLoginSync = async (firebaseUser) => {
     if (!firebaseUser) return null;
-    const session = await verifyFamilySession(firebaseUser, hostMode);
+    const cachedReuse = resolveFamilySessionReuse(firebaseUser, hostMode);
+    const session =
+      cachedReuse.allowed && cachedReuse.reuseKind !== 'stale'
+        ? cachedReuse.session
+        : await verifyFamilySession(firebaseUser, hostMode, {
+            forceRefreshToken: false,
+          });
     if (!session?.allowed) throw new Error('You do not have access to this workspace.');
     const data = session.profile || {};
     const role = data?.role || 'public_user';

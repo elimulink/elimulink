@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from time import perf_counter
 from typing import Optional
 
@@ -42,6 +43,18 @@ INSTITUTION_FAST_STREAM_INTENTS = {
     "institution_analytics",
 }
 
+_ULTRA_SHORT_GREETING_REPLIES = {
+    "hello": "Hello! How can I help?",
+    "hi": "Hi! How can I help?",
+    "hey": "Hey! How can I help?",
+    "morning": "Good morning! How can I help?",
+    "good morning": "Good morning! How can I help?",
+    "afternoon": "Good afternoon! How can I help?",
+    "good afternoon": "Good afternoon! How can I help?",
+    "evening": "Good evening! How can I help?",
+    "good evening": "Good evening! How can I help?",
+}
+
 
 def _is_institution_request(body: dict) -> bool:
     host_mode = str((body or {}).get("hostMode") or "").strip().lower()
@@ -59,6 +72,21 @@ def _workspace_context_from_body(body: dict, user: CurrentUser) -> dict:
         "department": (body or {}).get("departmentName") or (body or {}).get("departmentId") or user.department_id,
         "role": user.role,
     }
+
+
+def _normalize_fast_prompt_text(message: str) -> str:
+    return " ".join(re.findall(r"[a-z']+", str(message or "").strip().lower()))
+
+
+def _get_ultra_short_greeting_reply(message: str) -> Optional[str]:
+    normalized = _normalize_fast_prompt_text(message)
+    if not normalized:
+        return None
+    if len(normalized) > 20:
+        return None
+    if normalized not in _ULTRA_SHORT_GREETING_REPLIES:
+        return None
+    return _ULTRA_SHORT_GREETING_REPLIES[normalized]
 
 
 def _sse_event(event_name: str, payload: dict) -> str:
@@ -212,10 +240,12 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
         async def institution_event_stream() -> object:
             stream_started = perf_counter()
             first_chunk_at = None
-            yield _sse_event("start", {"ok": True})
-            accumulated_text = ""
-            prompt_started = perf_counter()
-            with get_db() as db:
+            user_message_saved = False
+
+            def ensure_session_and_user_saved(db) -> None:
+                nonlocal user_message_saved
+                if user_message_saved:
+                    return
                 if not get_session(db, current_session_id):
                     create_session(
                         db,
@@ -226,6 +256,12 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                         title="New Chat",
                     )
                 save_message(db, current_session_id, "user", message, intent=intent, tool_used=None)
+                user_message_saved = True
+
+            yield _sse_event("start", {"ok": True})
+            accumulated_text = ""
+            prompt_started = perf_counter()
+            with get_db() as db:
                 context = {
                     "uid": user.uid,
                     "role": user.role,
@@ -234,8 +270,18 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                     "departmentName": (body or {}).get("departmentName") or "General",
                     "hostMode": "institution",
                 }
-                analysis = analyze_compound_question(message)
-                history_limit = 2 if (analysis.is_compound or analysis.brief or analysis.needs_live_limitations) else 0
+                simple_fast_prompt = intent == "general_chat" and len(message.strip()) <= 120 and "\n" not in message.strip()
+                ultra_short_greeting_reply = None
+                if simple_fast_prompt:
+                    ultra_short_greeting_reply = _get_ultra_short_greeting_reply(message)
+                    if ultra_short_greeting_reply:
+                        simple_fast_prompt = True
+                if simple_fast_prompt:
+                    analysis = None
+                    history_limit = 0
+                else:
+                    analysis = analyze_compound_question(message)
+                    history_limit = 2 if (analysis.is_compound or analysis.brief or analysis.needs_live_limitations) else 0
                 history_started = perf_counter()
                 history = get_recent_history(db, current_session_id, limit=history_limit) if history_limit else []
                 print(
@@ -243,6 +289,24 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                     f"count={len(history)} limit={history_limit} endpoint=/api/ai/student",
                     flush=True,
                 )
+                if ultra_short_greeting_reply:
+                    yield _sse_event("chunk", {"delta": ultra_short_greeting_reply})
+                    ensure_session_and_user_saved(db)
+                    save_message(
+                        db,
+                        current_session_id,
+                        "assistant",
+                        ultra_short_greeting_reply,
+                        intent=f"{intent}:FAST_GREETING",
+                        tool_used=None,
+                    )
+                    print(
+                        f"[AI_TIMING] rid={trace_id or 'none'} stage=fast_greeting_reply ms={int((perf_counter() - stream_started) * 1000)} "
+                        f"endpoint=/api/ai/student fast=true chars={len(ultra_short_greeting_reply)}",
+                        flush=True,
+                    )
+                    yield _sse_event("done", {"text": ultra_short_greeting_reply, "intent": f"{intent}:FAST_GREETING"})
+                    return
                 compound_context = build_compound_request_context(message) if history_limit else ""
                 prompt_parts = []
                 if compound_context:
@@ -258,6 +322,8 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                     flush=True,
                 )
                 model_started = perf_counter()
+                max_output_tokens = 280 if simple_fast_prompt else 520
+                temperature = 0.25 if simple_fast_prompt else 0.35
                 try:
                     async for delta in stream_gemini_text(
                         prompt,
@@ -265,8 +331,8 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                         mode=(body or {}).get("mode"),
                         workspace_context=_workspace_context_from_body(body or {}, user),
                         assistant_style=assistant_style,
-                        max_output_tokens=520,
-                        temperature=0.35,
+                        max_output_tokens=max_output_tokens,
+                        temperature=temperature,
                     ):
                         if first_chunk_at is None:
                             first_chunk_at = perf_counter()
@@ -275,6 +341,7 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                                 f"endpoint=/api/ai/student fast=true",
                                 flush=True,
                             )
+                            ensure_session_and_user_saved(db)
                         accumulated_text += delta
                         yield _sse_event("chunk", {"delta": delta})
                 except Exception as exc:  # noqa: BLE001
@@ -292,6 +359,7 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                                 flush=True,
                             )
                         yield _sse_event("chunk", {"delta": fallback_text})
+                        ensure_session_and_user_saved(db)
                         final_text = fallback_text
                         save_message(
                             db,
@@ -308,9 +376,12 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                         )
                         yield _sse_event("done", {"text": final_text, "intent": f"{intent}:PROVIDER_RATE_LIMIT"})
                         return
+                    if not user_message_saved:
+                        ensure_session_and_user_saved(db)
                     yield _sse_event("error", {"message": str(exc)})
                     return
                 final_text = accumulated_text.strip() or "I couldn't generate a response."
+                ensure_session_and_user_saved(db)
                 save_message(
                     db,
                     current_session_id,
