@@ -7,8 +7,15 @@ from pydantic import BaseModel, Field
 
 class AIChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
+    normalizedMessage: Optional[str] = None
+    topic: Optional[str] = None
+    followUp: Optional[bool] = None
+    followUpType: Optional[str] = None
+    targetLanguage: Optional[str] = None
+    previousAssistantMessage: Optional[str] = None
     session_id: Optional[str] = None
     app_type: Optional[str] = None
+    stream: Optional[bool] = None
     mode: Optional[str] = None
     assistantStyle: Optional[str] = None
     workspaceContext: Optional[Dict[str, Any]] = None

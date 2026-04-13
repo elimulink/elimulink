@@ -7,9 +7,9 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app.services.voice_mapping import resolve_provider_voice, resolve_voice_style
-from app.services.model_registry import get_tts_model, get_transcribe_model
-from app.utils import ProviderTimeoutError, post_json_with_timeout
+from ..services.voice_mapping import resolve_provider_voice, resolve_voice_style
+from ..services.model_registry import get_tts_model, get_transcribe_model
+from ..utils import ProviderTimeoutError, post_json_with_timeout
 
 router = APIRouter(prefix="/api/v1/speech", tags=["speech-provider"])
 

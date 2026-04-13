@@ -3,8 +3,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from app.services.ai_access import resolve_ai_family_access
-from app.services.firebase_auth import verify_firebase_bearer_token
+from ..services.ai_access import resolve_ai_family_access
+from ..services.firebase_auth import verify_firebase_bearer_token
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])

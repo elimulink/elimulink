@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.services.vision_service import analyze_visual_context
+from ..services.vision_service import analyze_visual_context
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision-assist"])
 

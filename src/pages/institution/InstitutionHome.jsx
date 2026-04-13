@@ -21,7 +21,10 @@ import {
 } from "../../shared/image-generation/imageGenerationIntent";
 import { shouldOfferImageComparison } from "../../shared/image-generation/imageComparisonIntent";
 import {
+  deriveActiveTopic,
+  detectFollowUpIntent,
   formatAiServiceError,
+  normalizeInput,
   resolveContinuationPrompt,
 } from "../../shared/chat/chatResponseBehavior";
 import AttachmentChipsTray from "../../shared/chat-media/AttachmentChipsTray.jsx";
@@ -270,6 +273,7 @@ export default function InstitutionHome({
   const [status, setStatus] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState([]);
+  const [activeTopic, setActiveTopic] = useState("");
   const [voiceOpen, setVoiceOpen] = useState(false);
   const fileInputRef = useRef(null);
   const {
@@ -372,12 +376,21 @@ export default function InstitutionHome({
       at: frontendTimingStarted,
       textLength: text.length,
     });
-    const requestText = isUltraShortGreetingPrompt(text) ? text : resolveContinuationPrompt(text, messages);
+    const normalizedInput = normalizeInput(text);
+    const followUpIntent = detectFollowUpIntent(normalizedInput.normalizedText || text);
+    const currentTopic = deriveActiveTopic(messages, activeTopic);
+    const previousAssistantMessage = String(
+      [...messages].reverse().find((message) => message?.role === "ai")?.text || ""
+    ).trim();
+    const requestText =
+      isUltraShortGreetingPrompt(text) || followUpIntent.followUp
+        ? (normalizedInput.normalizedText || text)
+        : resolveContinuationPrompt(normalizedInput.normalizedText || text, messages);
     const latestAssistantText = String(
       [...messages].reverse().find((message) => message?.role === "ai")?.text || ""
     ).trim();
     const effectiveRequestText = isImageClarificationQuestion(latestAssistantText)
-      ? `Generate an image of ${text}`
+      ? `Generate an image of ${normalizedInput.normalizedText || text}`
       : requestText;
     const shouldGenerateImage = pendingAttachments.length === 0 && isImageGenerationPrompt(effectiveRequestText);
     const imageGenerationClarification = shouldGenerateImage
@@ -449,6 +462,16 @@ export default function InstitutionHome({
             message.id === assistantMessageId
               ? { ...message, text: aiText, type: "text" }
               : message
+          )
+        );
+        setActiveTopic((prev) =>
+          deriveActiveTopic(
+            [
+              ...messages,
+              { role: "user", text: text || effectiveRequestText },
+              { role: "ai", text: aiText },
+            ],
+            prev || currentTopic
           )
         );
         requestAnimationFrame(() => {
@@ -531,6 +554,12 @@ export default function InstitutionHome({
       const requestBody = {
         message: effectiveRequestText,
         text,
+        normalizedMessage: normalizedInput.changed ? normalizedInput.normalizedText : undefined,
+        topic: currentTopic || undefined,
+        followUp: followUpIntent.followUp,
+        followUpType: followUpIntent.followUpType || undefined,
+        targetLanguage: followUpIntent.targetLanguage || undefined,
+        previousAssistantMessage: previousAssistantMessage || undefined,
         hostMode: "institution",
         institutionId: userProfile?.institutionId || null,
         departmentId: activeDepartmentId || "general",
@@ -586,6 +615,16 @@ export default function InstitutionHome({
           message.id === assistantMessageId
             ? { ...message, text: aiText || "I could not generate a response." }
             : message
+        )
+      );
+      setActiveTopic((prev) =>
+        deriveActiveTopic(
+          [
+            ...messages,
+            { role: "user", text: text || effectiveRequestText },
+            { role: "ai", text: aiText || "I could not generate a response." },
+          ],
+          prev || currentTopic
         )
       );
       requestAnimationFrame(() => {

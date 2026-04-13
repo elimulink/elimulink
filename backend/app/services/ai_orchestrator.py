@@ -28,6 +28,7 @@ async def run_orchestrator(
     mode: Optional[str] = None,
     workspace_context: Optional[Dict[str, Any]] = None,
     assistant_style: Optional[str] = None,
+    request_metadata: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str, str, Optional[str]]:
     resolved_app = resolve_app_type(app_type)
     role = resolve_role(user)
@@ -62,7 +63,7 @@ async def run_orchestrator(
         tool_data = get_units(db, user_id)
 
     history = get_recent_history(db, current_session_id, limit=6)
-    prompt = build_context_prompt(message, intent, tool_data, history)
+    prompt = build_context_prompt(message, intent, tool_data, history, request_metadata=request_metadata)
 
     save_message(db, current_session_id, "user", message, intent=intent, tool_used=None)
     answer, error_code = await generate_answer(

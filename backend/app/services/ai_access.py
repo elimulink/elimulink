@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from fastapi import HTTPException
 
-from app.db.supabase_client import get_supabase_client
+from ..db.supabase_client import get_supabase_client
 
 AI_ACCESS_TIMEOUT_SECONDS = 20
 AI_ACCESS_CACHE_TTL_SECONDS = 20

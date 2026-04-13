@@ -43,9 +43,12 @@ export function saveStoredProfile(profile, uid = null) {
   const next = profile || {};
   if (effectiveUid) {
     writeScopedJson(effectiveUid, PROFILE_SETTINGS_KEY, next);
-    return;
+  } else {
+    writeJSON(PROFILE_SETTINGS_KEY, next);
   }
-  writeJSON(PROFILE_SETTINGS_KEY, next);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("elimulink-profile-change", { detail: next }));
+  }
 }
 
 export function getStoredPreferences(defaults = {}, uid = null) {

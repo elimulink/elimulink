@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import ipaddress
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
@@ -20,6 +21,17 @@ _service_account_path = Path(__file__).resolve().parent / "keys" / "firebase-ser
 def _is_production() -> bool:
     env = (os.getenv("APP_ENV") or os.getenv("ENV") or "").strip().lower()
     return env == "production"
+
+
+def _is_allowed_dev_host(host: str) -> bool:
+    value = str(host or "").strip().lower()
+    if value in {"127.0.0.1", "::1", "localhost"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return bool(ip.is_private or ip.is_loopback)
 
 
 def init_firebase_admin() -> None:
@@ -128,7 +140,7 @@ def get_current_user(
             print("[AUTH] DEV AUTH FALLBACK ACTIVE - Firebase token verification disabled")
             _dev_fallback_warned = True
         host = (request.client.host if request.client else "") or ""
-        if host not in {"127.0.0.1", "::1", "localhost"}:
+        if not _is_allowed_dev_host(host):
             raise HTTPException(
                 status_code=401,
                 detail={"code": "AUTH_REQUIRED", "message": "Authorization required"},

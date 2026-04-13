@@ -154,11 +154,10 @@ export default function LiveMultimodalSessionContainerV2({
   const fallbackSceneHints = useMemo(() => {
     if (!cameraActive) return [];
     return [
-      { id: "hint_laptop", label: "I can see a laptop" },
-      { id: "hint_books", label: "I can see books" },
-      { id: "hint_screen", label: "I can see a screen" },
-      { id: "hint_explain", label: "Explain this screen" },
-      { id: "hint_object", label: "What is this object?" },
+      { id: "hint_describe", label: "Describe this scene" },
+      { id: "hint_front", label: "What is in front of me?" },
+      { id: "hint_explain", label: "Explain what you see" },
+      { id: "hint_understand", label: "Help me understand this view" },
     ];
   }, [cameraActive]);
 
@@ -190,7 +189,7 @@ export default function LiveMultimodalSessionContainerV2({
       try {
         const result = await askAIRef.current?.({
           text:
-            "Generate 4 short, natural live-camera suggestion chips for a student using AI vision right now. Return one suggestion per line only, no numbering, each under 6 words.",
+            "Generate 4 short live-camera suggestion chips. Only mention specific visible objects when they are clearly supported by the provided capture titles or vision answers. If the evidence is uncertain, return only neutral prompts like 'Describe this scene' or 'Explain what you see'. Return one suggestion per line only, no numbering, each under 6 words.",
           context: {
             mode: "live-scene-suggestions",
             cameraEnabled: liveVoice.cameraEnabled,
@@ -205,10 +204,16 @@ export default function LiveMultimodalSessionContainerV2({
           app,
         });
         if (ignore) return;
+        const groundingText = liveVoice.captures
+          .slice(-3)
+          .map((item) => `${item.title || ""} ${item.answer || ""}`)
+          .join(" ");
+        const groundedKeywords = extractGroundedKeywords(groundingText);
         const lines = String(result?.text || result || "")
           .split(/\r?\n/)
           .map((line) => line.replace(/^[\s\d\-•.)]+/, "").trim())
           .filter((line) => line && line.length <= 52)
+          .filter((line) => isGroundedSuggestion(line, groundedKeywords))
           .slice(0, 4);
         setBackendSceneHints(lines.map((label, index) => ({ id: `ai-hint-${index}-${label}`, label })));
       } catch {
@@ -400,4 +405,61 @@ function clampPercent(value) {
   const next = Number(value || 0);
   if (!Number.isFinite(next)) return 0;
   return Math.max(0, Math.min(100, next));
+}
+
+const GENERIC_SCENE_HINTS = [
+  "describe this scene",
+  "what is in front of me?",
+  "explain what you see",
+  "help me understand this view",
+];
+
+const GROUNDABLE_TERMS = [
+  "tree",
+  "plant",
+  "leaf",
+  "flower",
+  "road",
+  "path",
+  "building",
+  "sign",
+  "car",
+  "bus",
+  "bike",
+  "person",
+  "people",
+  "desk",
+  "chair",
+  "book",
+  "screen",
+  "laptop",
+  "phone",
+  "board",
+  "classroom",
+  "document",
+  "paper",
+  "door",
+  "window",
+  "stairs",
+  "gate",
+  "floor",
+  "grass",
+  "ground",
+  "sky",
+];
+
+function extractGroundedKeywords(sourceText) {
+  const normalized = String(sourceText || "").toLowerCase();
+  return GROUNDABLE_TERMS.filter((term) => normalized.includes(term));
+}
+
+function isGroundedSuggestion(label, groundedKeywords) {
+  const normalized = String(label || "").trim().toLowerCase();
+  if (!normalized) return false;
+
+  if (GENERIC_SCENE_HINTS.includes(normalized)) {
+    return true;
+  }
+
+  return groundedKeywords.some((term) => normalized.includes(term));
 }

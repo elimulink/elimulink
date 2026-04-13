@@ -70,7 +70,12 @@ def err_response(code: str, status_code: int, message: Optional[str] = None) -> 
 
 
 def normalize_message(payload: dict[str, Any]) -> str:
-    value = payload.get("message") or payload.get("text") or payload.get("prompt")
+    value = (
+        payload.get("normalizedMessage")
+        or payload.get("message")
+        or payload.get("text")
+        or payload.get("prompt")
+    )
     return str(value or "").strip()
 
 

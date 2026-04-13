@@ -1,6 +1,8 @@
 const FOLLOW_UP_ACCEPTANCE_PATTERN =
   /^(yes|yeah|yep|okay|ok|sure|continue|continue please|go on|go ahead|proceed|do that|show me|explain more|tell me more)$/i;
 const FOLLOW_UP_DETAIL_PATTERN = /^(explain more|tell me more|more details|expand|go deeper)$/i;
+const FOLLOW_UP_LANGUAGE_PATTERN =
+  /\b(?:continue|explain|say|reply|answer|write|translate|summari[sz]e|simplify)\s+(?:that\s+|this\s+)?(?:in|using)\s+(english|swahili|kiswahili)\b/i;
 const FOLLOW_UP_TRIGGER_PATTERN =
   /^(?:give me|show me|tell me|explain|brief history|history|continue|go on|go ahead|what happened next|what next|who ruled|where is it|where are they|were they colonis(?:e|z)ed|what about it|what about them|simpler|simplify|expand|more details|detail|details|who are they|who is it|what is it|what happened after(?:wards)?)(?:\b|$)/i;
 const FOLLOW_UP_PRONOUN_PATTERN = /\b(?:it|they|them|this|that|there|he|she|those|these)\b/i;
@@ -135,6 +137,98 @@ function extractTopicFromText(text = "") {
   return "";
 }
 
+function normalizeLanguageLabel(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "kiswahili" || normalized === "swahili") return "swahili";
+  if (normalized === "english") return "english";
+  return normalized;
+}
+
+function applyWordCase(sourceWord = "", replacement = "") {
+  if (!sourceWord) return replacement;
+  if (sourceWord.toUpperCase() === sourceWord) return replacement.toUpperCase();
+  if (sourceWord[0] === sourceWord[0]?.toUpperCase()) {
+    return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+  }
+  return replacement;
+}
+
+const TYPO_NORMALIZATIONS = [
+  ["wat", "what"],
+  ["chidl", "child"],
+  ["reslts", "results"],
+  ["pls", "please"],
+];
+
+export function normalizeInput(text = "") {
+  const trimmed = String(text || "").replace(/\s+/g, " ").trim();
+  if (!trimmed) {
+    return {
+      originalText: "",
+      normalizedText: "",
+      changed: false,
+    };
+  }
+
+  let normalizedText = trimmed;
+  for (const [wrong, right] of TYPO_NORMALIZATIONS) {
+    normalizedText = normalizedText.replace(
+      new RegExp(`\\b${wrong}\\b`, "gi"),
+      (match) => applyWordCase(match, right),
+    );
+  }
+
+  return {
+    originalText: trimmed,
+    normalizedText,
+    changed: normalizedText !== trimmed,
+  };
+}
+
+export function detectFollowUpIntent(inputText = "") {
+  const clean = String(inputText || "").replace(/\s+/g, " ").trim();
+  if (!clean) {
+    return {
+      followUp: false,
+      followUpType: "",
+      targetLanguage: "",
+    };
+  }
+
+  const languageMatch = clean.match(FOLLOW_UP_LANGUAGE_PATTERN);
+  const targetLanguage = normalizeLanguageLabel(languageMatch?.[1] || "");
+  if (targetLanguage) {
+    return {
+      followUp: true,
+      followUpType: "CONTINUE_IN_LANGUAGE",
+      targetLanguage,
+    };
+  }
+
+  if (/^(?:continue|go on|go ahead|proceed|keep going|continue please)$/i.test(clean)) {
+    return { followUp: true, followUpType: "CONTINUE", targetLanguage: "" };
+  }
+
+  if (/^(?:simplify|simplify that|make it simpler|simpler|explain simply|put it simply)$/i.test(clean)) {
+    return { followUp: true, followUpType: "SIMPLIFY", targetLanguage: "" };
+  }
+
+  if (/^(?:summari[sz]e|summari[sz]e that|short summary|give me a summary|sum it up)$/i.test(clean)) {
+    return { followUp: true, followUpType: "SUMMARIZE", targetLanguage: "" };
+  }
+
+  if (/^(?:explain more|tell me more|go deeper|expand|more details|explain that more)$/i.test(clean)) {
+    return { followUp: true, followUpType: "EXPLAIN_MORE", targetLanguage: "" };
+  }
+
+  return {
+    followUp: false,
+    followUpType: "",
+    targetLanguage: "",
+  };
+}
+
 function extractActiveTopic(items = []) {
   const list = Array.isArray(items) ? items : [];
   for (let index = list.length - 1; index >= 0; index -= 1) {
@@ -144,6 +238,12 @@ function extractActiveTopic(items = []) {
     if (topic) return topic;
   }
   return "";
+}
+
+export function deriveActiveTopic(items = [], fallbackTopic = "") {
+  const fromItems = extractActiveTopic(items);
+  if (fromItems) return fromItems;
+  return normalizeTopicCandidate(fallbackTopic);
 }
 
 function isContextDependentFollowUp(cleanText = "") {

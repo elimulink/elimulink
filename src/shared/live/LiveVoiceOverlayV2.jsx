@@ -165,23 +165,6 @@ export default function LiveVoiceOverlayV2({
             onSwitchCamera={onSwitchCamera}
             onTakePhoto={onTakePhoto}
             onUploadPhoto={onUploadPhoto}
-          onTakeScreenshot={onTakeScreenshot}
-          onToggleScreenRecording={onToggleScreenRecording}
-        />
-
-          <MobileToolDock
-            cameraEnabled={cameraEnabled}
-            cameraFacingMode={cameraFacingMode}
-            recordingScreen={recordingScreen}
-            isSharing={isSharing}
-            screenShareSupported={screenShareSupported}
-            screenRecordingSupported={screenRecordingSupported}
-            onStartScreenShare={onStartScreenShare}
-            onStopScreenShare={onStopScreenShare}
-            onToggleCamera={onToggleCamera}
-            onSwitchCamera={onSwitchCamera}
-            onTakePhoto={onTakePhoto}
-            onUploadPhoto={onUploadPhoto}
             onTakeScreenshot={onTakeScreenshot}
             onToggleScreenRecording={onToggleScreenRecording}
           />
@@ -501,13 +484,28 @@ function BottomControls({
         ) : null}
       </div>
 
-      <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-2.5 lg:hidden">
-        <DockIconButton
-          icon={<MessageCircle size={20} />}
-          label="Chat"
-          onClick={onOpenTextOverlay}
-          active={textOverlayOpen}
+      <div className="pointer-events-auto mx-auto w-full max-w-md lg:hidden">
+        <MobileToolDock
+          textOverlayOpen={textOverlayOpen}
+          onOpenTextOverlay={onOpenTextOverlay}
+          cameraEnabled={cameraEnabled}
+          cameraFacingMode={cameraFacingMode}
+          recordingScreen={recordingScreen}
+          isSharing={isSharing}
+          screenShareSupported={screenShareSupported}
+          screenRecordingSupported={screenRecordingSupported}
+          onStartScreenShare={onStartScreenShare}
+          onStopScreenShare={onStopScreenShare}
+          onToggleCamera={onToggleCamera}
+          onSwitchCamera={onSwitchCamera}
+          onTakePhoto={onTakePhoto}
+          onUploadPhoto={onUploadPhoto}
+          onTakeScreenshot={onTakeScreenshot}
+          onToggleScreenRecording={onToggleScreenRecording}
         />
+      </div>
+
+      <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-3 lg:hidden">
         <MainMicButton mode={mode} label={micLabel} onClick={onPrimaryMic} />
         <DangerDockButton onClick={onEnd} />
       </div>
@@ -526,6 +524,8 @@ function BottomControls({
 }
 
 function MobileToolDock({
+  textOverlayOpen,
+  onOpenTextOverlay,
   cameraEnabled,
   cameraFacingMode,
   recordingScreen,
@@ -556,7 +556,13 @@ function MobileToolDock({
           Live mode
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="mb-2 grid grid-cols-4 gap-2">
+        <UtilityIconButton
+          label="Chat"
+          icon={<MessageCircle size={18} />}
+          onClick={onOpenTextOverlay}
+          active={textOverlayOpen}
+        />
         <UtilityIconButton
           label={
             !screenShareSupported
@@ -591,9 +597,9 @@ function MobileToolDock({
         <UtilityIconButton label="Snap" icon={<ImagePlus size={18} />} onClick={onTakePhoto} />
         <UtilityIconButton label="Upload" icon={<Upload size={18} />} onClick={onUploadPhoto} />
         <UtilityIconButton label="Shot" icon={<Monitor size={18} />} onClick={onTakeScreenshot} />
-        <div className="flex min-h-[54px] items-center justify-center rounded-[17px] border border-slate-200/70 bg-white/78 px-2 py-2 text-center text-[10px] font-medium leading-tight text-slate-500 dark:border-white/8 dark:bg-white/6 dark:text-white/58">
-          Capture
-        </div>
+      </div>
+      <div className="text-[10px] text-slate-500 dark:text-white/55">
+        Secondary tools stay above the main Talk and End controls.
       </div>
     </div>
   );
@@ -693,24 +699,6 @@ function MainMicButton({ mode, label, onClick }) {
     >
       <Mic size={24} />
       <span className="text-sm font-semibold">{label}</span>
-    </button>
-  );
-}
-
-function DockIconButton({ icon, label, onClick, active = false }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex h-[60px] w-[60px] items-center justify-center rounded-full backdrop-blur-xl transition ${
-        active
-          ? "bg-white/16 text-white shadow-[0_12px_28px_rgba(15,23,42,0.24)] ring-1 ring-white/12"
-          : "bg-white/92 text-slate-800 ring-1 ring-slate-200/80 shadow-[0_10px_26px_rgba(15,23,42,0.08)] dark:bg-white/10 dark:text-white dark:ring-white/10"
-      }`}
-      aria-label={label}
-      title={label}
-    >
-      {icon}
     </button>
   );
 }

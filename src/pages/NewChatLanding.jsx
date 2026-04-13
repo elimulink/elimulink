@@ -75,7 +75,10 @@ import {
 } from "../shared/image-generation/imageGenerationIntent.js";
 import { shouldOfferImageComparison } from "../shared/image-generation/imageComparisonIntent.js";
 import {
+  deriveActiveTopic,
+  detectFollowUpIntent,
   formatAiServiceError,
+  normalizeInput,
   resolveContinuationPrompt,
 } from "../shared/chat/chatResponseBehavior.js";
 import {
@@ -143,12 +146,13 @@ const MORE_ITEMS_BASE = [
 const CHAT_HISTORY_KEY = "institution_chat_threads_v1";
 const CHAT_ACTIVE_KEY = "institution_chat_active_v1";
 const ACTIVE_VIEW_KEY = "institution_active_view_v1";
+const SHELL_ONBOARDING_HINT_KEY = "institution_shell_onboarding_seen_v1";
 const UNTITLED_CHAT_BASE = "New Chat";
 const AI_PATH = "/api/ai/chat";
 
 const CHAT_MODE_CONFIG = {
   student: {
-    title: "Hi Victor, where should we start?",
+    title: "Hi there, where should we start?",
     subtitle:
       "Ask anything about coursework, assignments, revision, research, or coding.",
     starters: [
@@ -341,11 +345,24 @@ function timeGreeting(date = new Date()) {
   return "Good evening";
 }
 
-function resolveProfileName(firebaseUser) {
-  const displayName = String(firebaseUser?.displayName || "").trim();
-  if (displayName) return displayName;
+function normalizeProfileName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function resolveProfileName(firebaseUser, preferredName = "") {
+  const savedName = normalizeProfileName(preferredName);
+  if (savedName) return savedName;
   const email = String(firebaseUser?.email || "").trim();
-  if (email.includes("@")) return email.split("@")[0].replace(/[._-]+/g, " ");
+  if (email.includes("@")) return normalizeProfileName(email.split("@")[0]);
+  const displayName = normalizeProfileName(firebaseUser?.displayName || "");
+  if (displayName) return displayName;
   return "Scholar";
 }
 
@@ -565,6 +582,29 @@ function buildAcademicContextBlock(context) {
   return `Academic context:\n${lines.join("\n")}`;
 }
 
+function isInstitutionSimplePrompt(text, attachments = []) {
+  const clean = String(text || "").trim();
+  if (!clean) return false;
+  if ((Array.isArray(attachments) ? attachments.length : 0) > 0) return false;
+  if (clean.length > 160) return false;
+  if (/\n/.test(clean)) return false;
+  if (/[/:]/.test(clean)) return false;
+  if (/\b(?:http|www\.|attach|upload|image|photo|diagram|chart|pdf|file|citation|source|sources|research paper|references?)\b/i.test(clean)) return false;
+  if (/\b(?:compare|contrast|analyze critically|with citations|latest research|journal|scholar|dataset|table|markdown|code block)\b/i.test(clean)) return false;
+  const wordCount = clean.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 28) return false;
+  return /^[a-z0-9 ,.!?'()-]+$/i.test(clean);
+}
+
+function logInstitutionChatTiming(label, startedAt, meta = {}) {
+  if (!import.meta.env.DEV) return;
+  console.debug("[AI_TIMING][institution][frontend]", {
+    label,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    ...meta,
+  });
+}
+
 function contextLabel(context) {
   const ctx = { ...EMPTY_ACADEMIC_CONTEXT, ...(context || {}) };
   const left = ctx.course ? String(ctx.course) : "";
@@ -600,10 +640,12 @@ function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "", owner
     id: makeChatId(),
     ownerUid,
     chatScope: "institution",
+    sessionId: "",
     conversationId: "",
     shareId: "",
     shareUrl: "",
     isSharedView: false,
+    activeTopic: "",
     title,
     updatedAt: Date.now(),
     messages: assistantText
@@ -614,14 +656,14 @@ function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "", owner
 
 function StatCard({ title, value, subtitle }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-white border border-slate-200/90 shadow-sm px-3.5 py-2.5 min-h-[74px]">
+    <div className="flex items-center justify-between rounded-xl bg-white border border-slate-900/20 shadow-[0_4px_14px_rgba(15,23,42,0.04)] px-3.5 py-2 min-h-[62px]">
       <div>
-        <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{title}</div>
-        <div className="mt-0.5 text-lg leading-tight font-bold text-slate-900 break-words">{value}</div>
-        {subtitle ? <div className="text-[11px] text-slate-500 mt-0.5">{subtitle}</div> : null}
+        <div className="text-[10px] font-semibold tracking-wide text-slate-600 uppercase">{title}</div>
+        <div className="mt-0.5 text-[15px] leading-tight font-bold text-slate-900 break-words">{value}</div>
+        {subtitle ? <div className="text-[11px] text-slate-600 mt-0.5">{subtitle}</div> : null}
       </div>
-      <div className="text-slate-400 shrink-0 ml-3">
-        <BarChart3 size={16} />
+      <div className="text-slate-500 shrink-0 ml-3">
+        <BarChart3 size={15} />
       </div>
     </div>
   );
@@ -636,6 +678,14 @@ function formatTimeAgo(timestamp) {
   if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
   if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
   return `${Math.floor(delta / 86_400_000)}d ago`;
+}
+
+function hasUserAuthoredChatHistory(items) {
+  return Array.isArray(items) && items.some((chat) =>
+    Array.isArray(chat?.messages) && chat.messages.some((message) =>
+      String(message?.role || "") === "user" && String(message?.text || "").trim()
+    )
+  );
 }
 
 function MobileComposerToolCard({ icon, label, onClick }) {
@@ -915,17 +965,17 @@ function Bubble({
         <div
         className={[
           isUser
-            ? "max-w-[88%] md:max-w-[72%] text-[15px]"
-            : "max-w-[98%] md:max-w-[82%] text-[15px]",
+            ? "max-w-[92%] md:max-w-[72%] text-[15px]"
+            : "max-w-full md:max-w-[82%] text-[15px]",
           isUser
             ? "user-msg-bubble rounded-[20px] rounded-br-lg border border-sky-100/80 bg-sky-50/95 px-4 py-2.5 text-slate-900 shadow-[0_4px_14px_rgba(15,23,42,0.06)] md:px-4 md:py-3"
-            : "assistant-msg-surface bg-transparent px-0 py-0.5 text-slate-900 dark:text-slate-100",
+            : "assistant-msg-surface bg-transparent px-0 py-0.5 text-slate-900 dark:text-slate-50",
         ].join(" ")}
       >
         {isUser ? (
           <div className="leading-relaxed">{text}</div>
         ) : (
-          <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 text-slate-800 md:leading-[1.78] dark:text-slate-100">
+          <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 text-slate-900 md:leading-[1.78] dark:text-slate-50">
             {isComparisonPending ? (
               <ImageComparisonPicker
                 title={comparisonTitle}
@@ -963,7 +1013,7 @@ function Bubble({
                 ) : null}
               </div>
             ) : streaming ? (
-              <div className="inline-flex items-center gap-1.5 text-slate-400 dark:text-slate-300">
+              <div className="inline-flex items-center gap-1.5 text-slate-500 dark:text-slate-300">
                 <span className="typing-dot" />
                 <span className="typing-dot typing-dot-delay-1" />
                 <span className="typing-dot typing-dot-delay-2" />
@@ -1201,11 +1251,11 @@ function SidebarButton({ active, label, onClick, collapsed, icon: Icon, buttonRe
         collapsed ? "justify-center px-2.5" : "",
         active
           ? "bg-slate-900 text-white shadow-[0_8px_18px_rgba(15,23,42,0.18)]"
-          : "text-slate-700 hover:bg-slate-100/90",
+          : "text-slate-900 hover:bg-slate-100/90 dark:text-slate-50 dark:hover:bg-white/5",
       ].join(" ")}
       title={collapsed ? label : undefined}
     >
-      <span className={["text-base", active ? "text-white" : "text-slate-500"].join(" ")}>
+      <span className={["text-base", active ? "text-white" : "text-slate-500 dark:text-slate-400"].join(" ")}>
         {Icon ? <Icon size={16} /> : null}
       </span>
       {!collapsed ? <span className="truncate">{label}</span> : null}
@@ -1215,7 +1265,7 @@ function SidebarButton({ active, label, onClick, collapsed, icon: Icon, buttonRe
 
 function SectionLabel({ collapsed, children }) {
   if (collapsed) return null;
-  return <div className="px-3 pt-2 text-[10px] font-semibold tracking-[0.1em] text-slate-400">{children}</div>;
+  return <div className="px-3 pt-2 text-[10px] font-semibold tracking-[0.1em] text-slate-500 dark:text-slate-400">{children}</div>;
 }
 
 function isDesktopSettingsViewport() {
@@ -1232,7 +1282,15 @@ export default function NewChatLanding({
   initialAssistantMessage,
 }) {
   const firebaseUser = auth?.currentUser || null;
-  const profileName = resolveProfileName(firebaseUser);
+  const [profileVersion, setProfileVersion] = useState(0);
+  const bootstrapProfile = useMemo(
+    () => getStoredProfile({}, firebaseUser?.uid || null),
+    [firebaseUser?.uid, profileVersion]
+  );
+  const profileName = useMemo(
+    () => resolveProfileName(firebaseUser, bootstrapProfile?.name || ""),
+    [bootstrapProfile?.name, firebaseUser]
+  );
   const resolvedChatMode = chatMode === "admin" ? "admin" : "student";
   const isEmbeddedAdminChat = resolvedChatMode === "admin";
   const isAdminShellEmbed = isEmbeddedAdminChat && embeddedInAdminShell;
@@ -1249,6 +1307,7 @@ export default function NewChatLanding({
   const [active, setActive] = useState(
     isEmbeddedAdminChat ? "newchat" : (initialView === "chat" ? "newchat" : (initialView || "newchat"))
   );
+  const [liveNow, setLiveNow] = useState(() => new Date());
   const [userRole, setUserRole] = useState(initialUserRole || null);
   const [input, setInput] = useState("");
   const [chats, setChats] = useState([]);
@@ -1284,6 +1343,7 @@ export default function NewChatLanding({
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+  const [shouldRunShellOnboardingHint, setShouldRunShellOnboardingHint] = useState(false);
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(() => {
     try {
@@ -1330,12 +1390,26 @@ export default function NewChatLanding({
   );
   const [currentUid, setCurrentUid] = useState(auth.currentUser?.uid || null);
   const [assistantStyle, setAssistantStyle] = useAssistantStylePreference(currentUid);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLiveNow(new Date());
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleProfileChange = () => setProfileVersion((current) => current + 1);
+    window.addEventListener("elimulink-profile-change", handleProfileChange);
+    return () => window.removeEventListener("elimulink-profile-change", handleProfileChange);
+  }, []);
   const [showAssistantStylePrompt, setShowAssistantStylePrompt] = useState(false);
   const [showAssistantStyleSelector, setShowAssistantStyleSelector] = useState(false);
   const recognitionRef = useRef(null);
   const mobileAttachmentMenuRef = useRef(null);
   const mobileModelMenuRef = useRef(null);
   const desktopAttachmentMenuRef = useRef(null);
+  const starterSuggestionsPanelRef = useRef(null);
   const newChatMenuRef = useRef(null);
   const desktopSettingsTriggerRef = useRef(null);
   const profileMenuRef = useRef(null);
@@ -1358,6 +1432,8 @@ export default function NewChatLanding({
   const scrollLabelRef = useRef("Today");
   const mobileHeightMapRef = useRef(new Map());
   const desktopHeightMapRef = useRef(new Map());
+  const chatsRef = useRef([]);
+  const pendingInstitutionPersistenceRef = useRef(new Map());
 
   const fileInputRef = useRef(null);
   const attachmentSourceRef = useRef("file");
@@ -1650,6 +1726,10 @@ export default function NewChatLanding({
   }, [chatsStorageKey, currentUid, chats]);
 
   useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
+
+  useEffect(() => {
     const ownedChats = normalizeOwnedChats(chats, currentUid);
     if (activeChatId && ownedChats.some((chat) => chat.id === activeChatId)) return;
     setActiveChatId(ownedChats[0]?.id || null);
@@ -1724,7 +1804,7 @@ export default function NewChatLanding({
         phone: "+2547xx xxx xxx",
         avatarUrl: "",
       }, currentUid),
-    [active, profileName, firebaseUser, currentUid]
+    [active, profileName, firebaseUser, currentUid, profileVersion]
   );
   const settingsPrefs = useMemo(
     () =>
@@ -1758,6 +1838,15 @@ export default function NewChatLanding({
     }),
     [settingsProfile, profileName, firebaseUser]
   );
+  const landingGreeting = useMemo(() => timeGreeting(liveNow), [liveNow]);
+  const landingName = useMemo(
+    () => firstNameOf(settingsProfile?.name || user?.name || profileName),
+    [settingsProfile?.name, user?.name, profileName]
+  );
+  const landingTitle = useMemo(() => {
+    if (resolvedChatMode === "admin") return modeConfig.title;
+    return `Hi ${landingName}, where should we start?`;
+  }, [landingName, modeConfig.title, resolvedChatMode]);
   const adminOverviewCards = useMemo(
     () => [
       { title: "Pending Workflows", value: "12", subtitle: "Needs review" },
@@ -1827,6 +1916,16 @@ export default function NewChatLanding({
   const activeChatModel =
     INSTITUTION_CHAT_MODEL_OPTIONS.find((model) => model.key === selectedChatModelKey) ||
     INSTITUTION_CHAT_MODEL_OPTIONS[0];
+
+  useEffect(() => {
+    if (!hasStarterSuggestions || hasConversation) return;
+    const onDocumentMouseDown = (event) => {
+      if (starterSuggestionsPanelRef.current?.contains(event.target)) return;
+      setStarterSuggestions([]);
+    };
+    document.addEventListener("mousedown", onDocumentMouseDown);
+    return () => document.removeEventListener("mousedown", onDocumentMouseDown);
+  }, [hasStarterSuggestions, hasConversation]);
   const mobileSuggestionPool = useMemo(() => {
     const pool = starterSuggestions.length
       ? starterSuggestions
@@ -2338,7 +2437,45 @@ export default function NewChatLanding({
           isUntitledChatTitle(currentTitle, untitledChatBase) && titleHint
             ? titleHint.slice(0, 40)
             : currentTitle || nextUntitledChatTitle(prev, untitledChatBase);
-        return { ...chat, messages: nextMessages, title: nextTitle, updatedAt: Date.now() };
+        return {
+          ...chat,
+          messages: nextMessages,
+          activeTopic: deriveActiveTopic(nextMessages, chat?.activeTopic || ""),
+          title: nextTitle,
+          updatedAt: Date.now(),
+        };
+      })
+    );
+  }
+
+  function updateChatMessagesById(chatId, updater, titleHint) {
+    const targetChatId = String(chatId || "");
+    if (!targetChatId) return;
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (String(chat.id || "") !== targetChatId) return chat;
+        const rawMessages = updater(chat.messages || []);
+        let cursor = Date.now();
+        const nextMessages = (rawMessages || []).map((msg) => {
+          if (msg?.createdAt) {
+            cursor = Math.max(cursor, Number(msg.createdAt));
+            return msg;
+          }
+          cursor += 1;
+          return { ...(msg || {}), createdAt: cursor };
+        });
+        const currentTitle = String(chat.title || "").trim();
+        const nextTitle =
+          isUntitledChatTitle(currentTitle, untitledChatBase) && titleHint
+            ? titleHint.slice(0, 40)
+            : currentTitle || nextUntitledChatTitle(prev, untitledChatBase);
+        return {
+          ...chat,
+          messages: nextMessages,
+          activeTopic: deriveActiveTopic(nextMessages, chat?.activeTopic || ""),
+          title: nextTitle,
+          updatedAt: Date.now(),
+        };
       })
     );
   }
@@ -2352,6 +2489,12 @@ export default function NewChatLanding({
         return { ...chat, ...(typeof patcher === "function" ? patcher(chat) : patcher), updatedAt: Date.now() };
       })
     );
+  }
+
+  function updateActiveChatSessionId(sessionId) {
+    const nextSessionId = String(sessionId || "").trim();
+    if (!nextSessionId) return;
+    patchActiveChat((chat) => (String(chat?.sessionId || "").trim() === nextSessionId ? chat : { sessionId: nextSessionId }));
   }
 
   async function ensureInstitutionConversation(titleHint) {
@@ -2368,37 +2511,89 @@ export default function NewChatLanding({
     return conversationId;
   }
 
-  function applyPersistedExchangeToChat(userContent, persisted) {
+  function applyPersistedExchangeToChat(userContent, persisted, options = {}) {
+    const exchangeId = String(options?.exchangeId || "").trim();
+    const targetChatId = String(options?.chatId || activeChat?.id || "");
     const userMessage = persisted?.user_message;
     const assistantMessage = persisted?.assistant_message;
     const conversation = persisted?.conversation;
     if (!assistantMessage || !conversation) return;
     setChats((prev) =>
       prev.map((chat) => {
-        if (chat.id !== activeChat?.id) return chat;
+        if (String(chat.id || "") !== targetChatId) return chat;
         const nextMessages = [...(chat.messages || [])];
         for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
           const item = nextMessages[index];
-          if (item?.role === "user" && !item?.id && String(item?.text || "") === String(userContent || "")) {
+          if (
+            item?.role === "user" &&
+            !item?.id &&
+            (
+              (exchangeId && String(item?.exchangeId || "") === exchangeId) ||
+              String(item?.text || "") === String(userContent || "")
+            )
+          ) {
             nextMessages[index] = {
               ...item,
               id: userMessage?.id || item.id,
               conversationId: conversation.id,
+              persistState: "persisted",
             };
             break;
           }
         }
-        const alreadyHasAssistant = nextMessages.some((item) => item?.id === assistantMessage.id);
-        if (!alreadyHasAssistant) {
-          nextMessages.push({
+        const existingAssistantIndex = nextMessages.findIndex((item) => item?.id === assistantMessage.id);
+        if (existingAssistantIndex >= 0) {
+          nextMessages[existingAssistantIndex] = {
+            ...nextMessages[existingAssistantIndex],
             id: assistantMessage.id,
             conversationId: conversation.id,
             role: "assistant",
             text: assistantMessage.content,
             sources: assistantMessage.sources || [],
             ownerUid: currentUid,
-            createdAt: Date.parse(assistantMessage.created_at || "") || Date.now(),
-          });
+            createdAt: Date.parse(assistantMessage.created_at || "") || nextMessages[existingAssistantIndex]?.createdAt || Date.now(),
+          };
+        } else {
+          let matchedAssistantIndex = -1;
+          for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
+            const item = nextMessages[index];
+            if (item?.role !== "assistant") continue;
+            if (item?.id) continue;
+            if (exchangeId && String(item?.exchangeId || "") === exchangeId) {
+              matchedAssistantIndex = index;
+              break;
+            }
+            if (String(item?.text || "").trim() !== String(assistantMessage.content || "").trim()) continue;
+            matchedAssistantIndex = index;
+            break;
+          }
+          if (matchedAssistantIndex >= 0) {
+            nextMessages[matchedAssistantIndex] = {
+              ...nextMessages[matchedAssistantIndex],
+              id: assistantMessage.id,
+              conversationId: conversation.id,
+              role: "assistant",
+              text: assistantMessage.content,
+              sources: assistantMessage.sources || [],
+              ownerUid: currentUid,
+              streaming: false,
+              streamId: undefined,
+              persistState: "persisted",
+              createdAt:
+                Date.parse(assistantMessage.created_at || "") || nextMessages[matchedAssistantIndex]?.createdAt || Date.now(),
+            };
+          } else {
+            nextMessages.push({
+              id: assistantMessage.id,
+              conversationId: conversation.id,
+              role: "assistant",
+              text: assistantMessage.content,
+              sources: assistantMessage.sources || [],
+              ownerUid: currentUid,
+              persistState: "persisted",
+              createdAt: Date.parse(assistantMessage.created_at || "") || Date.now(),
+            });
+          }
         }
         return {
           ...chat,
@@ -2410,7 +2605,7 @@ export default function NewChatLanding({
     );
   }
 
-  async function persistInstitutionExchange({ userContent, assistantContent, sources, titleHint }) {
+  async function persistInstitutionExchange({ userContent, assistantContent, sources, titleHint, applyToChat = true, exchangeId = "" }) {
     const conversationId = await ensureInstitutionConversation(titleHint);
     if (!conversationId) {
       throw new Error("Failed to create institution conversation.");
@@ -2427,8 +2622,144 @@ export default function NewChatLanding({
       citations,
       sources: sources || [],
     });
-    applyPersistedExchangeToChat(userContent, payload);
+    if (applyToChat) {
+      applyPersistedExchangeToChat(userContent, payload, { exchangeId });
+    }
     return payload;
+  }
+
+  function markExchangePersistenceState(chatId, exchangeId, persistState) {
+    if (!exchangeId) return;
+    updateChatMessagesById(
+      chatId,
+      (chatMessages) =>
+        chatMessages.map((message) =>
+          String(message?.exchangeId || "") === String(exchangeId)
+            ? { ...message, persistState }
+            : message
+        ),
+      activeChat?.title || untitledChatBase
+    );
+  }
+
+  async function reconcilePersistedInstitutionExchange({ conversationId, userContent, assistantContent }) {
+    if (!conversationId) return null;
+    const result = await fetchInstitutionConversation(conversationId);
+    const messages = Array.isArray(result?.messages) ? result.messages : [];
+    for (let index = messages.length - 1; index >= 1; index -= 1) {
+      const assistantMessage = messages[index];
+      const userMessage = messages[index - 1];
+      if (assistantMessage?.role !== "assistant" || userMessage?.role !== "user") continue;
+      if (String(userMessage?.content || "") !== String(userContent || "")) continue;
+      if (String(assistantMessage?.content || "") !== String(assistantContent || "")) continue;
+      return {
+        conversation: result?.conversation,
+        user_message: userMessage,
+        assistant_message: assistantMessage,
+      };
+    }
+    return null;
+  }
+
+  function queueInstitutionExchangePersistence({
+    chatId,
+    exchangeId,
+    userContent,
+    assistantContent,
+    sources,
+    titleHint,
+    timingStarted = 0,
+  }) {
+    if (!assistantContent) return;
+    if (exchangeId && pendingInstitutionPersistenceRef.current.has(exchangeId)) return;
+
+    const task = {
+      attempts: 0,
+      chatId,
+      exchangeId,
+      userContent,
+      assistantContent,
+      sources,
+      titleHint,
+      timingStarted,
+    };
+    if (exchangeId) pendingInstitutionPersistenceRef.current.set(exchangeId, task);
+    markExchangePersistenceState(chatId, exchangeId, "pending");
+
+    const runAttempt = async () => {
+      task.attempts += 1;
+      markExchangePersistenceState(chatId, exchangeId, task.attempts > 1 ? "retrying" : "pending");
+      try {
+        const payload = await persistInstitutionExchange({
+          userContent,
+          assistantContent,
+          sources,
+          titleHint,
+          applyToChat: false,
+          exchangeId,
+        });
+        applyPersistedExchangeToChat(userContent, payload, { exchangeId, chatId });
+        markExchangePersistenceState(chatId, exchangeId, "persisted");
+        pendingInstitutionPersistenceRef.current.delete(exchangeId);
+        if (timingStarted) {
+          logInstitutionChatTiming("persistence_complete", timingStarted, {
+            attempt: task.attempts,
+            conversationId: String(payload?.conversation?.id || ""),
+          });
+        }
+        return;
+      } catch (error) {
+        const conversationId = String(
+          chatsRef.current.find((chat) => String(chat?.id || "") === String(chatId || ""))?.conversationId || ""
+        );
+        try {
+          const reconciled = await reconcilePersistedInstitutionExchange({
+            conversationId,
+            userContent,
+            assistantContent,
+          });
+          if (reconciled) {
+            applyPersistedExchangeToChat(userContent, reconciled, { exchangeId, chatId });
+            markExchangePersistenceState(chatId, exchangeId, "persisted");
+            pendingInstitutionPersistenceRef.current.delete(exchangeId);
+            if (timingStarted) {
+              logInstitutionChatTiming("persistence_reconciled", timingStarted, {
+                attempt: task.attempts,
+                conversationId,
+              });
+            }
+            return;
+          }
+        } catch {
+          // Ignore reconciliation failures and continue to retry/fail handling.
+        }
+
+        const canRetry = task.attempts < 2 && !error?.status;
+        if (canRetry) {
+          if (timingStarted) {
+            logInstitutionChatTiming("persistence_retry_scheduled", timingStarted, {
+              attempt: task.attempts,
+            });
+          }
+          setTimeout(() => {
+            void runAttempt();
+          }, 1500);
+          return;
+        }
+
+        markExchangePersistenceState(chatId, exchangeId, "failed");
+        pendingInstitutionPersistenceRef.current.delete(exchangeId);
+        console.error("[InstitutionPersistence] Failed to persist exchange", error);
+        if (timingStarted) {
+          logInstitutionChatTiming("persistence_failed", timingStarted, {
+            attempt: task.attempts,
+            status: error?.status || null,
+          });
+        }
+      }
+    };
+
+    Promise.resolve().then(runAttempt);
   }
 
   async function loadInstitutionSharedConversation(shareId) {
@@ -3146,13 +3477,51 @@ export default function NewChatLanding({
       }, "Reply");
     }
 
+  function buildAssistantRequestBody({ messageText, academicContext, simplePrompt = false, requestIntelligence = null }) {
+    const intelligence = requestIntelligence || {};
+    const body = {
+      message: simplePrompt ? String(messageText || "").trim() : withAcademicContext(messageText, academicContext),
+      normalizedMessage: String(intelligence.normalizedMessage || "").trim() || undefined,
+      topic: String(intelligence.topic || "").trim() || undefined,
+      followUp: Boolean(intelligence.followUp),
+      followUpType: String(intelligence.followUpType || "").trim() || undefined,
+      targetLanguage: String(intelligence.targetLanguage || "").trim() || undefined,
+      previousAssistantMessage: String(intelligence.previousAssistantMessage || "").trim() || undefined,
+      mode: resolvedChatMode,
+      app_type: "institution",
+      session_id: String(activeChat?.sessionId || "").trim() || undefined,
+      workspaceContext,
+    };
+
+    if (!simplePrompt) {
+      body.context = {
+        mode: resolvedChatMode,
+        workspace: workspaceContext || null,
+      };
+      body.preferredLanguage = String(settingsPrefs?.language || "en-KE");
+      body.metadata = {
+        academicContext: academicContext || EMPTY_ACADEMIC_CONTEXT,
+        mode: resolvedChatMode,
+        workspaceContext: workspaceContext || null,
+        requestIntelligence: {
+          topic: String(intelligence.topic || "").trim(),
+          followUp: Boolean(intelligence.followUp),
+          followUpType: String(intelligence.followUpType || "").trim(),
+          targetLanguage: String(intelligence.targetLanguage || "").trim(),
+        },
+      };
+    }
+
+    return body;
+  }
+
   function withAcademicContext(messageText, context) {
     const contextBlock = buildAcademicContextBlock(context);
     if (!contextBlock) return messageText;
     return `${messageText}\n\n${contextBlock}`;
   }
 
-  async function fetchAssistantReplyFull({ token, messageText, academicContext }) {
+  async function fetchAssistantReplyFull({ token, messageText, academicContext, simplePrompt = false, timingStarted = 0, requestIntelligence = null }) {
     const requestUrl = apiUrl(AI_PATH);
     const response = await fetch(requestUrl, {
       method: "POST",
@@ -3160,24 +3529,15 @@ export default function NewChatLanding({
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({
-        message: withAcademicContext(messageText, academicContext),
-        mode: resolvedChatMode,
-        workspaceContext,
-        context: {
-          mode: resolvedChatMode,
-          workspace: workspaceContext || null,
-        },
-        preferredLanguage: String(settingsPrefs?.language || "en-KE"),
-        metadata: {
-          academicContext: academicContext || EMPTY_ACADEMIC_CONTEXT,
-          mode: resolvedChatMode,
-          workspaceContext: workspaceContext || null,
-        },
-      }),
+      body: JSON.stringify(buildAssistantRequestBody({ messageText, academicContext, simplePrompt, requestIntelligence })),
     });
 
     const result = await response.json().catch(() => ({}));
+    if (timingStarted) {
+      logInstitutionChatTiming("full_response_received", timingStarted, {
+        status: response.status,
+      });
+    }
     if (import.meta.env.DEV) {
       console.debug("[NewChatLanding][AI_RESPONSE]", { status: response.status, ok: response.ok, mode: "fallback" });
     }
@@ -3194,10 +3554,11 @@ export default function NewChatLanding({
         ok: true,
         text: result?.text || result?.reply || result?.data?.reply || "Response received.",
         sources: normalizeResearchSources(result),
+        sessionId: String(result?.data?.session_id || result?.session_id || ""),
       };
     }
 
-  async function streamAssistantReply({ token, messageText, streamId, academicContext }) {
+  async function streamAssistantReply({ token, messageText, streamId, academicContext, simplePrompt = false, timingStarted = 0, requestIntelligence = null }) {
     const requestUrl = `${apiUrl(AI_PATH)}?stream=1`;
     const response = await fetch(requestUrl, {
       method: "POST",
@@ -3206,21 +3567,7 @@ export default function NewChatLanding({
         Accept: "text/event-stream",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({
-        message: withAcademicContext(messageText, academicContext),
-        mode: resolvedChatMode,
-        workspaceContext,
-        context: {
-          mode: resolvedChatMode,
-          workspace: workspaceContext || null,
-        },
-        preferredLanguage: String(settingsPrefs?.language || "en-KE"),
-        metadata: {
-          academicContext: academicContext || EMPTY_ACADEMIC_CONTEXT,
-          mode: resolvedChatMode,
-          workspaceContext: workspaceContext || null,
-        },
-      }),
+      body: JSON.stringify(buildAssistantRequestBody({ messageText, academicContext, simplePrompt, requestIntelligence })),
     });
 
     const contentType = String(response.headers.get("content-type") || "");
@@ -3233,6 +3580,7 @@ export default function NewChatLanding({
     let buffer = "";
     let streamedText = "";
     let gotChunk = false;
+    let firstChunkLogged = false;
 
     const processEvent = (eventBlock) => {
       const lines = eventBlock.split("\n");
@@ -3255,6 +3603,12 @@ export default function NewChatLanding({
         const delta = String(payload?.delta || "");
         if (delta) {
           gotChunk = true;
+          if (!firstChunkLogged && timingStarted) {
+            firstChunkLogged = true;
+            logInstitutionChatTiming("first_chunk", timingStarted, {
+              simplePrompt,
+            });
+          }
           streamedText += delta;
           updateStreamingAssistant(streamId, (prev) => `${prev}${delta}`);
           requestAnimationFrame(() => scrollToBottom("auto"));
@@ -3262,10 +3616,20 @@ export default function NewChatLanding({
       }
       if (eventType === "done") {
         const finalText = String(payload?.text || streamedText).trim();
+        updateActiveChatSessionId(payload?.session_id);
         finalizeStreamingAssistant(streamId, finalText || streamedText || "Response received.");
-        return true;
+        if (timingStarted) {
+          logInstitutionChatTiming("stream_complete", timingStarted, {
+            chars: (finalText || streamedText || "").length,
+          });
+        }
+        return {
+          completed: true,
+          sessionId: String(payload?.session_id || ""),
+          text: finalText || streamedText || "Response received.",
+        };
       }
-      return false;
+      return { completed: false };
     };
 
     try {
@@ -3279,7 +3643,9 @@ export default function NewChatLanding({
           const rawEvent = buffer.slice(0, sepIndex);
           buffer = buffer.slice(sepIndex + delimiter);
           const completed = processEvent(rawEvent);
-          if (completed) return { ok: true };
+          if (completed?.completed) {
+            return { ok: true, sessionId: completed.sessionId, text: completed.text };
+          }
           sepIndex = buffer.search(/\r?\n\r?\n/);
         }
       }
@@ -3336,10 +3702,20 @@ export default function NewChatLanding({
   );
 
   async function sendMessage(text) {
+    const timingStarted = performance.now();
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
-    const continuationPrompt = clean ? resolveContinuationPrompt(clean, messages) : "";
+    const normalizedInput = normalizeInput(clean);
+    const followUpIntent = detectFollowUpIntent(normalizedInput.normalizedText || clean);
+    const previousAssistantMessage = String(
+      [...(Array.isArray(messages) ? messages : [])]
+        .reverse()
+        .find((message) => message?.role === "assistant")?.text || ""
+    ).trim();
+    const currentTopic = deriveActiveTopic(messages, activeChat?.activeTopic || "");
+    const continuationPrompt =
+      clean && !followUpIntent.followUp ? resolveContinuationPrompt(normalizedInput.normalizedText || clean, messages) : "";
     const latestAssistantText = String(
       [...(Array.isArray(messages) ? messages : [])]
         .reverse()
@@ -3349,7 +3725,18 @@ export default function NewChatLanding({
       pendingAttachments.length === 0 &&
       !continuationPrompt &&
       isImageClarificationQuestion(latestAssistantText);
-    const requestPrompt = continuationPrompt || (awaitingImageDescription ? `Generate an image of ${clean}` : clean);
+    const requestPrompt =
+      continuationPrompt || (awaitingImageDescription ? `Generate an image of ${normalizedInput.normalizedText || clean}` : normalizedInput.normalizedText || clean);
+    const requestIntelligence = {
+      originalMessage: clean,
+      normalizedMessage: normalizedInput.changed ? normalizedInput.normalizedText : "",
+      topic: currentTopic,
+      followUp: followUpIntent.followUp,
+      followUpType: followUpIntent.followUpType,
+      targetLanguage: followUpIntent.targetLanguage,
+      previousAssistantMessage,
+    };
+    const simplePrompt = isInstitutionSimplePrompt(requestPrompt, pendingAttachments);
     const shouldExtractLinks = isLinkExtractionPrompt(requestPrompt);
     const shouldGenerateImage =
       !shouldExtractLinks &&
@@ -3370,33 +3757,41 @@ export default function NewChatLanding({
     const latestImageUrl = shouldEditLatestImage
       ? imageAPI.getLatestImageFromMessages(messages)
       : "";
-    const imageSearchQuery = getImageSearchQuery(requestPrompt, {
-      hasAttachments: pendingAttachments.length > 0,
-      shouldGenerateImage,
-      shouldEditImage: shouldEditLatestImage,
-    });
+    const imageSearchQuery = simplePrompt
+      ? ""
+      : getImageSearchQuery(requestPrompt, {
+          hasAttachments: pendingAttachments.length > 0,
+          shouldGenerateImage,
+          shouldEditImage: shouldEditLatestImage,
+        });
 
     const attachSummary =
       pendingAttachments.length > 0
         ? `\n\nAttachments:\n${pendingAttachments.map((a) => `- ${a.name}`).join("\n")}`
         : "";
     const messageText = `${clean || "Sent attachments"}${attachSummary}`;
+    const exchangeId = `ex-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const assistantBaseText = requestPrompt || clean || "Sent attachments";
-    const imageVisionContext = shouldExtractLinks
+    const imageVisionContext = simplePrompt || shouldExtractLinks
       ? ""
       : await buildVisionAttachmentSummary(pendingAttachments, clean);
     const assistantRequestText = `${assistantBaseText}${attachSummary}${imageVisionContext}`;
     const currentContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
-    const detectedContext = detectAcademicContext(assistantRequestText, currentContext);
-    const mergedContext = mergeAcademicContext(currentContext, detectedContext, assistantRequestText);
-    if (activeChat?.id) {
+    const detectedContext = simplePrompt ? currentContext : detectAcademicContext(assistantRequestText, currentContext);
+    const mergedContext = simplePrompt ? currentContext : mergeAcademicContext(currentContext, detectedContext, assistantRequestText);
+    if (activeChat?.id && !simplePrompt) {
       setContextByChat((prev) => ({ ...prev, [activeChat.id]: mergedContext }));
     }
 
     updateActiveChatMessages(
-      (m) => [...m, { role: "user", text: messageText, ownerUid: currentUid, createdAt: Date.now() }],
+      (m) => [...m, { role: "user", text: messageText, ownerUid: currentUid, createdAt: Date.now(), exchangeId, persistState: "local" }],
       clean || untitledChatBase
     );
+    logInstitutionChatTiming("frontend_send_start", timingStarted, {
+      textLength: clean.length,
+      simplePrompt,
+      hasAttachments: pendingAttachments.length > 0,
+    });
     if (clean) setLastPrompt(clean);
     setInput("");
     clearMedia();
@@ -3658,30 +4053,98 @@ export default function NewChatLanding({
     }
 
     let streamId = null;
+    const shouldUseInstitutionResearchFlow = storageScope === "institution" || storageScope === "institution_admin";
+    if (shouldUseInstitutionResearchFlow) {
+      streamId = `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      appendAssistantPlaceholder(streamId);
+      updateActiveChatMessages(
+        (chatMessages) =>
+          chatMessages.map((message) =>
+            String(message?.streamId || "") === streamId
+              ? { ...message, exchangeId, persistState: "pending" }
+              : message
+          ),
+        clean || untitledChatBase
+      );
+      requestAnimationFrame(() => scrollToBottom("auto"));
+      logInstitutionChatTiming("placeholder_visible", timingStarted, {
+        streamId,
+      });
+    }
+
     try {
-      const token = await auth?.currentUser?.getIdToken(true).catch(() => null);
+      let token = await auth?.currentUser?.getIdToken().catch(() => null);
       if (!token) {
-        updateActiveChatMessages(
-          (m) => [...m, { role: "assistant", text: "Please sign in to use AI chat.", ownerUid: currentUid, createdAt: Date.now() }],
-          clean || "Sign in"
-        );
+        token = await auth?.currentUser?.getIdToken(true).catch(() => null);
+      }
+      if (!token) {
+        if (streamId) {
+          finalizeStreamingAssistant(streamId, "Please sign in to use AI chat.");
+        } else {
+          updateActiveChatMessages(
+            (m) => [...m, { role: "assistant", text: "Please sign in to use AI chat.", ownerUid: currentUid, createdAt: Date.now() }],
+            clean || "Sign in"
+          );
+        }
         return;
       }
 
-      const shouldUseInstitutionResearchFlow = storageScope === "institution" || storageScope === "institution_admin";
       if (shouldUseInstitutionResearchFlow) {
-        const fullReply = await fetchAssistantReplyFull({
+        if (import.meta.env.DEV) {
+          console.debug("[NewChatLanding][AI_REQUEST]", {
+            url: apiUrl(AI_PATH),
+            hasText: Boolean(clean),
+            attachments: pendingAttachments.length,
+            mode: simplePrompt ? "institution-fast-stream" : "institution-stream",
+            simplePrompt,
+          });
+        }
+        logInstitutionChatTiming("request_dispatched", timingStarted, {
+          mode: simplePrompt ? "institution-fast-stream" : "institution-stream",
+          sessionId: String(activeChat?.sessionId || ""),
+        });
+
+        const streamResult = await streamAssistantReply({
           token,
           messageText: assistantRequestText,
+          streamId,
           academicContext: mergedContext,
+          simplePrompt,
+          timingStarted,
+          requestIntelligence,
         });
-        const assistantText = String(fullReply?.text || "Response received.");
-        const assistantSources = Array.isArray(fullReply?.sources) ? fullReply.sources : [];
-        await persistInstitutionExchange({
+        if (streamResult.ok) {
+          updateActiveChatSessionId(streamResult.sessionId);
+          queueInstitutionExchangePersistence({
+            chatId: activeChat?.id,
+            exchangeId,
+            userContent: messageText,
+            assistantContent: String(streamResult.text || ""),
+            sources: [],
+            titleHint: clean || untitledChatBase,
+            timingStarted,
+          });
+          return;
+        }
+
+          const fallback = await fetchAssistantReplyFull({
+            token,
+            messageText: assistantRequestText,
+            academicContext: mergedContext,
+            simplePrompt,
+            timingStarted,
+            requestIntelligence,
+          });
+        updateActiveChatSessionId(fallback.sessionId);
+        finalizeStreamingAssistant(streamId, fallback.text, { sources: fallback.sources || [] });
+        queueInstitutionExchangePersistence({
+          chatId: activeChat?.id,
+          exchangeId,
           userContent: messageText,
-          assistantContent: assistantText,
-          sources: assistantSources,
+          assistantContent: String(fallback?.text || ""),
+          sources: Array.isArray(fallback?.sources) ? fallback.sources : [],
           titleHint: clean || untitledChatBase,
+          timingStarted,
         });
         return;
       }
@@ -3704,15 +4167,25 @@ export default function NewChatLanding({
         messageText: assistantRequestText,
         streamId,
         academicContext: mergedContext,
+        simplePrompt,
+        timingStarted,
+        requestIntelligence,
       });
-      if (streamResult.ok) return;
+      if (streamResult.ok) {
+        updateActiveChatSessionId(streamResult.sessionId);
+        return;
+      }
 
       const fallback = await fetchAssistantReplyFull({
         token,
         messageText: assistantRequestText,
         academicContext: mergedContext,
+        simplePrompt,
+        timingStarted,
+        requestIntelligence,
       });
-        finalizeStreamingAssistant(streamId, fallback.text, { sources: fallback.sources || [] });
+      updateActiveChatSessionId(fallback.sessionId);
+      finalizeStreamingAssistant(streamId, fallback.text, { sources: fallback.sources || [] });
     } catch {
       const backendHealthy = await isBackendHealthy();
       const errorText = formatAiServiceError({ backendHealthy });
@@ -4141,7 +4614,7 @@ export default function NewChatLanding({
     <div
       className={[
         isAdminShellEmbed
-          ? "h-full min-h-0 bg-white dark:bg-[#020617] flex flex-col overflow-hidden"
+          ? "h-full min-h-0 bg-transparent dark:bg-transparent flex flex-col overflow-hidden"
           : "min-h-[100dvh] h-[100dvh] bg-white dark:bg-[#020617] flex flex-col overflow-hidden md:h-[100dvh] md:overflow-hidden",
       ].join(" ")}
     >
@@ -4361,12 +4834,12 @@ export default function NewChatLanding({
 
           <div
             className={[
-              "hidden md:flex flex-1 min-w-0 items-center justify-start transition-[padding] duration-300 ease-out",
-              isSidebarOpen ? "pl-[288px]" : "pl-[98px]",
+              "hidden md:flex flex-1 min-w-0 items-center justify-end pr-3 xl:pr-4 transition-[padding] duration-300 ease-out",
+              isSidebarOpen ? "pl-[288px]" : "pl-[90px]",
             ].join(" ")}
           >
             <div className="relative w-full max-w-[640px]">
-              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search size={18} className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
               <input
                 ref={globalSearchInputRef}
                 value={globalSearch}
@@ -4378,35 +4851,35 @@ export default function NewChatLanding({
                   }
                 }}
                 placeholder="Search Ctrl K"
-                className="pointer-events-auto h-9 w-full rounded-full border border-slate-200/80 bg-white/70 pl-10 pr-4 text-sm text-slate-800 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl outline-none placeholder:text-slate-400 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:ring-sky-500/20"
+                className="pointer-events-auto h-9 w-full rounded-full border border-slate-900/15 bg-white/70 pl-10 pr-4 text-sm text-slate-900 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl outline-none placeholder:text-slate-500 focus:border-slate-900/25 focus:ring-2 focus:ring-slate-200 dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-50 dark:placeholder:text-slate-400 dark:focus:ring-slate-700/40"
               />
             </div>
           </div>
 
-          <div className="pointer-events-auto mr-1 hidden items-center gap-1 rounded-full border border-slate-200/70 bg-white/65 px-1.5 py-1 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl xl:flex dark:border-white/10 dark:bg-slate-900/50">
+          <div className="pointer-events-auto mr-1 hidden items-center gap-1 rounded-full border border-slate-900/15 bg-white/65 px-1.5 py-1 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl xl:flex dark:border-white/10 dark:bg-slate-900/50">
             <button
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-900/15 text-slate-600 hover:bg-white/70 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
               title="New Chat"
               onClick={startNewChat}
             >
               <Check size={16} />
             </button>
             <button
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-900/15 text-slate-600 hover:bg-white/70 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
               title="Notebook"
               onClick={() => handleNavClick("notebook")}
             >
               <NotebookPen size={16} />
             </button>
             <button
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-900/15 text-slate-500 hover:bg-white/70 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
               title="Courses"
               onClick={() => handleNavClick("courses")}
             >
               <BookOpen size={16} />
             </button>
             <button
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-900/15 text-slate-500 hover:bg-white/70 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
               title="Results"
               onClick={() => handleNavClick("results")}
             >
@@ -4417,7 +4890,7 @@ export default function NewChatLanding({
           <div ref={notificationsMenuRef} className="pointer-events-auto relative">
             <button
               onClick={toggleNotificationsMenu}
-              className="relative h-9 w-9 rounded-full border border-slate-200/80 bg-white/75 text-slate-700 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl hover:bg-white/90 dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:hover:bg-slate-800/80"
+              className="relative h-9 w-9 rounded-full border border-slate-900/15 bg-white/75 text-slate-700 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl hover:bg-white/90 dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:hover:bg-slate-800/80"
               title="Notifications"
             >
               <Bell size={16} className="mx-auto" />
@@ -4488,7 +4961,7 @@ export default function NewChatLanding({
           <div ref={profileMenuRef} className="pointer-events-auto relative">
             <button
               onClick={toggleProfileMenu}
-              className="inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-slate-200/80 bg-white/75 text-slate-700 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl hover:bg-white/90 dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:hover:bg-slate-800/80"
+              className="inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-slate-900/15 bg-white/75 text-slate-700 shadow-[0_10px_26px_rgba(15,23,42,0.08)] backdrop-blur-xl hover:bg-white/90 dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:hover:bg-slate-800/80"
               title={`${user.name} profile`}
             >
               {user.avatarUrl ? (
@@ -4649,7 +5122,7 @@ export default function NewChatLanding({
 
             <nav className="flex-1 overflow-y-auto overscroll-contain p-2 pb-6 space-y-3">
               <div className="space-y-1">
-                <div className="px-3 pt-1 text-[11px] font-semibold tracking-wider text-slate-500">MAIN</div>
+                <div className="px-3 pt-1 text-[11px] font-semibold tracking-wider text-slate-500 dark:text-slate-400">MAIN</div>
                 <div className="space-y-1 relative" ref={newChatMenuRef}>
                   <div className="flex items-center gap-1">
                     <div className="flex-1">
@@ -4675,7 +5148,7 @@ export default function NewChatLanding({
 
                   {isNewChatMenuOpen ? (
                     <div className="absolute left-0 top-full mt-1 w-48 rounded-xl border border-blue-200/60 bg-blue-500/20 backdrop-blur-sm p-1 space-y-1 z-30">
-                      <div className="px-2 py-1 text-[11px] font-semibold tracking-wider text-slate-500">CHAT HISTORY</div>
+                      <div className="px-2 py-1 text-[11px] font-semibold tracking-wider text-slate-500 dark:text-slate-400">CHAT HISTORY</div>
                       <div className="max-h-44 overflow-auto smart-scrollbar space-y-1">
                         {chats.map((chat) => (
                           <div
@@ -4761,7 +5234,7 @@ export default function NewChatLanding({
               </div>
 
               <div className="space-y-1">
-                <div className="px-3 pt-1 text-[11px] font-semibold tracking-wider text-slate-500">COLLABORATION</div>
+                <div className="px-3 pt-1 text-[11px] font-semibold tracking-wider text-slate-500 dark:text-slate-400">COLLABORATION</div>
                 {COLLABORATION_ITEMS.map((item) => (
                   <SidebarButton
                     key={item.key}
@@ -4778,7 +5251,7 @@ export default function NewChatLanding({
               </div>
 
               <div className="space-y-1">
-                <div className="px-3 pt-1 text-[11px] font-semibold tracking-wider text-slate-500">SYSTEM</div>
+                <div className="px-3 pt-1 text-[11px] font-semibold tracking-wider text-slate-500 dark:text-slate-400">SYSTEM</div>
 
                 <SidebarButton
                   label={SETTINGS_ITEM.label}
@@ -4802,7 +5275,7 @@ export default function NewChatLanding({
                   <span className="flex-1">More</span>
                   {isMobileMoreOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </button>
-                <div className="px-3 -mt-1 text-xs text-slate-400">Role: {String(userRole || "unknown")}</div>
+                <div className="px-3 -mt-1 text-xs text-slate-500 dark:text-slate-400">Role: {String(userRole || "unknown")}</div>
 
                 {isMobileMoreOpen ? (
                   <div className="pl-2 space-y-1">
@@ -4838,16 +5311,16 @@ export default function NewChatLanding({
         <aside
           className={[
             "hidden md:block h-full min-h-0 shrink-0 transition-[width] duration-300 ease-out",
-            isSidebarOpen ? "w-[272px]" : "w-[82px]",
+            isSidebarOpen ? "w-[272px]" : "w-[74px]",
           ].join(" ")}
         >
           <div
             className={[
-              "surface-elevated rounded-2xl bg-slate-50/90 border border-slate-200/80 shadow-[0_10px_22px_rgba(15,23,42,0.05)] overflow-visible h-full flex flex-col",
+              "surface-elevated rounded-2xl bg-slate-50/90 border border-slate-900/15 shadow-[0_10px_22px_rgba(15,23,42,0.05)] overflow-visible h-full flex flex-col",
               "transition-all duration-300 ease-out",
             ].join(" ")}
           >
-            <div className="relative flex items-center border-b border-slate-200/70 bg-slate-50/95 px-3 py-3 dark:border-white/10 dark:bg-slate-900/95">
+            <div className="relative flex items-center border-b border-slate-900/15 bg-slate-50/95 px-3 py-3 dark:border-white/10 dark:bg-slate-900/95">
               {isSidebarOpen ? (
                 <div className="flex items-center gap-2">
                   <div className="relative h-7 w-7 rounded-xl bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_20px_rgba(99,102,241,0.22)]" />
@@ -4864,7 +5337,7 @@ export default function NewChatLanding({
                 className={[
                   "absolute -right-2.5 top-1/2 -translate-y-1/2",
                   "h-8 w-8 rounded-xl",
-                  "border border-slate-200/90 bg-white/95 shadow-sm",
+                  "border border-slate-900/15 bg-white/95 shadow-sm",
                   "hover:bg-slate-100 text-slate-600",
                   "flex items-center justify-center",
                 ].join(" ")}
@@ -4881,12 +5354,12 @@ export default function NewChatLanding({
               {isSidebarOpen ? (
                 <div className="px-2 pb-1">
                   <div className="relative">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
                       value={sidebarSearch}
                       onChange={(event) => setSidebarSearch(event.target.value)}
                       placeholder="Search"
-                      className="h-9 w-full rounded-xl border border-slate-200/90 bg-slate-50/90 pl-9 pr-3 text-[13px] text-slate-700 placeholder:text-slate-400 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                      className="h-9 w-full rounded-xl border border-slate-900/15 bg-slate-50/90 pl-9 pr-3 text-[13px] text-slate-900 placeholder:text-slate-500 outline-none focus:border-slate-900/25 focus:ring-2 focus:ring-slate-200"
                     />
                   </div>
                 </div>
@@ -4907,13 +5380,24 @@ export default function NewChatLanding({
                     {isSidebarOpen ? (
                       <button
                         onClick={() => setIsNewChatMenuOpen((v) => !v)}
-                        className="h-9 w-9 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0"
+                        className="h-9 w-9 rounded-lg border border-slate-900/15 bg-white hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center shrink-0"
                         title="Chat actions"
                       >
                         <Ellipsis size={16} />
                       </button>
                     ) : null}
                   </div>
+                  {!isSidebarOpen ? (
+                    <div className="mt-1 flex justify-center">
+                      <button
+                        onClick={() => setIsNewChatMenuOpen((v) => !v)}
+                        className="h-8 w-8 rounded-lg border border-slate-900/15 bg-white hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center shadow-sm"
+                        title="Chat history"
+                      >
+                        <Ellipsis size={15} />
+                      </button>
+                    </div>
+                  ) : null}
 
                   {isSidebarOpen && isNewChatMenuOpen ? (
                     <div className="absolute left-2 right-2 top-full mt-1 rounded-xl border border-blue-200/60 bg-blue-500/20 backdrop-blur-sm p-1 space-y-1 z-30">
@@ -4978,6 +5462,75 @@ export default function NewChatLanding({
                               title="Delete chat"
                             >
                               <Trash2 size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {!isSidebarOpen && isNewChatMenuOpen ? (
+                    <div className="absolute left-[72px] top-0 w-[264px] rounded-2xl border border-blue-200/70 bg-blue-500/20 p-2 shadow-[0_18px_50px_rgba(15,23,42,0.14)] backdrop-blur-md z-30">
+                      <div className="px-2 py-1 text-[11px] font-semibold tracking-[0.16em] text-slate-500">CHAT HISTORY</div>
+                      <div className="mt-1 max-h-52 overflow-auto smart-scrollbar space-y-1">
+                        {chats.map((chat) => (
+                          <div
+                            key={chat.id}
+                            className={[
+                              "flex items-center gap-2 rounded-xl px-2.5 py-2",
+                              activeChatId === chat.id
+                                ? "bg-indigo-600 text-white shadow-sm"
+                                : "bg-white/65 hover:bg-white/85",
+                            ].join(" ")}
+                          >
+                            <button
+                              onClick={() => {
+                                syncActiveView("newchat", "push");
+                                setActiveChatId(chat.id);
+                                setIsNewChatMenuOpen(false);
+                              }}
+                              className="min-w-0 flex-1 text-left"
+                              title={chat.title}
+                            >
+                              <div
+                                className={[
+                                  "truncate text-sm",
+                                  activeChatId === chat.id ? "font-semibold text-white" : "font-medium text-slate-800",
+                                ].join(" ")}
+                              >
+                                {chat.title || untitledChatBase}
+                              </div>
+                              <div
+                                className={[
+                                  "mt-0.5 text-[11px]",
+                                  activeChatId === chat.id ? "text-indigo-100" : "text-slate-500",
+                                ].join(" ")}
+                              >
+                                {formatChatStamp(chat.updatedAt)}
+                              </div>
+                            </button>
+                            <button
+                              onClick={() => renameChatById(chat.id)}
+                              className={[
+                                "h-8 w-8 inline-flex items-center justify-center rounded-lg border",
+                                activeChatId === chat.id
+                                  ? "border-white/35 text-white hover:bg-white/15"
+                                  : "border-slate-300/80 text-slate-700 hover:bg-white",
+                              ].join(" ")}
+                              title="Rename chat"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => deleteChatById(chat.id)}
+                              className={[
+                                "h-8 w-8 inline-flex items-center justify-center rounded-lg border",
+                                activeChatId === chat.id
+                                  ? "border-white/35 text-white hover:bg-white/15"
+                                  : "border-slate-300/80 text-slate-700 hover:bg-white",
+                              ].join(" ")}
+                              title="Delete chat"
+                            >
+                              <Trash2 size={13} />
                             </button>
                           </div>
                         ))}
@@ -5072,7 +5625,7 @@ export default function NewChatLanding({
                 ) : null}
 
                 {!isSidebarOpen && isMorePopupOpen ? (
-                  <div className="absolute left-[74px] bottom-2 w-56 rounded-2xl bg-white border border-slate-200 shadow-lg p-2 z-20">
+                  <div className="absolute left-[66px] bottom-2 w-56 rounded-2xl bg-white border border-slate-200 shadow-lg p-2 z-20">
                     <div className="px-2 py-1 text-[11px] font-semibold tracking-wider text-slate-500">MORE</div>
                     <div className="mt-1 space-y-1">
                       {moreItems.map((item) => (
@@ -5117,23 +5670,25 @@ export default function NewChatLanding({
               <div
                 ref={mobileMessagesRef}
                 onScroll={handleChatScroll}
-                className="chat-scroll-surface flex-1 overflow-y-auto overscroll-none touch-pan-y bg-white px-4 pt-24 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-4 dark:bg-[#020617]"
+                className="chat-scroll-surface flex-1 overflow-y-auto overscroll-none touch-pan-y bg-white px-1 pt-24 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-4 dark:bg-[#020617]"
                 style={{ paddingBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom) + ${kbHeight}px + 28px)` }}
               >
                 {messages.length === 0 ? (
-                  <div className="px-4 pt-4 pb-2">
-                    <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-sky-600 dark:text-slate-300">{timeGreeting()}</div>
-                    <div className="mt-2 text-[29px] leading-[1.18] font-semibold text-slate-950 dark:text-white">
-                      {modeConfig.title}
+                  <div className="px-1 pt-4 pb-2">
+                    <div className="text-[11px] font-semibold tracking-[0.18em] uppercase text-slate-500 dark:text-slate-300">
+                      {landingGreeting}
                     </div>
-                    <div className="mt-2.5 max-w-[32ch] text-[14px] leading-relaxed text-slate-600 dark:text-slate-200">
+                    <div className="mt-2 text-[29px] leading-[1.12] font-semibold tracking-[-0.03em] text-slate-950 dark:text-white">
+                      {landingTitle}
+                    </div>
+                    <div className="mt-2.5 max-w-[32ch] text-[14px] leading-relaxed text-slate-700 dark:text-slate-300">
                       {modeConfig.subtitle}
                     </div>
                   </div>
                 ) : null}
 
                 {messages.length === 0 ? (
-                  <div className="flex flex-wrap items-start gap-2 px-4 pt-3 pb-2">
+                  <div className="flex flex-wrap items-start justify-start gap-2 px-1 pt-3 pb-2">
                     {starterSet.map((starter) => {
                       const isActive = selectedStarter === starter.key;
                       return (
@@ -5156,7 +5711,7 @@ export default function NewChatLanding({
                 ) : null}
 
                 {activeContextLabel ? (
-                  <div className="inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
+                  <div className="inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
                     {activeContextLabel}
                   </div>
                 ) : null}
@@ -5166,7 +5721,7 @@ export default function NewChatLanding({
                   <div key={idx} ref={(node) => measureVirtualRow("mobile", idx, node)}>
                     {shouldShowSectionAnchor(idx) ? (
                       <div className="my-2.5 flex items-center gap-2.5">
-                        <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase dark:text-slate-500">
+                        <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase dark:text-slate-400">
                           {sectionLabelForIndex(idx)}
                         </span>
                         <span className="h-px flex-1 bg-slate-200/70 dark:bg-slate-800" />
@@ -5245,13 +5800,6 @@ export default function NewChatLanding({
                 style={{ bottom: `${kbHeight}px` }}
               >
                 <div ref={mobileAttachmentMenuRef} className="relative max-w-xl mx-auto space-y-2">
-                  {showMobileEntryGlow ? (
-                    <>
-                      <div className="pointer-events-none fixed left-0 top-[14%] z-[48] h-[62vh] w-7 rounded-r-full bg-[linear-gradient(180deg,rgba(168,85,247,0.0),rgba(168,85,247,0.35),rgba(14,165,233,0.28),rgba(168,85,247,0.0))] blur-[10px] opacity-90 elu-mobile-entry-glow" />
-                      <div className="pointer-events-none fixed right-0 top-[14%] z-[48] h-[62vh] w-7 rounded-l-full bg-[linear-gradient(180deg,rgba(251,146,60,0.0),rgba(251,146,60,0.36),rgba(14,165,233,0.24),rgba(251,146,60,0.0))] blur-[10px] opacity-90 elu-mobile-entry-glow" />
-                    </>
-                  ) : null}
-
                   {showMobileRotatingSuggestion && activeMobileSuggestion ? (
                     <div className="px-1">
                       <button
@@ -5310,7 +5858,7 @@ export default function NewChatLanding({
                                 <span className="text-[14px] font-semibold">{modelOption.label}</span>
                                 {isSelected ? <Check size={16} /> : null}
                               </div>
-                              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                              <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-400">
                                 {modelOption.description}
                               </div>
                             </button>
@@ -5324,8 +5872,8 @@ export default function NewChatLanding({
                     className={[
                       "relative surface-elevated rounded-[24px] border px-2 py-1.5 backdrop-blur-xl transition-all duration-300",
                       showMobileEntryGlow
-                        ? "border-cyan-300/75 bg-white/94 shadow-[0_0_0_1px_rgba(14,165,233,0.16),0_0_18px_rgba(14,165,233,0.14),0_18px_44px_rgba(15,23,42,0.12)] dark:border-cyan-400/25 dark:bg-slate-950/72 dark:shadow-[0_0_0_1px_rgba(34,211,238,0.12),0_0_18px_rgba(14,165,233,0.16),0_18px_38px_rgba(0,0,0,0.28)]"
-                        : "border-cyan-200/70 bg-white/94 shadow-[0_0_0_1px_rgba(14,165,233,0.10),0_0_14px_rgba(14,165,233,0.08),0_12px_28px_rgba(15,23,42,0.10)] dark:border-cyan-400/15 dark:bg-slate-950/72 dark:shadow-[0_0_0_1px_rgba(34,211,238,0.10),0_0_14px_rgba(14,165,233,0.12),0_14px_30px_rgba(0,0,0,0.24)]",
+                        ? "border-cyan-300/75 bg-white/94 shadow-[0_18px_44px_rgba(15,23,42,0.12)] dark:border-cyan-400/25 dark:bg-slate-950/72 dark:shadow-[0_18px_38px_rgba(0,0,0,0.28)]"
+                        : "border-cyan-200/70 bg-white/94 shadow-[0_12px_28px_rgba(15,23,42,0.10)] dark:border-cyan-400/15 dark:bg-slate-950/72 dark:shadow-[0_14px_30px_rgba(0,0,0,0.24)]",
                     ].join(" ")}
                   >
                     <AttachmentChipsTray
@@ -5374,7 +5922,7 @@ export default function NewChatLanding({
                         }
                       }}
                       onPaste={handlePaste}
-                      className="composer-plain-input max-h-[120px] min-h-[40px] flex-1 resize-none appearance-none border-0 bg-transparent px-1.5 py-2 text-[15px] leading-6 text-slate-800 outline-none shadow-none ring-0 placeholder:text-slate-400 dark:bg-transparent dark:text-slate-100 dark:placeholder:text-slate-500"
+                      className="composer-plain-input max-h-[120px] min-h-[40px] flex-1 resize-none appearance-none border-0 bg-transparent px-1.5 py-2 text-[15px] leading-6 text-slate-900 outline-none shadow-none ring-0 placeholder:text-slate-500 dark:bg-transparent dark:text-slate-50 dark:placeholder:text-slate-400"
                       placeholder="Type your message..."
                       />
 
@@ -5512,9 +6060,9 @@ export default function NewChatLanding({
 
           {active === "newchat" ? (
             <div className="relative hidden md:flex flex-1 min-h-0 flex-col bg-transparent dark:bg-transparent">
-            <div className="shrink-0 bg-transparent px-4 py-2.5">
+            <div className={["shrink-0 bg-transparent", isEmbeddedAdminChat ? "px-0 pt-0 pb-1" : "px-4 py-2.5"].join(" ")}>
               <div
-                className="group/chat-header relative mx-auto w-full max-w-[1180px]"
+                className={["group/chat-header relative w-full", isEmbeddedAdminChat ? "" : "mx-auto max-w-[1180px]"].join(" ")}
                 title={`${isEmbeddedAdminChat ? "Institution Admin Assistant" : "AI Academic Assistant"} • ${formatChatStamp(activeChat?.updatedAt)}`}
               >
                 <div className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -5526,10 +6074,10 @@ export default function NewChatLanding({
               </div>
             </div>
 
-            <div className={[hasConversation ? "px-4 pt-1 pb-2" : "px-4 pt-12 pb-2 md:pt-20", "flex-1 min-h-0 flex flex-col"].join(" ")}>
-              <div className="max-w-[1180px] w-full mx-auto flex-1 min-h-0 flex flex-col">
+            <div className={[isEmbeddedAdminChat ? (hasConversation ? "px-0 pt-0 pb-0" : "px-0 pt-2 pb-0") : (hasConversation ? "px-4 pt-1 pb-2" : "px-4 pt-14 pb-2 md:pt-24"), "flex-1 min-h-0 flex flex-col"].join(" ")}>
+              <div className={["w-full flex-1 min-h-0 flex flex-col", isEmbeddedAdminChat ? "max-w-[1180px] mx-auto" : "max-w-[1180px] mx-auto"].join(" ")}>
               {messages.length === 0 && !isEmbeddedAdminChat ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3 md:mt-2">
+                <div className="grid w-full max-w-[920px] mx-auto grid-cols-2 gap-2 shrink-0 mb-2 md:mt-0.5 lg:grid-cols-4">
                   <StatCard title="Next Class" value={user.nextClass} subtitle="From your timetable" />
                   <StatCard title="Balance" value={user.balance} subtitle="Fees portal" />
                   <StatCard title="Attendance" value={user.attendance} subtitle="This month" />
@@ -5537,7 +6085,7 @@ export default function NewChatLanding({
                 </div>
               ) : null}
               {messages.length === 0 && isEmbeddedAdminChat ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3 md:mt-2">
+                <div className="grid w-full max-w-[920px] mx-auto grid-cols-2 gap-2 shrink-0 mb-2 md:mt-0.5 lg:grid-cols-4">
                   {adminOverviewCards.map((item) => (
                     <StatCard key={item.title} title={item.title} value={item.value} subtitle={item.subtitle} />
                   ))}
@@ -5547,18 +6095,43 @@ export default function NewChatLanding({
               <div
                 ref={desktopMessagesRef}
                 onScroll={handleChatScroll}
-                className="chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pt-6 pb-4 space-y-3 md:pt-8"
+                className={["chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-3", isEmbeddedAdminChat ? "px-0 pt-2 pb-1 md:pt-2" : "px-3 pt-4 pb-3 md:pt-5"].join(" ")}
               >
-                <div className="max-w-[920px] w-full mx-auto space-y-5 pb-8 md:pt-2">
+                <div className={["w-full space-y-4", isEmbeddedAdminChat ? "max-w-[920px] mx-auto pb-3" : "max-w-[920px] mx-auto pb-6 md:pt-1"].join(" ")}>
                   {messages.length === 0 ? (
-                    <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
-                      <div className="text-sm text-slate-500 dark:text-slate-300">{timeGreeting()}</div>
-                      <div className="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">
-                        {modeConfig.title}
+                    <div className="px-2 pt-0.5 pb-0.5">
+                      <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-300">
+                        {landingGreeting}
                       </div>
-                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                      <div className="mt-2 text-[34px] leading-[1.08] font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">
+                        {landingTitle}
+                      </div>
+                      <div className="mt-2 max-w-[44ch] text-[15px] leading-7 text-slate-700 dark:text-slate-300">
                         {modeConfig.subtitle}
                       </div>
+                    </div>
+                  ) : null}
+
+                  {messages.length === 0 ? (
+                    <div className="flex w-full max-w-[820px] flex-wrap gap-2 px-2 pt-0.5">
+                      {starterSet.map((starter) => {
+                        const isActive = selectedStarter === starter.key;
+                        return (
+                          <button
+                            key={starter.key}
+                            onClick={() => applyStarter(starter)}
+                            className={[
+                              "inline-flex min-w-[170px] flex-1 items-center gap-2 rounded-full border px-3.5 py-2.5 text-left text-[12px] font-semibold leading-tight bg-white shadow-[0_10px_24px_rgba(14,30,63,0.06)] transition active:scale-[0.99] dark:border-slate-700/90 dark:bg-slate-900/96 dark:shadow-[0_12px_28px_rgba(0,0,0,0.32)]",
+                              isActive
+                                ? "border-cyan-200 bg-[linear-gradient(180deg,rgba(239,248,255,0.98),rgba(232,250,249,0.96))] text-[#103765] dark:border-sky-500/70 dark:bg-sky-500/15 dark:text-white"
+                                : "border-slate-900/20 text-slate-700 hover:border-slate-900/30 hover:bg-slate-50 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800/95",
+                            ].join(" ")}
+                          >
+                            <span className="text-[14px] leading-none">{starter.emoji}</span>
+                            <span className="truncate">{starter.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   ) : null}
 
@@ -5567,7 +6140,7 @@ export default function NewChatLanding({
                       <div key={idx} ref={(node) => measureVirtualRow("desktop", idx, node)}>
                         {shouldShowSectionAnchor(idx) ? (
                           <div className="my-3 flex items-center gap-3">
-                            <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase dark:text-slate-500">
+                            <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase dark:text-slate-400">
                               {sectionLabelForIndex(idx)}
                             </span>
                             <span className="h-px flex-1 bg-slate-200/70 dark:bg-slate-800" />
@@ -5639,7 +6212,7 @@ export default function NewChatLanding({
               </div>
 
               {hasStarterSuggestions && !hasConversation ? (
-                <div className="surface-elevated mt-3 rounded-2xl border border-slate-200/80 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0 max-w-[920px] w-full mx-auto dark:border-slate-700 dark:bg-slate-900">
+                <div ref={starterSuggestionsPanelRef} className="surface-elevated mt-3 rounded-2xl border border-slate-900/15 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0 max-w-[920px] w-full mx-auto dark:border-slate-700 dark:bg-slate-900">
                   <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase dark:text-slate-400">
                     Suggested prompts
                   </div>
@@ -5657,8 +6230,8 @@ export default function NewChatLanding({
                 </div>
               ) : null}
 
-              <div ref={desktopAttachmentMenuRef} className="mt-3 shrink-0 relative max-w-[920px] w-full mx-auto pt-4 pb-1">
-                <div className="surface-elevated rounded-[28px] border border-cyan-200/70 bg-white/94 px-3 py-2.5 shadow-[0_0_0_1px_rgba(14,165,233,0.10),0_0_14px_rgba(14,165,233,0.08),0_12px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl transition focus-within:border-cyan-300/80 dark:border-cyan-400/15 dark:bg-slate-950/72 dark:shadow-[0_0_0_1px_rgba(34,211,238,0.10),0_0_14px_rgba(14,165,233,0.12),0_14px_30px_rgba(0,0,0,0.24)]">
+              <div ref={desktopAttachmentMenuRef} className={["shrink-0 relative z-10 max-w-[920px] w-full mx-auto", isEmbeddedAdminChat ? "mt-auto pt-3" : "mt-2"].join(" ")}>
+                <div className="surface-elevated rounded-[28px] border border-slate-900/15 bg-white/94 px-3 py-2.5 shadow-[0_0_0_1px_rgba(15,23,42,0.03),0_12px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl transition focus-within:border-slate-900/25 dark:border-cyan-400/15 dark:bg-slate-950/72 dark:shadow-[0_0_0_1px_rgba(34,211,238,0.10),0_0_14px_rgba(14,165,233,0.12),0_14px_30px_rgba(0,0,0,0.24)]">
                   <AttachmentChipsTray
                     items={attachments}
                     onPreview={openAttachmentItem}
@@ -5682,7 +6255,7 @@ export default function NewChatLanding({
                   <div className="flex items-end gap-2">
                     <button
                       onClick={toggleAttachmentPanel}
-                      className="h-10 w-10 shrink-0 rounded-2xl border border-transparent bg-slate-100/70 hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center transition active:scale-[0.98] dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
+                      className="h-10 w-10 shrink-0 rounded-2xl border border-slate-900/15 bg-slate-100/70 hover:bg-slate-100 text-slate-700 inline-flex items-center justify-center transition active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
                       title="Add attachment"
                     >
                       <Plus size={17} />
@@ -5701,17 +6274,17 @@ export default function NewChatLanding({
                         }
                       }}
                       onPaste={handlePaste}
-                      className="composer-plain-input min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-400"
+                      className="composer-plain-input min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-slate-900 outline-none placeholder:text-slate-500 dark:text-slate-50 dark:placeholder:text-slate-400"
                       placeholder="Type your message..."
                     />
 
                     <button
                       onClick={() => setIsAiModeOn((v) => !v)}
                       className={[
-                        "h-9 px-3.5 rounded-xl border border-transparent text-xs font-semibold transition",
+                        "h-9 px-3.5 rounded-xl border text-xs font-semibold transition",
                         isAiModeOn
-                          ? "border-slate-900 bg-slate-900 text-white"
-                          : "bg-slate-100/75 text-slate-700 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]",
+                          ? "border-slate-900/20 bg-slate-900 text-white"
+                          : "border-slate-900/15 bg-slate-100/75 text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]",
                       ].join(" ")}
                       title="AI conversation mode"
                     >
@@ -5721,10 +6294,10 @@ export default function NewChatLanding({
                     <button
                       onClick={toggleMic}
                       className={[
-                        "h-9 w-9 rounded-xl border border-transparent inline-flex items-center justify-center transition",
+                        "h-9 w-9 rounded-xl border inline-flex items-center justify-center transition",
                         isListening
                           ? "border-red-500 bg-red-500 text-white"
-                          : "bg-slate-100/75 text-slate-700 hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]",
+                          : "border-slate-900/15 bg-slate-100/75 text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]",
                       ].join(" ")}
                       title={isListening ? "Stop voice input" : "Start voice input"}
                     >
@@ -5736,7 +6309,7 @@ export default function NewChatLanding({
                         audioPlayer.closePlayer();
                         openLiveVoiceSession();
                       }}
-                      className="h-9 w-9 rounded-xl border border-transparent bg-slate-100/75 text-slate-700 inline-flex items-center justify-center transition hover:bg-slate-100 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
+                      className="h-9 w-9 rounded-xl border border-slate-900/15 bg-slate-100/75 text-slate-700 inline-flex items-center justify-center transition hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:bg-white/[0.09]"
                       title="Open live voice chat"
                     >
                       <PhoneCall size={16} />
@@ -5768,7 +6341,7 @@ export default function NewChatLanding({
                   <div className="grid grid-cols-4 gap-1.5">
                     <button
                       onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
-                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-700 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     >
                       <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100">
                         <Image size={16} />
@@ -5777,7 +6350,7 @@ export default function NewChatLanding({
                     </button>
                     <button
                       onClick={() => openAttachmentPicker({ source: "file" })}
-                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-700 hover:border-slate-300 hover:bg-white"
                     >
                       <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
                         <Paperclip size={16} />
@@ -5786,7 +6359,7 @@ export default function NewChatLanding({
                     </button>
                     <button
                       onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "camera" })}
-                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-700 hover:border-slate-300 hover:bg-white"
                     >
                       <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
                         <Camera size={16} />
@@ -5795,7 +6368,7 @@ export default function NewChatLanding({
                     </button>
                     <button
                       onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "scan" })}
-                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-700 hover:border-slate-300 hover:bg-white"
                     >
                       <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
                         <ScanLine size={16} />
@@ -5824,7 +6397,7 @@ export default function NewChatLanding({
                         <div className="rounded-lg bg-white/90 p-1 dark:bg-slate-900">
                           <button
                             onClick={() => setIsToolsPanelOpen(false)}
-                            className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                            className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                           >
                             <ChevronDown size={12} />
                             Back
@@ -6003,7 +6576,7 @@ export default function NewChatLanding({
           isChatScrolling ? "opacity-100 translate-x-0" : "opacity-0 translate-x-1.5",
         ].join(" ")}
       >
-        <div className="mb-2 -ml-16 w-20 rounded-full border border-slate-200/70 bg-white/90 px-2.5 py-1 text-[11px] text-slate-600 text-center shadow-[0_6px_18px_rgba(15,23,42,0.08)] backdrop-blur-sm md:text-xs">
+        <div className="mb-2 -ml-16 w-20 rounded-full border border-slate-200/70 bg-white/90 px-2.5 py-1 text-[11px] text-slate-700 text-center shadow-[0_6px_18px_rgba(15,23,42,0.08)] backdrop-blur-sm md:text-xs">
           {chatScrollLabel}
         </div>
         <div className="relative h-20 md:h-24 w-[3px] md:w-1 rounded-full bg-slate-400/25 overflow-hidden backdrop-blur-sm">

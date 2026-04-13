@@ -70,10 +70,10 @@ const ATTENDANCE_ROWS = [
 ];
 
 function Card({ title, subtitle, children, right }) {
-  return <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="mb-3 flex items-start justify-between"><div><div className="text-sm font-semibold">{title}</div><div className="text-xs text-slate-500">{subtitle}</div></div>{right}</div>{children}</section>;
+  return <section className="rounded-2xl border border-slate-300/70 bg-white p-3.5 shadow-sm"><div className="mb-2.5 flex items-start justify-between"><div><div className="text-sm font-semibold text-slate-900">{title}</div><div className="text-xs text-slate-500">{subtitle}</div></div>{right}</div>{children}</section>;
 }
 function Chip({ v }) { const x = String(v || ""); const cls = x === "approved" ? "bg-emerald-100 text-emerald-700" : x === "rejected" ? "bg-rose-100 text-rose-700" : x === "pending_approval" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-700"; return <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${cls}`}>{x.replaceAll("_", " ")}</span>; }
-function Summary({ label, value, Icon }) { return <div className="rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="flex items-center justify-between text-xs text-slate-600"><span>{label}</span>{Icon ? <Icon size={13} /> : null}</div><div className="mt-1 text-2xl font-bold">{value}</div></div>; }
+function Summary({ label, value, Icon }) { return <div className="rounded-xl border border-slate-300/70 bg-slate-50 p-2.5"><div className="flex items-center justify-between text-xs text-slate-600"><span>{label}</span>{Icon ? <Icon size={13} /> : null}</div><div className="mt-1 text-xl font-bold">{value}</div></div>; }
 
 function AdminMiniModal({ open, title, children, onClose }) {
   if (!open) return null;
@@ -84,12 +84,12 @@ function AdminMiniModal({ open, title, children, onClose }) {
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <div>
             <div className="text-lg font-semibold text-slate-900">{title}</div>
-            <div className="text-sm text-slate-500">Administrative action panel</div>
+            <div className="text-sm text-slate-600">Administrative action panel</div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+            className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
           >
             Close
           </button>
@@ -199,7 +199,7 @@ function ResultsManagementPanel({ workflows = [], onOpenWorkflows, onOpenAnalyti
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-lg font-semibold text-slate-900">Results Oversight</div>
-              <div className="text-sm text-slate-500">
+              <div className="text-sm text-slate-700">
                 Review current issues, queues, and export actions.
               </div>
             </div>
@@ -208,7 +208,7 @@ function ResultsManagementPanel({ workflows = [], onOpenWorkflows, onOpenAnalyti
               <button
                 type="button"
                 onClick={() => setModal("approvals")}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
               >
                 <ClipboardCheck size={16} />
                 Pending approvals
@@ -217,7 +217,7 @@ function ResultsManagementPanel({ workflows = [], onOpenWorkflows, onOpenAnalyti
               <button
                 type="button"
                 onClick={() => setModal("missing")}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
               >
                 <AlertTriangle size={16} />
                 Missing marks
@@ -228,12 +228,12 @@ function ResultsManagementPanel({ workflows = [], onOpenWorkflows, onOpenAnalyti
           </div>
 
           <div className="mt-5 grid grid-cols-1 xl:grid-cols-[1.3fr_0.9fr] gap-5">
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <div className="text-sm font-semibold text-slate-700">Flagged Result Issues</div>
+            <div className="rounded-2xl border border-slate-300/70 p-4">
+              <div className="text-sm font-semibold text-slate-800">Flagged Result Issues</div>
               <div className="mt-3 overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-100 text-left text-slate-500">
+                    <tr className="border-b border-slate-300/70 text-left text-slate-700">
                       <th className="py-2 pr-4 font-medium">Unit</th>
                       <th className="py-2 pr-4 font-medium">Issue</th>
                       <th className="py-2 pr-4 font-medium">Owner</th>
@@ -242,10 +242,10 @@ function ResultsManagementPanel({ workflows = [], onOpenWorkflows, onOpenAnalyti
                   </thead>
                   <tbody>
                     {flaggedRows.map((row) => (
-                      <tr key={`${row.code}-${row.issue}`} className="border-b border-slate-50">
+                      <tr key={`${row.code}-${row.issue}`} className="border-b border-slate-200/80">
                         <td className="py-3 pr-4 font-medium text-slate-800">{row.code}</td>
-                        <td className="py-3 pr-4 text-slate-600">{row.issue}</td>
-                        <td className="py-3 pr-4 text-slate-600">{row.owner}</td>
+                        <td className="py-3 pr-4 text-slate-700">{row.issue}</td>
+                        <td className="py-3 pr-4 text-slate-700">{row.owner}</td>
                         <td className="py-3">
                           <span
                             className={[
@@ -265,15 +265,15 @@ function ResultsManagementPanel({ workflows = [], onOpenWorkflows, onOpenAnalyti
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <div className="text-sm font-semibold text-slate-700">Administrative Focus</div>
+            <div className="rounded-2xl border border-slate-300/70 p-4">
+              <div className="text-sm font-semibold text-slate-800">Administrative Focus</div>
               <div className="mt-3 space-y-3">
                 <div className="rounded-xl bg-slate-50 p-3">
                   <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
                     <GraduationCap size={16} />
                     Approval Queue
                   </div>
-                  <div className="mt-1 text-sm text-slate-500">
+                  <div className="mt-1 text-sm text-slate-700">
                     Review bottlenecks affecting semester reporting timelines.
                   </div>
                 </div>
@@ -767,7 +767,7 @@ function UserManagementPanel() {
               <div className="mt-3 overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-100 text-left text-slate-500">
+                    <tr className="border-b border-slate-200 text-left text-slate-600">
                       <th className="py-2 pr-4 font-medium">Name</th>
                       <th className="py-2 pr-4 font-medium">Role</th>
                       <th className="py-2 pr-4 font-medium">Status</th>
@@ -776,9 +776,9 @@ function UserManagementPanel() {
                   </thead>
                   <tbody>
                     {users.map((user) => (
-                      <tr key={`${user.name}-${user.role}`} className="border-b border-slate-50">
+                      <tr key={`${user.name}-${user.role}`} className="border-b border-slate-200/80">
                         <td className="py-3 pr-4 font-medium text-slate-800">{user.name}</td>
-                        <td className="py-3 pr-4 text-slate-600">{user.role}</td>
+                        <td className="py-3 pr-4 text-slate-700">{user.role}</td>
                         <td className="py-3 pr-4">
                           <span
                             className={[
@@ -791,7 +791,7 @@ function UserManagementPanel() {
                             {user.status}
                           </span>
                         </td>
-                        <td className="py-3 text-slate-600">{user.area}</td>
+                        <td className="py-3 text-slate-700">{user.area}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1211,12 +1211,12 @@ function AuditLogsPanel() {
 
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                   value={filterText}
                   onChange={(e) => setFilterText(e.target.value)}
                   placeholder="Search logs..."
-                  className="rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm outline-none focus:border-sky-300"
+                  className="rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-500 focus:border-sky-300"
                 />
               </div>
 
@@ -1434,7 +1434,7 @@ function SettingsPanel({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-lg font-semibold text-slate-900">Department Settings</div>
-              <div className="text-sm text-slate-500">
+              <div className="text-sm text-slate-600">
                 Review institution identity, communication defaults, AI behavior, and reporting preferences.
               </div>
             </div>
@@ -1448,38 +1448,38 @@ function SettingsPanel({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <label className="space-y-1">
-                  <div className="text-sm text-slate-500">Department name</div>
+                  <div className="text-sm text-slate-700">Department name</div>
                   <input
                     value={form.departmentName}
                     onChange={(e) => updateField("departmentName", e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-300"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-300"
                   />
                 </label>
 
                 <label className="space-y-1">
-                  <div className="text-sm text-slate-500">Institution</div>
+                  <div className="text-sm text-slate-700">Institution</div>
                   <input
                     value={form.institutionName}
                     onChange={(e) => updateField("institutionName", e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-300"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-300"
                   />
                 </label>
 
                 <label className="space-y-1 md:col-span-2">
-                  <div className="text-sm text-slate-500">Notification email</div>
+                  <div className="text-sm text-slate-700">Notification email</div>
                   <input
                     value={form.notificationEmail}
                     onChange={(e) => updateField("notificationEmail", e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-300"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-300"
                   />
                 </label>
 
                 <label className="space-y-1">
-                  <div className="text-sm text-slate-500">Language</div>
+                  <div className="text-sm text-slate-700">Language</div>
                   <select
                     value={form.language}
                     onChange={(e) => updateField("language", e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-300"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-300"
                   >
                     <option>English</option>
                     <option>Swahili</option>
@@ -1663,7 +1663,7 @@ function ProfilePanel({ settingsData = null }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-lg font-semibold text-slate-900">Administrative Profile</div>
-              <div className="text-sm text-slate-500">
+              <div className="text-sm text-slate-600">
                 Review account identity, role scope, department placement, and operational footprint.
               </div>
             </div>
@@ -1679,7 +1679,7 @@ function ProfilePanel({ settingsData = null }) {
                 </div>
                 <div>
                   <div className="text-lg font-semibold text-slate-900">{profile.name}</div>
-                  <div className="text-sm text-slate-500">{profile.role}</div>
+                  <div className="text-sm text-slate-600">{profile.role}</div>
                 </div>
               </div>
 
@@ -1689,7 +1689,7 @@ function ProfilePanel({ settingsData = null }) {
                     <Building2 size={16} />
                     Institution
                   </div>
-                  <div className="mt-1 text-sm text-slate-500">{profile.institution}</div>
+                  <div className="mt-1 text-sm text-slate-600">{profile.institution}</div>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-3">
@@ -1697,7 +1697,7 @@ function ProfilePanel({ settingsData = null }) {
                     <Briefcase size={16} />
                     Department
                   </div>
-                  <div className="mt-1 text-sm text-slate-500">{profile.department}</div>
+                  <div className="mt-1 text-sm text-slate-600">{profile.department}</div>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-3">
@@ -1705,7 +1705,7 @@ function ProfilePanel({ settingsData = null }) {
                     <Mail size={16} />
                     Email
                   </div>
-                  <div className="mt-1 text-sm text-slate-500">{profile.email}</div>
+                  <div className="mt-1 text-sm text-slate-600">{profile.email}</div>
                 </div>
               </div>
             </div>
@@ -1819,6 +1819,7 @@ export default function AdminAnalyticsLanding({ userRole }) {
   const actorId = auth?.currentUser?.uid || "admin-local";
   const allItems = useMemo(() => GROUPS.flatMap((g) => g.items), []);
   const pageTitle = allItems.find((i) => i[0] === active)?.[1] || "Analytics";
+  const isDesktopShellViewport = typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
   const filteredGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return GROUPS;
@@ -2012,23 +2013,51 @@ export default function AdminAnalyticsLanding({ userRole }) {
   const attendanceMenuItems = [{ key: "new", label: "New", children: [{ key: "new-doc", label: "Documents", onClick: () => console.log("New document") }, { key: "new-template", label: "From a template", onClick: () => console.log("From template") }] }, { type: "separator" }, { key: "copy", label: "Make a copy", onClick: () => console.log("copy") }, { key: "share", label: "Share", children: [{ key: "share-others", label: "Share to others", onClick: () => console.log("share") }, { key: "publish-web", label: "Publish to web", onClick: () => console.log("publish") }] }, { key: "email", label: "Email", children: [{ key: "email-file", label: "Email this file", onClick: () => console.log("email file") }, { key: "email-collab", label: "Email collaborators", onClick: () => console.log("email collab") }] }, { key: "rename", label: "Rename", onClick: () => console.log("rename") }, { key: "move", label: "Move", children: [{ key: "move-notebook", label: "notebook", onClick: () => console.log("move notebook") }, { key: "move-newchat", label: "newchat", onClick: () => console.log("move newchat") }] }, { key: "shortcut", label: "Add shortcut to Drive", onClick: () => console.log("shortcut") }, { key: "trash", label: "Move to trash", onClick: () => console.log("trash") }, { key: "page-setup", label: "Page setup", onClick: () => console.log("setup") }, { key: "print", label: "Print", onClick: () => console.log("print") }, { key: "language", label: "Language", onClick: () => console.log("language") }, { key: "security", label: "Security limitations", onClick: () => console.log("security") }, { key: "details", label: "Details", onClick: () => console.log("details") }];
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-slate-100 text-slate-900">
-      <header className="fixed inset-x-0 top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-3 py-2.5 md:px-6 md:py-3">
-          <div className="hidden md:grid md:grid-cols-[180px_minmax(0,1fr)_200px] md:items-center md:gap-4">
-            <div className="text-base font-semibold">{pageTitle}</div>
-            <div className="relative">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search admin modules..." className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none" />
-              {searchMatches.length > 0 ? <div className="absolute left-0 right-0 top-11 z-20 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">{searchMatches.map(([key, label]) => <button key={key} onClick={() => { setActive(key); setSearch(""); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">{label}</button>)}</div> : null}
+    <div className="h-[100dvh] overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#f8fafc_22%,#f1f5f9_100%)] text-slate-900">
+      <header className="fixed inset-x-0 top-0 z-30 px-3 pt-2 md:px-5">
+        <div className="mx-auto max-w-[1400px] px-0 py-1 md:py-0">
+          <div className="md:hidden space-y-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMobileMenu(true)}
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-[18px] border border-slate-900/15 bg-white/78 text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.06)]"
+                title="Open admin menu"
+              >
+                <PanelLeftOpen size={18} />
+              </button>
+              <div className="min-w-0 flex-1 px-1 py-1">
+                <div className="truncate text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Admin Workspace</div>
+                <div className="truncate text-[15px] font-semibold text-slate-900">{pageTitle}</div>
+              </div>
+              <button onClick={() => { setNotifOpen((v) => !v); setProfileOpen(false); }} className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-slate-900/15 bg-white/78 text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.06)]" title="Notifications"><Bell size={17} /></button>
+              <button onClick={() => { setProfileOpen((v) => !v); setNotifOpen(false); }} className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-slate-900/15 bg-white/78 text-xs font-semibold text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.06)]" title="Profile">A</button>
             </div>
-            <div className="justify-self-end flex items-center gap-2">
-              <button onClick={() => { setNotifOpen((v) => !v); setProfileOpen(false); }} className="h-8 w-8 rounded-full border border-slate-200 bg-white grid place-items-center"><Bell size={15} /></button>
-              <button onClick={() => { setProfileOpen((v) => !v); setNotifOpen(false); }} className="h-8 w-8 rounded-full border border-slate-200 bg-white grid place-items-center text-xs font-semibold">A</button>
+            <div className="relative max-w-[520px]">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search admin modules..." className="h-10 w-full rounded-full border border-slate-900/12 bg-white/74 pl-9 pr-4 text-sm text-slate-900 shadow-[0_8px_20px_rgba(15,23,42,0.05)] outline-none placeholder:text-slate-500 focus:border-slate-900/18 focus:ring-2 focus:ring-slate-200" />
+              {searchMatches.length > 0 ? <div className="absolute left-0 right-0 top-12 z-20 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[0_18px_42px_rgba(15,23,42,0.12)]">{searchMatches.map(([key, label]) => <button key={key} onClick={() => { setActive(key); setSearch(""); }} className="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50">{label}</button>)}</div> : null}
             </div>
           </div>
-          {notifOpen ? <div className="absolute right-3 mt-2 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-lg md:right-6"><div className="rounded-lg px-2 py-2 text-sm hover:bg-slate-50"><div className="font-semibold">Pending approvals</div><div className="text-xs text-slate-500">2 workflow items waiting for approval.</div></div></div> : null}
-          {profileOpen ? <div className="absolute right-3 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg md:right-6"><button onClick={() => { setActive("profile"); setProfileOpen(false); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Profile</button><button onClick={() => openDesktopSettingsLauncher(desktopSettingsTriggerRef.current)} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Settings</button><button onClick={() => { setProfileOpen(false); window.location.href = "/login?returnTo=%2Finstitution"; }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 inline-flex items-center gap-2"><LogOut size={14} />Logout</button></div> : null}
+          <div className={["hidden md:grid md:items-center md:gap-4", active === "chat" ? "md:grid-cols-[minmax(0,1fr)_auto]" : "md:grid-cols-[220px_minmax(0,1fr)_auto]"].join(" ")}>
+            {active === "chat" ? null : (
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Admin Workspace</div>
+                <div className="truncate text-base font-semibold text-slate-900">{pageTitle}</div>
+              </div>
+            )}
+            <div className="relative w-full max-w-[560px] justify-self-end xl:max-w-[640px]">
+              <Search size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search admin modules..." className="h-10 w-full rounded-full border border-slate-900/12 bg-white/74 pl-10 pr-4 text-sm text-slate-900 shadow-[0_8px_20px_rgba(15,23,42,0.05)] outline-none placeholder:text-slate-500 focus:border-slate-900/18 focus:ring-2 focus:ring-slate-200" />
+              {searchMatches.length > 0 ? <div className="absolute left-0 right-0 top-12 z-20 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[0_18px_42px_rgba(15,23,42,0.12)]">{searchMatches.map(([key, label]) => <button key={key} onClick={() => { setActive(key); setSearch(""); }} className="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50">{label}</button>)}</div> : null}
+            </div>
+            <div className="justify-self-end flex items-center gap-2">
+              <button onClick={() => { setNotifOpen((v) => !v); setProfileOpen(false); }} className="grid h-9 w-9 place-items-center rounded-full border border-slate-900/15 bg-white/78 text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.06)] hover:bg-white/90"><Bell size={15} /></button>
+              <button onClick={() => { setProfileOpen((v) => !v); setNotifOpen(false); }} className="grid h-9 w-9 place-items-center rounded-full border border-slate-900/15 bg-white/78 text-xs font-semibold text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.06)] hover:bg-white/90">A</button>
+            </div>
+          </div>
+          {notifOpen ? <div className="absolute right-3 top-[calc(100%+10px)] z-30 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_42px_rgba(15,23,42,0.14)] md:right-4"><div className="rounded-xl px-3 py-2.5 text-sm hover:bg-slate-50"><div className="font-semibold text-slate-900">Pending approvals</div><div className="text-xs text-slate-500">2 workflow items waiting for approval.</div></div></div> : null}
+          {profileOpen ? <div className="absolute right-3 top-[calc(100%+10px)] z-30 w-56 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[0_18px_42px_rgba(15,23,42,0.14)] md:right-4"><button onClick={() => { setActive("profile"); setProfileOpen(false); }} className="w-full rounded-xl px-3 py-2.5 text-left text-sm hover:bg-slate-50">Profile</button><button onClick={() => openDesktopSettingsLauncher(desktopSettingsTriggerRef.current)} className="w-full rounded-xl px-3 py-2.5 text-left text-sm hover:bg-slate-50">Settings</button><button onClick={() => { setProfileOpen(false); window.location.href = "/login?returnTo=%2Finstitution"; }} className="inline-flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"><LogOut size={14} />Logout</button></div> : null}
         </div>
       </header>
       <DesktopSettingsLauncher
@@ -2038,20 +2067,40 @@ export default function AdminAnalyticsLanding({ userRole }) {
         onSelectSection={handleDesktopSettingsSectionSelect}
       />
 
-      <div className="mx-auto max-w-7xl overflow-hidden px-3 py-3 md:px-6 md:py-4" style={{ marginTop: `${HEADER_H}px`, height: `calc(100dvh - ${HEADER_H}px)` }}>
-        <div className="grid h-full grid-cols-12 gap-4 md:gap-6">
-          <aside className={`col-span-12 overflow-hidden ${sidebarCollapsed ? "lg:col-span-2" : "lg:col-span-3"}`}>
-            <div className="h-full rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col overflow-hidden">
-              <div className="border-b border-slate-200 px-3 py-2.5 flex items-center justify-between"><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{sidebarCollapsed ? "Menu" : "Admin Modules"}</div><button onClick={() => setSidebarCollapsed((v) => !v)} className="hidden h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 lg:inline-flex">{sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}</button></div>
-              <nav className={["min-h-0 flex-1 overflow-y-auto p-3 space-y-3", mobileMenu ? "block" : "hidden lg:block"].join(" ")}>{filteredGroups.map((group) => <div key={group.title} className="space-y-1.5">{!sidebarCollapsed ? <div className="px-2 text-[10px] uppercase tracking-wide font-semibold text-slate-400">{group.title}</div> : null}{group.items.map(([key, label, Icon]) => <button key={key} ref={key === "settings" ? desktopSettingsTriggerRef : undefined} onClick={(event) => { if (key === "settings") { openDesktopSettingsLauncher(event.currentTarget); return; } setActive(key); setMobileMenu(false); }} title={sidebarCollapsed ? label : undefined} className={["w-full rounded-xl border px-3 py-2 text-left text-sm transition", sidebarCollapsed ? "flex items-center justify-center px-2" : "", active === key ? "border-sky-500 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"].join(" ")}><span className="inline-flex items-center gap-2"><Icon size={15} />{!sidebarCollapsed ? label : null}</span></button>)}</div>)}</nav>
+      {mobileMenu ? (
+        <div className="fixed inset-0 z-[29] bg-slate-950/24 backdrop-blur-[2px] md:hidden" onClick={() => setMobileMenu(false)} />
+      ) : null}
+
+      <div className="mx-auto max-w-[1400px] overflow-hidden px-3 pt-0 pb-3 md:px-5 md:pb-4" style={{ marginTop: `${HEADER_H - 4}px`, height: `calc(100dvh - ${HEADER_H - 4}px)` }}>
+        <div className="h-full min-h-0 md:flex md:gap-4">
+          <aside className={["fixed inset-y-0 left-0 z-40 w-[286px] max-w-[88vw] px-3 py-3 transition-transform duration-300 md:static md:inset-auto md:z-auto md:max-w-none md:px-0 md:py-0 md:h-full md:min-h-0 md:shrink-0", mobileMenu ? "translate-x-0" : "-translate-x-full md:translate-x-0", sidebarCollapsed ? "md:w-[74px]" : "md:w-[272px]"].join(" ")}>
+            <div className="h-full rounded-[28px] border border-slate-900/15 bg-slate-50/90 shadow-[0_10px_22px_rgba(15,23,42,0.05)] backdrop-blur-sm flex flex-col overflow-hidden">
+              <div className="relative flex items-center justify-between border-b border-slate-900/15 bg-slate-50/95 px-3 py-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{sidebarCollapsed ? "Menu" : "Admin Workspace"}</div>
+                  {!sidebarCollapsed ? <div className="truncate text-[15px] font-semibold text-slate-900">Institution Admin</div> : null}
+                </div>
+                <button onClick={() => (isDesktopShellViewport ? setSidebarCollapsed((v) => !v) : setMobileMenu(false))} className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-900/15 bg-white/92 text-slate-600 hover:bg-slate-100">{isDesktopShellViewport ? (sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />) : <PanelLeftClose size={14} />}</button>
+              </div>
+              {!sidebarCollapsed ? (
+                <div className="px-3 pt-3 pb-1">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search admin modules..." className="h-9 w-full rounded-xl border border-slate-900/15 bg-white/72 pl-9 pr-3 text-[13px] text-slate-900 outline-none placeholder:text-slate-500 focus:border-slate-900/25 focus:ring-2 focus:ring-slate-200" />
+                  </div>
+                </div>
+              ) : null}
+              <nav className="min-h-0 flex-1 overflow-y-auto p-2.5 pb-4 space-y-3">
+                {filteredGroups.map((group) => <div key={group.title} className="space-y-1.5">{!sidebarCollapsed ? <div className="px-3 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{group.title}</div> : null}{group.items.map(([key, label, Icon]) => <button key={key} ref={key === "settings" ? desktopSettingsTriggerRef : undefined} onClick={(event) => { if (key === "settings") { openDesktopSettingsLauncher(event.currentTarget); return; } setActive(key); setMobileMenu(false); }} title={sidebarCollapsed ? label : undefined} className={["w-full rounded-xl px-3 py-2.5 text-left text-sm transition-colors duration-200", sidebarCollapsed ? "flex items-center justify-center px-2.5" : "flex items-center gap-3", active === key ? "bg-slate-900 text-white shadow-[0_8px_18px_rgba(15,23,42,0.18)]" : "text-slate-900 hover:bg-white/70"].join(" ")}><span className={["text-base", active === key ? "text-white" : "text-slate-700"].join(" ")}><Icon size={18} strokeWidth={2.1} /></span>{!sidebarCollapsed ? label : null}</button>)}</div>)}
+              </nav>
             </div>
           </aside>
 
-          <main className={`col-span-12 min-h-0 overflow-hidden ${sidebarCollapsed ? "lg:col-span-10" : "lg:col-span-9"}`}>
-            <div className={["h-full rounded-2xl border border-slate-200 bg-white shadow-sm", active === "chat" ? "overflow-hidden p-0" : "overflow-y-auto p-4 space-y-4"].join(" ")}>
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden flex flex-col">
+            <div className={["h-full min-h-0 flex flex-col", active === "chat" ? "overflow-hidden" : "overflow-y-auto pt-0 pb-2 space-y-4"].join(" ")}>
               {active === "analytics" ? <><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{analyticsKpi.map(([l, v]) => <Card key={l} title={l} subtitle=""><div className="text-2xl font-bold">{v}</div></Card>)}</div>{analyticsError ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">{analyticsError}</div> : null}<Card title="Workflow Snapshot" subtitle="Operations at a glance"><div className="grid grid-cols-2 gap-2 md:grid-cols-3"><Summary label="Total" value={summary.total} Icon={ClipboardCheck} /><Summary label="Pending" value={summary.pending} Icon={Clock3} /><Summary label="In review" value={summary.review} Icon={FileCheck2} /><Summary label="Resolved" value={summary.resolved} Icon={ClipboardCheck} /><Summary label="Comm unlocked" value={summary.comm} Icon={ClipboardCheck} /></div></Card><Card title="Supervised AI Rule" subtitle="Human-in-the-loop safety"><div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{AI_RULE}</div></Card></> : null}
               {active === "chat" ? (
-                <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                <div className="h-full min-h-0 flex-1 overflow-hidden">
                   <NewChatLanding
                     active="chat"
                     chatMode="admin"

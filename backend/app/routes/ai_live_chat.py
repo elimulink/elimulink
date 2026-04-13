@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.services.live_chat_service import generate_live_chat_reply
+from ..services.live_chat_service import generate_live_chat_reply
 
 router = APIRouter(prefix="/api/v1/ai", tags=["ai-live-chat"])
 

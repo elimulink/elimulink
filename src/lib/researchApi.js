@@ -65,7 +65,7 @@ async function apiFetch(path, options = {}) {
 
 async function apiFetchWithAuth(path, options = {}) {
   const currentUser = auth?.currentUser || null;
-  const token = currentUser ? await currentUser.getIdToken() : "";
+  const token = currentUser ? await currentUser.getIdToken(true).catch(() => "") : "";
   return apiFetch(path, {
     ...options,
     headers: {
@@ -77,7 +77,7 @@ async function apiFetchWithAuth(path, options = {}) {
 
 async function apiFetchBlobWithAuth(path, options = {}) {
   const currentUser = auth?.currentUser || null;
-  const token = currentUser ? await currentUser.getIdToken() : "";
+  const token = currentUser ? await currentUser.getIdToken(true).catch(() => "") : "";
   const response = await fetch(apiUrl(path), {
     headers: {
       ...(options.headers || {}),

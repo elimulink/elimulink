@@ -20,6 +20,7 @@ from ..services.auth_service import resolve_app_type, resolve_role, resolve_user
 from ..services.assistant_style import normalize_assistant_style
 from ..services.compound_question import analyze_compound_question, build_compound_request_context
 from ..services.memory_service import get_recent_history
+from ..services.prompt_builder import build_context_prompt
 from ..repositories.chat_repository import create_session, get_session, save_message
 from ..services.intent_router import detect_intent
 from ..utils.ids import new_session_id
@@ -107,8 +108,26 @@ def _is_light_simple_prompt(message: str) -> bool:
     return True
 
 
+def _stream_history_limit(message: str, session_exists: bool) -> int:
+    if not session_exists:
+        return 0 if _is_light_simple_prompt(message) else 3
+    return 2 if _is_light_simple_prompt(message) else 4
+
+
 def _sse_event(event_name: str, payload: dict) -> str:
     return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _request_metadata_from_payload(payload: AIChatRequest, original_message: str = "") -> dict:
+    return {
+        "originalMessage": str(original_message or "").strip(),
+        "normalizedMessage": str(payload.normalizedMessage or "").strip(),
+        "topic": str(payload.topic or "").strip(),
+        "followUp": bool(payload.followUp),
+        "followUpType": str(payload.followUpType or "").strip(),
+        "targetLanguage": str(payload.targetLanguage or "").strip(),
+        "previousAssistantMessage": str(payload.previousAssistantMessage or "").strip(),
+    }
 
 
 @router.post("/api/ai/chat")
@@ -134,20 +153,208 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
     user = user or CurrentUser(uid="public", role="public")
     rate_limit(user.uid, limit=15, window_sec=60)
     payload = AIChatRequest(**(body or {}))
+    request_metadata = _request_metadata_from_payload(payload, original_message=str((body or {}).get("message") or ""))
     trace_id = getattr(request.state, "request_id", None)
-    stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}
+    request_received_at = perf_counter()
+    print(
+        f"[AI_TIMING] rid={trace_id or 'none'} stage=backend_request_received ms={int((perf_counter() - request_received_at) * 1000)} endpoint=/api/ai/chat",
+        flush=True,
+    )
+    stream_requested = (
+        str(request.query_params.get("stream", "")).strip().lower() in {"1", "true", "yes"}
+        or bool(payload.stream)
+    )
+    current_session_id = payload.session_id or new_session_id()
+    intent = detect_intent(message)
+    resolved_app_type = resolve_app_type(
+        payload.app_type or ("institution" if _is_institution_request(body or {}) else None)
+    )
+
+    if stream_requested and intent == "general_chat":
+        async def event_stream() -> object:
+            started_at = perf_counter()
+            first_chunk_at = None
+            prompt_ready_at = None
+            yield _sse_event("start", {"ok": True})
+
+            with get_db() as db:
+                session_exists = bool(get_session(db, current_session_id))
+                simple_fast_prompt = _is_light_simple_prompt(message)
+                ultra_short_greeting_reply = _get_ultra_short_greeting_reply(message) if simple_fast_prompt else None
+                history_limit = 0 if ultra_short_greeting_reply else _stream_history_limit(message, session_exists)
+                history_started = perf_counter()
+                history = get_recent_history(db, current_session_id, limit=history_limit) if history_limit else []
+                print(
+                    f"[AI_TIMING] rid={trace_id or 'none'} stage=history_fetch ms={int((perf_counter() - history_started) * 1000)} "
+                    f"endpoint=/api/ai/chat count={len(history)} limit={history_limit}",
+                    flush=True,
+                )
+
+                user_saved = False
+
+                def ensure_session_and_user_saved() -> None:
+                    nonlocal user_saved
+                    if user_saved:
+                        return
+                    if not session_exists and not get_session(db, current_session_id):
+                        create_session(
+                            db,
+                            current_session_id,
+                            getattr(user, "uid", None) or "public",
+                            resolved_app_type,
+                            getattr(user, "institution_id", None),
+                            title="New Chat",
+                        )
+                    save_message(db, current_session_id, "user", message, intent=intent, tool_used=None)
+                    user_saved = True
+
+                if ultra_short_greeting_reply:
+                    first_chunk_at = perf_counter()
+                    print(
+                        f"[AI_TIMING] rid={trace_id or 'none'} stage=first_chunk ms={int((first_chunk_at - started_at) * 1000)} "
+                        f"endpoint=/api/ai/chat stream=true fast_greeting=true",
+                        flush=True,
+                    )
+                    yield _sse_event("chunk", {"delta": ultra_short_greeting_reply})
+                    ensure_session_and_user_saved()
+                    save_message(
+                        db,
+                        current_session_id,
+                        "assistant",
+                        ultra_short_greeting_reply,
+                        intent=f"{intent}:FAST_GREETING",
+                        tool_used=None,
+                    )
+                    yield _sse_event(
+                        "done",
+                        {
+                            "text": ultra_short_greeting_reply,
+                            "session_id": current_session_id,
+                            "intent": f"{intent}:FAST_GREETING",
+                            "tool_used": None,
+                        },
+                    )
+                    return
+
+                prompt_started = perf_counter()
+                prompt = (
+                    f"USER_MESSAGE:\n{message}"
+                    if simple_fast_prompt and not history
+                    else build_context_prompt(message, intent, None, history, request_metadata=request_metadata)
+                )
+                prompt_ready_at = perf_counter()
+                print(
+                    f"[AI_TIMING] rid={trace_id or 'none'} stage=pre_stream_ready ms={int((prompt_ready_at - started_at) * 1000)} "
+                    f"endpoint=/api/ai/chat simple={str(simple_fast_prompt).lower()} history={len(history)} chars={len(prompt)}",
+                    flush=True,
+                )
+
+                context = {
+                    "app_type": resolved_app_type,
+                    "role": resolve_role(user),
+                    "tool_data": {},
+                    "history": history,
+                    "assistantStyle": assistant_style,
+                }
+
+                accumulated_text = ""
+                try:
+                    async for delta in stream_gemini_text(
+                        prompt,
+                        context,
+                        mode=mode,
+                        workspace_context=workspace_context if isinstance(workspace_context, dict) else {},
+                        assistant_style=normalize_assistant_style(payload.assistantStyle or assistant_style),
+                    ):
+                        if first_chunk_at is None:
+                            first_chunk_at = perf_counter()
+                            print(
+                                f"[AI_TIMING] rid={trace_id or 'none'} stage=first_chunk ms={int((first_chunk_at - started_at) * 1000)} "
+                                f"endpoint=/api/ai/chat stream=true",
+                                flush=True,
+                            )
+                            ensure_session_and_user_saved()
+                        accumulated_text += delta
+                        yield _sse_event("chunk", {"delta": delta})
+                except Exception as exc:  # noqa: BLE001
+                    if str(exc) == "MISSING_PROVIDER_KEY":
+                        yield _sse_event("error", {"message": "AI provider key is missing."})
+                        return
+                    if is_provider_quota_error(str(exc)):
+                        fallback_text = provider_busy_response()
+                        accumulated_text = fallback_text
+                        if first_chunk_at is None:
+                            first_chunk_at = perf_counter()
+                        yield _sse_event("chunk", {"delta": fallback_text})
+                        ensure_session_and_user_saved()
+                        save_message(
+                            db,
+                            current_session_id,
+                            "assistant",
+                            fallback_text,
+                            intent=f"{intent}:PROVIDER_RATE_LIMIT",
+                            tool_used=None,
+                        )
+                        yield _sse_event(
+                            "done",
+                            {
+                                "text": fallback_text,
+                                "session_id": current_session_id,
+                                "intent": f"{intent}:PROVIDER_RATE_LIMIT",
+                                "tool_used": None,
+                            },
+                        )
+                        return
+                    yield _sse_event("error", {"message": str(exc)})
+                    return
+
+                final_text = accumulated_text.strip() or "I couldn't generate a response."
+                ensure_session_and_user_saved()
+                save_message(
+                    db,
+                    current_session_id,
+                    "assistant",
+                    final_text,
+                    intent=intent,
+                    tool_used=None,
+                )
+                print(
+                    f"[AI_TIMING] rid={trace_id or 'none'} stage=stream_end ms={int((perf_counter() - started_at) * 1000)} "
+                    f"endpoint=/api/ai/chat stream=true chars={len(final_text)}",
+                    flush=True,
+                )
+                yield _sse_event(
+                    "done",
+                    {
+                        "text": final_text,
+                        "session_id": current_session_id,
+                        "intent": intent,
+                        "tool_used": None,
+                    },
+                )
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     try:
         with get_db() as db:
             answer, session_id, intent, tool_used = await run_orchestrator(
                 db,
                 user,
-                payload.message,
+                message,
                 payload.session_id,
                 payload.app_type,
                 mode=mode,
                 workspace_context=workspace_context if isinstance(workspace_context, dict) else {},
                 assistant_style=normalize_assistant_style(payload.assistantStyle or assistant_style),
+                request_metadata=request_metadata,
             )
     except Exception as exc:  # noqa: BLE001
         if str(exc) == "MISSING_PROVIDER_KEY":
@@ -166,7 +373,6 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
         detail = str(exc) if str((os.getenv("APP_ENV") or os.getenv("ENV") or "")).strip().lower() != "production" else None
         return err_response("PROVIDER_ERROR", 502, detail)
 
-    stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}
     if stream_requested:
         async def event_stream() -> object:
             # First event confirms stream readiness.
@@ -184,7 +390,10 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
                 yield f"event: chunk\ndata: {payload_chunk}\n\n"
                 await asyncio.sleep(0.01)
 
-            payload_done = json.dumps({"text": text}, ensure_ascii=False)
+            payload_done = json.dumps(
+                {"text": text, "session_id": session_id, "intent": intent, "tool_used": tool_used},
+                ensure_ascii=False,
+            )
             print(
                 f"[AI_TIMING] rid={trace_id or 'none'} stage=stream_wrapper_end ms={int((perf_counter() - started_at) * 1000)}",
                 flush=True,
@@ -245,6 +454,7 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
     )
     rate_limit(user.uid, limit=15, window_sec=60)
     payload = AIChatRequest(**(body or {}))
+    request_metadata = _request_metadata_from_payload(payload, original_message=str((body or {}).get("message") or ""))
     trace_id = getattr(request.state, "request_id", None)
     current_session_id = payload.session_id or new_session_id()
     intent = detect_intent(message)
@@ -325,15 +535,13 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                     )
                     yield _sse_event("done", {"text": ultra_short_greeting_reply, "intent": f"{intent}:FAST_GREETING"})
                     return
-                compound_context = build_compound_request_context(message) if history_limit else ""
-                prompt_parts = []
-                if compound_context:
-                    prompt_parts.append(compound_context)
-                if history:
-                    history_text = "\n".join(f"{item['role']}: {item['content']}" for item in history)
-                    prompt_parts.append(f"HISTORY:\n{history_text}")
-                prompt_parts.append(f"USER_MESSAGE:\n{message}")
-                prompt = "\n\n".join(prompt_parts)
+                prompt = build_context_prompt(
+                    message,
+                    intent,
+                    None,
+                    history,
+                    request_metadata=request_metadata,
+                )
                 print(
                     f"[AI_TIMING] rid={trace_id or 'none'} stage=prompt_build ms={int((perf_counter() - prompt_started) * 1000)} "
                     f"chars={len(prompt)} endpoint=/api/ai/student",
@@ -429,9 +637,10 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
         answer, session_id, intent, tool_used = await run_orchestrator(
             db,
             user,
-            payload.message,
+            message,
             payload.session_id,
             payload.app_type or "student",
+            request_metadata=request_metadata,
         )
 
     return ok_response(
