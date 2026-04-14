@@ -587,13 +587,13 @@ function isInstitutionSimplePrompt(text, attachments = []) {
   const clean = String(text || "").trim();
   if (!clean) return false;
   if ((Array.isArray(attachments) ? attachments.length : 0) > 0) return false;
-  if (clean.length > 160) return false;
+  if (clean.length > 220) return false;
   if (/\n/.test(clean)) return false;
   if (/[/:]/.test(clean)) return false;
   if (/\b(?:http|www\.|attach|upload|image|photo|diagram|chart|pdf|file|citation|source|sources|research paper|references?)\b/i.test(clean)) return false;
-  if (/\b(?:compare|contrast|analyze critically|with citations|latest research|journal|scholar|dataset|table|markdown|code block)\b/i.test(clean)) return false;
+  if (/\b(?:compare|contrast|analyze critically|with citations|latest research|journal|scholar|dataset|table|markdown|code block|bibliography|peer reviewed|literature review|case study|methodology|research questions?)\b/i.test(clean)) return false;
   const wordCount = clean.split(/\s+/).filter(Boolean).length;
-  if (wordCount > 28) return false;
+  if (wordCount > 32) return false;
   return /^[a-z0-9 ,.!?'()-]+$/i.test(clean);
 }
 

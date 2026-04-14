@@ -94,12 +94,24 @@ def _is_light_simple_prompt(message: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(message or "").strip().lower())
     if not normalized or "\n" in normalized:
         return False
-    if len(normalized) > 110:
+    if len(normalized) > 220:
+        return False
+    if re.search(r"[/:]", normalized):
+        return False
+    if re.search(
+        r"\b(?:http|www\.|attach|upload|image|photo|diagram|chart|pdf|file|citation|source|sources|research paper|references?)\b",
+        normalized,
+    ):
         return False
     word_count = len(re.findall(r"[a-z0-9']+", normalized))
-    if word_count == 0 or word_count > 14:
+    if word_count == 0 or word_count > 32:
         return False
     if re.search(r"\b(?:then|also|compare|contrast|versus|vs|difference between|and then)\b", normalized):
+        return False
+    if re.search(
+        r"\b(?:analyze critically|with citations|latest research|journal|scholar|dataset|table|markdown|code block|bibliography|peer reviewed|literature review|case study|methodology|research questions?)\b",
+        normalized,
+    ):
         return False
     if normalized.count(";") > 0:
         return False
