@@ -15,6 +15,8 @@ import {
   Sigma,
   Table2,
 } from "lucide-react";
+import CitationChip from "../research/CitationChip.jsx";
+import SourcesDrawer from "../research/SourcesDrawer.jsx";
 import { parseAssistantResponseBlocks } from "./responseBlockParser";
 
 function blockShellClass(tone = "default") {
@@ -387,32 +389,62 @@ export function FileAttachmentBlock({ block }) {
 }
 
 export function LinkSourceBlock({ block }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerSources, setDrawerSources] = useState([]);
+  const [drawerTitle, setDrawerTitle] = useState("Sources");
+
+  const groupedSources = useMemo(() => {
+    const items = Array.isArray(block.links) ? block.links : [];
+    const groups = [];
+    const byKey = new Map();
+    items.forEach((item) => {
+      const key = String(item?.sourceName || item?.domain || item?.title || item?.url || "").trim();
+      if (!key) return;
+      if (!byKey.has(key)) {
+        const group = { key, sourceName: item.sourceName || item.domain || item.title || "Source", domain: item.domain || "", items: [] };
+        byKey.set(key, group);
+        groups.push(group);
+      }
+      byKey.get(key).items.push(item);
+    });
+    return groups;
+  }, [block.links]);
+
+  const openDrawer = (sources, title = "Sources") => {
+    setDrawerSources(Array.isArray(sources) ? sources : []);
+    setDrawerTitle(title);
+    setDrawerOpen(true);
+  };
+
   return (
     <ResponseBlockShell icon={Link2} label={block.title || "Sources"}>
-      <div className="space-y-2.5">
-        {(block.links || []).map((link, index) => (
-          <a
-            key={`${link.url}-${index}`}
-            href={link.url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-start justify-between gap-3 rounded-xl px-1 py-2 transition hover:bg-slate-50/80 dark:hover:bg-white/[0.04]"
-          >
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                {link.title || link.domain || link.url}
-              </div>
-              {link.description ? (
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600 dark:text-slate-300">{link.description}</p>
-              ) : null}
-              <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                {link.domain || "source"}
-              </div>
-            </div>
-            <ChevronRight size={16} className="mt-0.5 shrink-0 text-slate-400" />
-          </a>
-        ))}
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {groupedSources.map((group, index) => (
+            <CitationChip
+              key={group.key}
+              label={group.sourceName || group.domain || `Source ${index + 1}`}
+              countLabel={group.items.length > 0 ? `+${group.items.length}` : ""}
+              indexLabel={index >= 0 ? `[${index + 1}]` : ""}
+              onClick={() => openDrawer(group.items, group.sourceName || "Sources")}
+            />
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => openDrawer(Array.isArray(block.links) ? block.links : [], block.title || "Sources")}
+          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10 dark:hover:text-white"
+        >
+          <Link2 size={14} />
+          Sources
+        </button>
       </div>
+      <SourcesDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        title={drawerTitle}
+        sources={drawerSources}
+      />
     </ResponseBlockShell>
   );
 }

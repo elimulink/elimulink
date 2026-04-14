@@ -568,15 +568,10 @@ body {
 }
 
 .staff-entry-logo {
-  width: 54px;
+  width: auto;
   height: 54px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
+  display: block;
+  object-fit: contain;
   flex-shrink: 0;
 }
 

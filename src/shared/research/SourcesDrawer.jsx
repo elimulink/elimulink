@@ -79,6 +79,11 @@ export default function SourcesDrawer({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
+                        {source.sourceName ? (
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-white/45">
+                            {source.sourceName}
+                          </p>
+                        ) : null}
                         <p className="line-clamp-2 text-sm font-semibold leading-6 text-slate-900 dark:text-white">
                           {source.title || source.domain || `Source ${index + 1}`}
                         </p>

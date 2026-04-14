@@ -244,11 +244,13 @@ function toLinksFromText(value) {
     const href = match[2];
     if (seen.has(href)) continue;
     seen.add(href);
+    const domain = safeDomainLabel(href);
     links.push({
       title: match[1],
       url: href,
       description: "",
-      domain: safeDomainLabel(href),
+      domain,
+      sourceName: sourceNameFromDomain(domain),
     });
   }
 
@@ -257,11 +259,13 @@ function toLinksFromText(value) {
     const url = item.startsWith("http") ? item : `https://${item}`;
     if (seen.has(url)) return;
     seen.add(url);
+    const domain = safeDomainLabel(url);
     links.push({
-      title: safeDomainLabel(url),
+      title: domain,
       url,
       description: "",
-      domain: safeDomainLabel(url),
+      domain,
+      sourceName: sourceNameFromDomain(domain),
     });
   });
 
@@ -276,6 +280,26 @@ function safeDomainLabel(url) {
   }
 }
 
+function sourceNameFromDomain(domain) {
+  const raw = String(domain || "").trim().toLowerCase();
+  if (!raw) return "Source";
+  const overrides = {
+    "worldbank.org": "World Bank",
+    "un.org": "United Nations",
+    "unesco.org": "UNESCO",
+    "who.int": "WHO",
+    "wikipedia.org": "Wikipedia",
+    "britannica.com": "Britannica",
+    "example.com": "Example",
+  };
+  if (overrides[raw]) return overrides[raw];
+  const firstLabel = raw.split(".")[0] || raw;
+  return firstLabel
+    .split("-")
+    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(" ");
+}
+
 function normalizeSourceLinks(sources = []) {
   const seen = new Set();
   return (Array.isArray(sources) ? sources : [])
@@ -283,14 +307,29 @@ function normalizeSourceLinks(sources = []) {
       const url = String(source?.url || source?.href || "").trim();
       if (!url || seen.has(url)) return null;
       seen.add(url);
+      const domain = String(source?.domain || safeDomainLabel(url)).trim();
       return {
         title: String(source?.title || source?.label || safeDomainLabel(url)).trim(),
         url,
         description: String(source?.snippet || source?.description || "").trim(),
-        domain: String(source?.domain || safeDomainLabel(url)).trim(),
+        domain,
+        sourceName: String(source?.sourceName || sourceNameFromDomain(domain)).trim(),
       };
     })
     .filter(Boolean);
+}
+
+export function extractAssistantSources(text = "", sources = []) {
+  const textSources = toLinksFromText(text);
+  const normalizedSources = normalizeSourceLinks(sources);
+  const merged = [...normalizedSources, ...textSources];
+  const seen = new Set();
+  return merged.filter((item) => {
+    const key = String(item?.url || "").trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function buildTextBlock(segment, index) {

@@ -263,9 +263,7 @@ export default function StudentLoginPage({ onAuthSuccess, profileDisplayName }) 
           <div className="absolute bottom-10 right-12 h-56 w-56 rounded-full bg-blue-300/20 blur-3xl" />
           <div className="relative z-10 max-w-xl">
             <div className="inline-flex items-center gap-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-600 via-blue-600 to-teal-500 text-lg font-black tracking-[0.18em] text-white shadow-[0_24px_50px_rgba(14,116,144,0.28)]">
-                EL
-              </div>
+              <img src="/logo.png" alt="ElimuLink" className="h-14 w-auto object-contain shrink-0" />
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/80">Student Portal</div>
                 <div className="text-3xl font-semibold tracking-tight text-slate-950">ElimuLink</div>
@@ -303,9 +301,7 @@ export default function StudentLoginPage({ onAuthSuccess, profileDisplayName }) 
           <div className="w-full max-w-[29rem] overflow-hidden rounded-[30px] border border-white/70 bg-white/58 p-3 shadow-[0_30px_80px_rgba(15,23,42,0.14)] backdrop-blur-2xl lg:max-w-[31rem]">
             <div className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-[26px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.78))] px-5 py-5 sm:px-6 sm:py-6 lg:max-h-none lg:overflow-visible">
               <div className="mb-4 flex items-center gap-3 lg:hidden">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-600 via-blue-600 to-teal-500 text-sm font-black tracking-[0.16em] text-white shadow-[0_18px_40px_rgba(14,116,144,0.22)]">
-                  EL
-                </div>
+                <img src="/logo.png" alt="ElimuLink" className="h-11 w-auto object-contain shrink-0" />
                 <div>
                   <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-700/80">Student Portal</div>
                   <div className="text-lg font-semibold text-slate-950">ElimuLink</div>

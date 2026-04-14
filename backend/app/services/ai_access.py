@@ -12,6 +12,12 @@ AI_ACCESS_CACHE_TTL_SECONDS = 20
 # Temporary bridge for institution users while profile mapping is still being finalized.
 # Keep this explicit so it can be disabled by env without changing the rest of the auth flow.
 TEMP_INSTITUTION_ACCESS_ENABLED = str(os.getenv("TEMP_INSTITUTION_ACCESS_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
+TEMP_PUBLIC_EMAIL_INSTITUTION_ACCESS = str(os.getenv("TEMP_PUBLIC_EMAIL_INSTITUTION_ACCESS", "0")).strip().lower() in {"1", "true", "yes", "on"}
+TEMP_INSTITUTION_PUBLIC_EMAIL_ALLOWLIST = {
+    str(item or "").strip().lower()
+    for item in str(os.getenv("TEMP_INSTITUTION_PUBLIC_EMAIL_ALLOWLIST", "")).split(",")
+    if str(item or "").strip()
+}
 PUBLIC_EMAIL_DOMAINS = {
     "gmail.com",
     "yahoo.com",
@@ -28,6 +34,12 @@ _ACCESS_CACHE: dict[str, tuple[float, Dict[str, Any]]] = {}
 
 if TEMP_INSTITUTION_ACCESS_ENABLED:
     print("[AI_ACCESS] temporary institution access fallback is enabled")
+if TEMP_INSTITUTION_PUBLIC_EMAIL_ALLOWLIST:
+    print(
+        f"[AI_ACCESS] temporary institution public-email allowlist enabled count={len(TEMP_INSTITUTION_PUBLIC_EMAIL_ALLOWLIST)}"
+    )
+if TEMP_PUBLIC_EMAIL_INSTITUTION_ACCESS:
+    print("[AI_ACCESS] temporary institution public-email demo access is enabled")
 
 
 def _normalize_role(role: str | None, app_name: str) -> str:
@@ -66,11 +78,45 @@ def _email_domain(email: str | None) -> str:
     return value.rsplit("@", 1)[-1]
 
 
+def _normalize_email(email: str | None) -> str:
+    return str(email or "").strip().lower()
+
+
 def _is_work_email(email: str | None) -> bool:
     domain = _email_domain(email)
     if not domain:
         return False
     return domain not in PUBLIC_EMAIL_DOMAINS
+
+
+def _is_public_email(email: str | None) -> bool:
+    domain = _email_domain(email)
+    if not domain:
+        return False
+    return domain in PUBLIC_EMAIL_DOMAINS
+
+
+def _is_allowlisted_public_email(email: str | None) -> bool:
+    normalized = _normalize_email(email)
+    if not normalized:
+        return False
+    return normalized in TEMP_INSTITUTION_PUBLIC_EMAIL_ALLOWLIST
+
+
+def _is_demo_public_email(email: str | None) -> bool:
+    return TEMP_PUBLIC_EMAIL_INSTITUTION_ACCESS and _is_public_email(email)
+
+
+def _can_use_temporary_institution_access(email: str | None) -> bool:
+    return _is_work_email(email) or _is_allowlisted_public_email(email) or _is_demo_public_email(email)
+
+
+def _temporary_institution_reason(email: str | None, fallback_reason: str) -> str:
+    if _is_allowlisted_public_email(email):
+        return "approved_public_email"
+    if _is_demo_public_email(email):
+        return "public_email_demo_access"
+    return fallback_reason
 
 
 def _temporary_institution_access(uid: str, email: str, reason: str) -> Dict[str, Any]:
@@ -121,8 +167,9 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
 
     supabase = get_supabase_client()
     if supabase is None:
-        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _is_work_email(email):
-            payload = _temporary_institution_access(uid, email, "supabase_unavailable")
+        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _can_use_temporary_institution_access(email):
+            reason = _temporary_institution_reason(email, "supabase_unavailable")
+            payload = _temporary_institution_access(uid, email, reason)
             _store_cached_access(uid, app_name, payload)
             return payload
         raise HTTPException(
@@ -168,8 +215,9 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
             }
             _store_cached_access(uid, app_name, payload)
             return payload
-        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _is_work_email(email):
-            payload = _temporary_institution_access(uid, email, "missing_profile")
+        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _can_use_temporary_institution_access(email):
+            reason = _temporary_institution_reason(email, "missing_profile")
+            payload = _temporary_institution_access(uid, email, reason)
             _store_cached_access(uid, app_name, payload)
             return payload
         return _deny()
@@ -198,8 +246,10 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
         return payload
 
     if app_name not in app_access:
-        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _is_work_email(user.get("email") or email):
-            payload = _temporary_institution_access(uid, user.get("email") or email, "missing_institution_mapping")
+        resolved_email = user.get("email") or email
+        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _can_use_temporary_institution_access(resolved_email):
+            reason = _temporary_institution_reason(resolved_email, "missing_institution_mapping")
+            payload = _temporary_institution_access(uid, resolved_email, reason)
             _store_cached_access(uid, app_name, payload)
             return payload
         print(f"[AI_ACCESS] resolve:deny_missing_app uid={uid} app={app_name} access={app_access}")

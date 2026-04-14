@@ -3769,6 +3769,10 @@ export default function NewChatLanding({
           mode: "institution-fast-stream",
           sessionId: String(activeChat?.sessionId || ""),
         });
+        logInstitutionChatTiming("request_sent", timingStarted, {
+          mode: "institution-fast-stream",
+          simplePrompt: true,
+        });
 
         const streamResult = await streamAssistantReply({
           token,
@@ -4218,6 +4222,10 @@ export default function NewChatLanding({
         logInstitutionChatTiming("request_dispatched", timingStarted, {
           mode: simplePrompt ? "institution-fast-stream" : "institution-stream",
           sessionId: String(activeChat?.sessionId || ""),
+        });
+        logInstitutionChatTiming("request_sent", timingStarted, {
+          mode: simplePrompt ? "institution-fast-stream" : "institution-stream",
+          simplePrompt: Boolean(simplePrompt),
         });
 
         const streamResult = await streamAssistantReply({

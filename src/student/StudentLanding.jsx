@@ -1371,15 +1371,18 @@ export default function StudentLanding() {
       await new Promise((resolve) => requestAnimationFrame(() => resolve()));
 
       try {
-        let token = await auth?.currentUser?.getIdToken().catch(() => null);
-        if (!token) {
-          token = await auth?.currentUser?.getIdToken(true).catch(() => null);
-        }
+        logStudentChatTiming("token_fetch_start", performance.now(), { simplePrompt: true });
+        const token = await resolveWarmIdToken(auth);
+        logStudentChatTiming("token_fetch_done", performance.now(), {
+          simplePrompt: true,
+          hasToken: Boolean(token),
+        });
         if (!token) {
           finalizeStreamingAssistant(streamId, "Please sign in to use AI chat.");
           return;
         }
 
+        logStudentChatTiming("request_sent", performance.now(), { simplePrompt: true });
         const streamResult = await streamAssistantReply({
           token,
           messageText: clean,
@@ -1621,10 +1624,12 @@ export default function StudentLanding() {
     }
 
     try {
-      let token = await auth?.currentUser?.getIdToken().catch(() => null);
-      if (!token) {
-        token = await auth?.currentUser?.getIdToken(true).catch(() => null);
-      }
+      logStudentChatTiming("token_fetch_start", performance.now(), { simplePrompt: false });
+      const token = await resolveWarmIdToken(auth);
+      logStudentChatTiming("token_fetch_done", performance.now(), {
+        simplePrompt: false,
+        hasToken: Boolean(token),
+      });
       if (!token) {
         updateActiveChatMessages(
           (m) => [...m, { role: "assistant", text: "Please sign in to use AI chat." }],

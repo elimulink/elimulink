@@ -179,9 +179,11 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
             yield _sse_event("start", {"ok": True})
 
             with get_db() as db:
-                session_exists = bool(get_session(db, current_session_id))
                 ultra_short_greeting_reply = _get_ultra_short_greeting_reply(message) if simple_fast_prompt else None
-                history_limit = 0 if (ultra_short_greeting_reply or simple_fast_prompt) else _stream_history_limit(message, session_exists)
+                session_exists: bool | None = None
+                if not (ultra_short_greeting_reply or simple_fast_prompt):
+                    session_exists = bool(get_session(db, current_session_id))
+                history_limit = 0 if (ultra_short_greeting_reply or simple_fast_prompt) else _stream_history_limit(message, bool(session_exists))
                 history_started = perf_counter()
                 history = get_recent_history(db, current_session_id, limit=history_limit) if history_limit else []
                 print(
@@ -194,9 +196,12 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
 
                 def ensure_session_and_user_saved() -> None:
                     nonlocal user_saved
+                    nonlocal session_exists
                     if user_saved:
                         return
-                    if not session_exists and not get_session(db, current_session_id):
+                    if session_exists is None:
+                        session_exists = bool(get_session(db, current_session_id))
+                    if not session_exists:
                         create_session(
                             db,
                             current_session_id,
@@ -205,6 +210,7 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
                             getattr(user, "institution_id", None),
                             title="New Chat",
                         )
+                        session_exists = True
                     save_message(db, current_session_id, "user", message, intent=intent, tool_used=None)
                     user_saved = True
 
