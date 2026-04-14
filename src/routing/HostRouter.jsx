@@ -151,9 +151,11 @@ function LoadingScreen({ message = 'Verifying your workspace access and preparin
     <div className="min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef6ff_100%)] px-2 py-4 text-slate-900 sm:px-4 sm:py-6">
       <div className="mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-[30rem] items-center justify-center sm:min-h-[calc(100dvh-3rem)]">
         <div className="w-full px-4 py-6 text-center sm:px-8 sm:py-10">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-600 via-blue-600 to-teal-500 text-sm font-black tracking-[0.16em] text-white shadow-[0_18px_40px_rgba(14,116,144,0.18)]">
-            EL
-          </div>
+          <img
+            src="/logo.png"
+            alt="ElimuLink"
+            className="mx-auto h-16 w-auto object-contain sm:h-20"
+          />
           <div className="mt-4 text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-700/80 sm:mt-5 sm:text-[11px]">ElimuLink</div>
           <div className="mt-3 text-[clamp(1.45rem,5vw,1.9rem)] font-semibold tracking-tight text-slate-950 [text-shadow:0_8px_28px_rgba(255,255,255,0.72)] sm:text-xl">Restoring your session</div>
           <div className="mx-auto mt-2 max-w-[26rem] text-sm leading-6 text-slate-500 [text-shadow:0_6px_20px_rgba(255,255,255,0.6)]">

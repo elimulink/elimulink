@@ -3380,9 +3380,7 @@ export default function NotebookPage({
                     Workspace
                   </button>
                 ) : null}
-                <span className="h-7 w-7 rounded-md bg-emerald-500 text-white text-xs font-semibold inline-flex items-center justify-center shrink-0">
-                  E
-                </span>
+                <img src="/logo.png" alt="ElimuLink" className="h-7 w-auto object-contain shrink-0" />
                 <span className="text-xs font-semibold tracking-wide text-white">ElimuLink</span>
               </div>
 

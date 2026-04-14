@@ -166,11 +166,12 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
     )
     current_session_id = payload.session_id or new_session_id()
     intent = detect_intent(message)
+    simple_fast_prompt = _is_light_simple_prompt(message)
     resolved_app_type = resolve_app_type(
         payload.app_type or ("institution" if _is_institution_request(body or {}) else None)
     )
 
-    if stream_requested and intent == "general_chat":
+    if stream_requested and (intent == "general_chat" or simple_fast_prompt):
         async def event_stream() -> object:
             started_at = perf_counter()
             first_chunk_at = None
@@ -179,9 +180,8 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
 
             with get_db() as db:
                 session_exists = bool(get_session(db, current_session_id))
-                simple_fast_prompt = _is_light_simple_prompt(message)
                 ultra_short_greeting_reply = _get_ultra_short_greeting_reply(message) if simple_fast_prompt else None
-                history_limit = 0 if ultra_short_greeting_reply else _stream_history_limit(message, session_exists)
+                history_limit = 0 if (ultra_short_greeting_reply or simple_fast_prompt) else _stream_history_limit(message, session_exists)
                 history_started = perf_counter()
                 history = get_recent_history(db, current_session_id, limit=history_limit) if history_limit else []
                 print(
@@ -239,7 +239,7 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
                 prompt_started = perf_counter()
                 prompt = (
                     f"USER_MESSAGE:\n{message}"
-                    if simple_fast_prompt and not history
+                    if simple_fast_prompt
                     else build_context_prompt(message, intent, None, history, request_metadata=request_metadata)
                 )
                 prompt_ready_at = perf_counter()

@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { auth } from "../lib/firebase";
 import { logoutFamilySession } from "../auth/familySession";
+import { resolveWarmIdToken } from "../shared/auth/idTokenCache.js";
 import {
   clearRegisteredPasskeys,
   getSecureUnlockCapabilities,
@@ -490,6 +491,28 @@ function isDesktopSettingsViewport() {
   return typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
 }
 
+function isWarmSimplePrompt(text, attachments = []) {
+  const clean = String(text || "").trim();
+  if (!clean) return false;
+  if ((Array.isArray(attachments) ? attachments.length : 0) > 0) return false;
+  if (clean.length > 36) return false;
+  if (/\n/.test(clean)) return false;
+  if (/[/:]/.test(clean)) return false;
+  if (/\b(?:http|www\.|attach|upload|image|photo|diagram|chart|pdf|file|citation|source|sources|research paper|references?)\b/i.test(clean)) return false;
+  const wordCount = clean.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 10) return false;
+  return /^[a-z0-9 ,.!?'()-]+$/i.test(clean);
+}
+
+function logStudentChatTiming(label, startedAt, meta = {}) {
+  if (!import.meta.env.DEV) return;
+  console.debug("[AI_TIMING][student][frontend]", {
+    label,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    ...meta,
+  });
+}
+
 export default function StudentLanding() {
   const firebaseUser = auth?.currentUser || null;
   const profileName = resolveProfileName(firebaseUser);
@@ -928,6 +951,134 @@ export default function StudentLanding() {
     );
   }
 
+  function appendAssistantPlaceholder(streamId) {
+    const now = Date.now();
+    updateActiveChatMessages(
+      (messages) => [...messages, { role: "assistant", text: "", streaming: true, streamId, createdAt: now }],
+      "Reply"
+    );
+  }
+
+  function updateStreamingAssistant(streamId, updater) {
+    updateActiveChatMessages((messages) => {
+      const idx = messages.findIndex((item) => item?.streamId === streamId);
+      if (idx < 0) return messages;
+      const next = [...messages];
+      const current = next[idx];
+      const nextText = updater(String(current?.text || ""));
+      next[idx] = { ...current, text: nextText, streaming: true };
+      return next;
+    }, "Reply");
+  }
+
+  function finalizeStreamingAssistant(streamId, text, meta = {}) {
+    updateActiveChatMessages((messages) => {
+      const idx = messages.findIndex((item) => item?.streamId === streamId);
+      if (idx < 0) {
+        return [...messages, { role: "assistant", text, sources: meta.sources || [], createdAt: Date.now() }];
+      }
+      const next = [...messages];
+      const current = next[idx] || {};
+      next[idx] = {
+        ...current,
+        role: "assistant",
+        text,
+        sources: meta.sources || current.sources || [],
+        streaming: false,
+      };
+      return next;
+    }, "Reply");
+  }
+
+  async function streamAssistantReply({ token, messageText, streamId, timingStarted = 0 }) {
+    const response = await fetch(`${apiUrl("/api/chat")}?stream=1`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        message: String(messageText || "").trim(),
+        preferredLanguage: String(settingsPrefs?.language || "en"),
+      }),
+    });
+
+    const contentType = String(response.headers.get("content-type") || "");
+    if (!response.ok || !response.body || !contentType.includes("text/event-stream")) {
+      return { ok: false, reason: "no_stream" };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let streamedText = "";
+    let gotChunk = false;
+
+    const processEvent = (eventBlock) => {
+      const lines = eventBlock.split("\n");
+      let eventType = "message";
+      const dataLines = [];
+      for (const line of lines) {
+        if (line.startsWith("event:")) eventType = line.slice(6).trim();
+        if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      }
+      const payloadRaw = dataLines.join("\n");
+      if (!payloadRaw) return false;
+      let payload = {};
+      try {
+        payload = JSON.parse(payloadRaw);
+      } catch {
+        payload = {};
+      }
+
+      if (eventType === "chunk") {
+        const delta = String(payload?.delta || "");
+        if (delta) {
+          gotChunk = true;
+          streamedText += delta;
+          updateStreamingAssistant(streamId, (prev) => `${prev}${delta}`);
+        }
+      }
+      if (eventType === "done") {
+        const finalText = String(payload?.text || streamedText).trim();
+        finalizeStreamingAssistant(streamId, finalText || streamedText || "Response received.");
+        return {
+          completed: true,
+          text: finalText || streamedText || "Response received.",
+        };
+      }
+      return { completed: false };
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let sepIndex = buffer.search(/\r?\n\r?\n/);
+        while (sepIndex >= 0) {
+          const delimiter = buffer.slice(sepIndex).startsWith("\r\n\r\n") ? 4 : 2;
+          const rawEvent = buffer.slice(0, sepIndex);
+          buffer = buffer.slice(sepIndex + delimiter);
+          const completed = processEvent(rawEvent);
+          if (completed?.completed) {
+            return { ok: true, text: completed.text };
+          }
+          sepIndex = buffer.search(/\r?\n\r?\n/);
+        }
+      }
+    } catch {
+      return { ok: false, reason: "stream_read_error", gotChunk, streamedText };
+    }
+
+    if (gotChunk) {
+      finalizeStreamingAssistant(streamId, streamedText || "Response received.");
+      return { ok: true, text: streamedText || "Response received." };
+    }
+    return { ok: false, reason: "empty_stream" };
+  }
+
   function openSettingsPanel(options = {}) {
     const { skipLauncher = false, anchorEl = null } = options;
     setIsProfileMenuOpen(false);
@@ -1201,6 +1352,70 @@ export default function StudentLanding() {
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
+
+    const warmSimplePrompt = isWarmSimplePrompt(clean, pendingAttachments);
+    if (warmSimplePrompt) {
+      const streamId = `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      updateActiveChatMessages(
+        (m) => [
+          ...m,
+          { role: "user", text: clean, createdAt: Date.now(), streaming: false },
+          { role: "assistant", text: "", streaming: true, streamId, createdAt: Date.now() },
+        ],
+        clean || "New Chat"
+      );
+      if (clean) setLastPrompt(clean);
+      setInput("");
+      clearMedia();
+      requestAnimationFrame(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+      try {
+        let token = await auth?.currentUser?.getIdToken().catch(() => null);
+        if (!token) {
+          token = await auth?.currentUser?.getIdToken(true).catch(() => null);
+        }
+        if (!token) {
+          finalizeStreamingAssistant(streamId, "Please sign in to use AI chat.");
+          return;
+        }
+
+        const streamResult = await streamAssistantReply({
+          token,
+          messageText: clean,
+          streamId,
+        });
+        if (streamResult.ok) return;
+
+        const response = await fetch(apiUrl("/api/chat"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            message: clean,
+            preferredLanguage: String(settingsPrefs?.language || "en"),
+          }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const code = result?.code || result?.error || `HTTP_${response.status}`;
+          const message = result?.message || code;
+          finalizeStreamingAssistant(
+            streamId,
+            formatAiServiceError({ backendHealthy: true, status: response.status, message })
+          );
+          return;
+        }
+        const reply = result?.text || result?.reply || result?.data?.reply || "Response received.";
+        finalizeStreamingAssistant(streamId, reply, { sources: normalizeResearchSources(result) });
+      } catch {
+        finalizeStreamingAssistant(streamId, formatAiServiceError({ backendHealthy: true }));
+      }
+      return;
+    }
+
     const requestText = resolveContinuationPrompt(clean, messages);
     const shouldGenerateImage =
       pendingAttachments.length === 0 && isImageGenerationPrompt(requestText);
@@ -1406,7 +1621,10 @@ export default function StudentLanding() {
     }
 
     try {
-      const token = await auth?.currentUser?.getIdToken(true).catch(() => null);
+      let token = await auth?.currentUser?.getIdToken().catch(() => null);
+      if (!token) {
+        token = await auth?.currentUser?.getIdToken(true).catch(() => null);
+      }
       if (!token) {
         updateActiveChatMessages(
           (m) => [...m, { role: "assistant", text: "Please sign in to use AI chat." }],

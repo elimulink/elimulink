@@ -266,7 +266,7 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
       <section className="inst-auth-brand">
         <div className="inst-auth-brand-inner">
           <div className="inst-auth-logo-row">
-            <div className="inst-auth-logo">EL</div>
+            <img src="/logo.png" alt="ElimuLink" className="h-11 w-auto object-contain shrink-0" />
             <div>
               <div className="inst-auth-brand-name">ElimuLink</div>
               <div className="inst-auth-brand-sub">Institution Platform</div>
