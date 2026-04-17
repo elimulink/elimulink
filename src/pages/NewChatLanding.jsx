@@ -587,13 +587,13 @@ function isInstitutionSimplePrompt(text, attachments = []) {
   const clean = String(text || "").trim();
   if (!clean) return false;
   if ((Array.isArray(attachments) ? attachments.length : 0) > 0) return false;
-  if (clean.length > 220) return false;
+  if (clean.length > 260) return false;
   if (/\n/.test(clean)) return false;
   if (/[/:]/.test(clean)) return false;
   if (/\b(?:http|www\.|attach|upload|image|photo|diagram|chart|pdf|file|citation|source|sources|research paper|references?)\b/i.test(clean)) return false;
-  if (/\b(?:compare|contrast|analyze critically|with citations|latest research|journal|scholar|dataset|table|markdown|code block|bibliography|peer reviewed|literature review|case study|methodology|research questions?)\b/i.test(clean)) return false;
+  if (/\b(?:compare|contrast|versus|vs|difference between|analyze critically|with citations|latest research|journal|scholar|dataset|table|markdown|code block|bibliography|peer reviewed|literature review|case study|methodology|research questions?|tool|workflow|generate a report)\b/i.test(clean)) return false;
   const wordCount = clean.split(/\s+/).filter(Boolean).length;
-  if (wordCount > 32) return false;
+  if (wordCount > 36) return false;
   return /^[a-z0-9 ,.!?'()-]+$/i.test(clean);
 }
 
@@ -3838,12 +3838,6 @@ export default function NewChatLanding({
 
     const normalizedInput = normalizeInput(clean);
     const followUpIntent = detectFollowUpIntent(normalizedInput.normalizedText || clean);
-    const previousAssistantMessage = String(
-      [...(Array.isArray(messages) ? messages : [])]
-        .reverse()
-        .find((message) => message?.role === "assistant")?.text || ""
-    ).trim();
-    const currentTopic = deriveActiveTopic(messages, activeChat?.activeTopic || "");
     const continuationCandidate = clean
       ? resolveContinuationPrompt(normalizedInput.normalizedText || clean, messages)
       : "";
@@ -3862,17 +3856,32 @@ export default function NewChatLanding({
       isImageClarificationQuestion(latestAssistantText);
     const requestPrompt =
       continuationPrompt || (awaitingImageDescription ? `Generate an image of ${normalizedInput.normalizedText || clean}` : normalizedInput.normalizedText || clean);
-    const shouldReuseConversationContext = Boolean(continuationPrompt) || followUpIntent.followUp;
-    const requestIntelligence = {
-      originalMessage: clean,
-      normalizedMessage: normalizedInput.changed ? normalizedInput.normalizedText : "",
-      topic: shouldReuseConversationContext ? currentTopic : "",
-      followUp: shouldReuseConversationContext ? followUpIntent.followUp : false,
-      followUpType: followUpIntent.followUpType,
-      targetLanguage: followUpIntent.targetLanguage,
-      previousAssistantMessage: shouldReuseConversationContext ? previousAssistantMessage : "",
-    };
+    const attachSummary =
+      pendingAttachments.length > 0
+        ? `\n\nAttachments:\n${pendingAttachments.map((a) => `- ${a.name}`).join("\n")}`
+        : "";
+    const messageText = `${clean || "Sent attachments"}${attachSummary}`;
+    const exchangeId = `ex-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const assistantBaseText = requestPrompt || clean || "Sent attachments";
+
+    updateActiveChatMessages(
+      (m) => [...m, { role: "user", text: messageText, ownerUid: currentUid, createdAt: Date.now(), exchangeId, persistState: "local" }],
+      clean || untitledChatBase
+    );
+    if (clean) setLastPrompt(clean);
+    setInput("");
+    clearMedia();
+    setSelectedStarter(null);
+    setStarterSuggestions([]);
+    requestAnimationFrame(() => scrollToBottom("smooth"));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
     const simplePrompt = isInstitutionSimplePrompt(requestPrompt, pendingAttachments);
+    logInstitutionChatTiming("frontend_send_start", timingStarted, {
+      textLength: clean.length,
+      simplePrompt,
+      hasAttachments: pendingAttachments.length > 0,
+    });
     const shouldExtractLinks = isLinkExtractionPrompt(requestPrompt);
     const shouldGenerateImage =
       !shouldExtractLinks &&
@@ -3900,40 +3909,33 @@ export default function NewChatLanding({
           shouldGenerateImage,
           shouldEditImage: shouldEditLatestImage,
         });
+    const shouldUseInstitutionResearchFlow = storageScope === "institution" || storageScope === "institution_admin";
+    let streamId = null;
 
-    const attachSummary =
-      pendingAttachments.length > 0
-        ? `\n\nAttachments:\n${pendingAttachments.map((a) => `- ${a.name}`).join("\n")}`
-        : "";
-    const messageText = `${clean || "Sent attachments"}${attachSummary}`;
-    const exchangeId = `ex-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const assistantBaseText = requestPrompt || clean || "Sent attachments";
-    const imageVisionContext = simplePrompt || shouldExtractLinks
-      ? ""
-      : await buildVisionAttachmentSummary(pendingAttachments, clean);
-    const assistantRequestText = `${assistantBaseText}${attachSummary}${imageVisionContext}`;
-    const currentContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
-    const detectedContext = simplePrompt ? currentContext : detectAcademicContext(assistantRequestText, currentContext);
-    const mergedContext = simplePrompt ? currentContext : mergeAcademicContext(currentContext, detectedContext, assistantRequestText);
-    if (activeChat?.id && !simplePrompt) {
-      setContextByChat((prev) => ({ ...prev, [activeChat.id]: mergedContext }));
+    if (
+      shouldUseInstitutionResearchFlow &&
+      !shouldExtractLinks &&
+      !shouldGenerateImage &&
+      !shouldEditLatestImage &&
+      !imageSearchQuery
+    ) {
+      streamId = `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      appendAssistantPlaceholder(streamId);
+      updateActiveChatMessages(
+        (chatMessages) =>
+          chatMessages.map((message) =>
+            String(message?.streamId || "") === streamId
+              ? { ...message, exchangeId, persistState: "pending" }
+              : message
+          ),
+        clean || untitledChatBase
+      );
+      requestAnimationFrame(() => scrollToBottom("auto"));
+      logInstitutionChatTiming("placeholder_visible", timingStarted, {
+        streamId,
+        mode: "institution-stream",
+      });
     }
-
-    updateActiveChatMessages(
-      (m) => [...m, { role: "user", text: messageText, ownerUid: currentUid, createdAt: Date.now(), exchangeId, persistState: "local" }],
-      clean || untitledChatBase
-    );
-    logInstitutionChatTiming("frontend_send_start", timingStarted, {
-      textLength: clean.length,
-      simplePrompt,
-      hasAttachments: pendingAttachments.length > 0,
-    });
-    if (clean) setLastPrompt(clean);
-    setInput("");
-    clearMedia();
-    setSelectedStarter(null);
-    setStarterSuggestions([]);
-    requestAnimationFrame(() => scrollToBottom("smooth"));
 
     if (shouldExtractLinks) {
       const firstImageAttachment = pendingAttachments.find((item) => item?.isImage && item?.file);
@@ -4152,35 +4154,58 @@ export default function NewChatLanding({
     }
 
     if (imageSearchQuery) {
+      const searchStatusId = `img-search-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      updateActiveChatMessages(
+        (messages) => [
+          ...messages,
+          {
+            id: searchStatusId,
+            role: "assistant",
+            text: `Searching for image results for "${imageSearchQuery}"...`,
+            ownerUid: currentUid,
+            createdAt: Date.now(),
+          },
+        ],
+        clean || untitledChatBase
+      );
+      requestAnimationFrame(() => scrollToBottom("auto"));
       try {
         const results = await searchWebImages(imageSearchQuery, { limit: 8 });
         updateActiveChatMessages(
           (messages) => [
-            ...messages,
-              {
-                role: "assistant",
-                text: results.length
-                  ? `Here are some web image results for "${imageSearchQuery}". You can preview, open the source, or reuse one in your workspace flow.`
-                  : `I couldn't find image results for "${imageSearchQuery}" right now.`,
-                imageSearchResults: results,
-                imageSearchQuery,
-                sources: normalizeResearchSources({ imageSearchResults: results }),
-                ownerUid: currentUid,
-                createdAt: Date.now(),
-              },
+            ...messages.map((message) =>
+              String(message?.id || "") === searchStatusId
+                ? {
+                    id: searchStatusId,
+                    role: "assistant",
+                    text: results.length
+                      ? `Here are some web image results for "${imageSearchQuery}". You can preview, open the source, or reuse one in your workspace flow.`
+                      : `I couldn't find image results for "${imageSearchQuery}" right now.`,
+                    imageSearchResults: results,
+                    imageSearchQuery,
+                    sources: normalizeResearchSources({ imageSearchResults: results }),
+                    ownerUid: currentUid,
+                    createdAt: message?.createdAt || Date.now(),
+                  }
+                : message
+            ),
           ],
           clean || untitledChatBase
         );
       } catch (error) {
         updateActiveChatMessages(
           (messages) => [
-            ...messages,
-            {
-              role: "assistant",
-              text: String(error?.message || "Web image search is unavailable right now."),
-              ownerUid: currentUid,
-              createdAt: Date.now(),
-            },
+            ...messages.map((message) =>
+              String(message?.id || "") === searchStatusId
+                ? {
+                    id: searchStatusId,
+                    role: "assistant",
+                    text: String(error?.message || "Web image search is unavailable right now."),
+                    ownerUid: currentUid,
+                    createdAt: message?.createdAt || Date.now(),
+                  }
+                : message
+            ),
           ],
           clean || untitledChatBase
         );
@@ -4188,24 +4213,31 @@ export default function NewChatLanding({
       return;
     }
 
-    let streamId = null;
-    const shouldUseInstitutionResearchFlow = storageScope === "institution" || storageScope === "institution_admin";
-    if (shouldUseInstitutionResearchFlow) {
-      streamId = `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      appendAssistantPlaceholder(streamId);
-      updateActiveChatMessages(
-        (chatMessages) =>
-          chatMessages.map((message) =>
-            String(message?.streamId || "") === streamId
-              ? { ...message, exchangeId, persistState: "pending" }
-              : message
-          ),
-        clean || untitledChatBase
-      );
-      requestAnimationFrame(() => scrollToBottom("auto"));
-      logInstitutionChatTiming("placeholder_visible", timingStarted, {
-        streamId,
-      });
+    const previousAssistantMessage = String(
+      [...(Array.isArray(messages) ? messages : [])]
+        .reverse()
+        .find((message) => message?.role === "assistant")?.text || ""
+    ).trim();
+    const currentTopic = deriveActiveTopic(messages, activeChat?.activeTopic || "");
+    const shouldReuseConversationContext = Boolean(continuationPrompt) || followUpIntent.followUp;
+    const requestIntelligence = {
+      originalMessage: clean,
+      normalizedMessage: normalizedInput.changed ? normalizedInput.normalizedText : "",
+      topic: shouldReuseConversationContext ? currentTopic : "",
+      followUp: shouldReuseConversationContext ? followUpIntent.followUp : false,
+      followUpType: followUpIntent.followUpType,
+      targetLanguage: followUpIntent.targetLanguage,
+      previousAssistantMessage: shouldReuseConversationContext ? previousAssistantMessage : "",
+    };
+    const imageVisionContext = simplePrompt || shouldExtractLinks
+      ? ""
+      : await buildVisionAttachmentSummary(pendingAttachments, clean);
+    const assistantRequestText = `${assistantBaseText}${attachSummary}${imageVisionContext}`;
+    const currentContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
+    const detectedContext = simplePrompt ? currentContext : detectAcademicContext(assistantRequestText, currentContext);
+    const mergedContext = simplePrompt ? currentContext : mergeAcademicContext(currentContext, detectedContext, assistantRequestText);
+    if (activeChat?.id && !simplePrompt) {
+      setContextByChat((prev) => ({ ...prev, [activeChat.id]: mergedContext }));
     }
 
     try {
@@ -4228,6 +4260,25 @@ export default function NewChatLanding({
       }
 
       if (shouldUseInstitutionResearchFlow) {
+        if (!streamId) {
+          streamId = `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          appendAssistantPlaceholder(streamId);
+          updateActiveChatMessages(
+            (chatMessages) =>
+              chatMessages.map((message) =>
+                String(message?.streamId || "") === streamId
+                  ? { ...message, exchangeId, persistState: "pending" }
+                  : message
+              ),
+            clean || untitledChatBase
+          );
+          requestAnimationFrame(() => scrollToBottom("auto"));
+          logInstitutionChatTiming("placeholder_visible", timingStarted, {
+            streamId,
+            mode: "institution-stream",
+          });
+        }
+
         if (import.meta.env.DEV) {
           console.debug("[NewChatLanding][AI_REQUEST]", {
             url: apiUrl(AI_PATH),

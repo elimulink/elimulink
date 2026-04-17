@@ -15,7 +15,6 @@ import { ArrowRight, Building2, ShieldCheck, Smartphone } from "lucide-react";
 import { auth } from "../lib/firebase";
 import {
   resolveAppName,
-  resolveFamilySessionReuse,
   verifyFamilySession,
 } from "../auth/familySession";
 import { requestPostSignupLock } from "../auth/secureLock";
@@ -146,11 +145,6 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
 
   const verifyAccess = async (firebaseUser) => {
     const appName = resolveAppName(hostMode);
-    const cachedReuse = resolveFamilySessionReuse(firebaseUser, appName);
-    if (cachedReuse.allowed && cachedReuse.reuseKind !== "stale" && cachedReuse.session?.profile) {
-      return cachedReuse.session.profile;
-    }
-
     const session = await verifyFamilySession(firebaseUser, appName, {
       timeoutMs: 20000,
       networkRetryCount: 1,
