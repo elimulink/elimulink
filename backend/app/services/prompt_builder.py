@@ -49,6 +49,11 @@ def build_follow_up_context(request_metadata: Dict[str, Any] | None) -> str:
             lines.append(f"TARGET_LANGUAGE: {target_language}")
         if previous_assistant_message:
             lines.append(f"PREVIOUS_ASSISTANT_MESSAGE:\n{previous_assistant_message}")
+        if follow_up_type in {"ACCEPT_CONTINUATION", "CONTINUE", "EXPLAIN_MORE", "CONTINUE_IN_LANGUAGE"}:
+            lines.append(
+                "CONTINUATION_RULE: Continue the pending explanation or next step directly. Do not restart the topic, "
+                "do not ask the user to repeat themselves, and do not switch to a new subject."
+            )
         lines.append(
             "STRICT_TOPIC_RULE: Keep the same topic. Do not switch subject based on a random short word. "
             "If the request is ambiguous, continue the previous topic instead of inventing a new one."

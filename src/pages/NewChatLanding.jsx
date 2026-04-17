@@ -967,7 +967,7 @@ function Bubble({
         className={[
           isUser
             ? "max-w-[92%] md:max-w-[72%] text-[15px]"
-            : "max-w-full md:max-w-[82%] text-[15px]",
+            : "max-w-full md:max-w-[82%] text-[16px] md:text-[15px]",
           isUser
             ? "user-msg-bubble rounded-[20px] rounded-br-lg border border-sky-100/80 bg-sky-50/95 px-4 py-2.5 text-slate-900 shadow-[0_4px_14px_rgba(15,23,42,0.06)] md:px-4 md:py-3"
             : "assistant-msg-surface bg-transparent px-0 py-0.5 text-slate-900 dark:text-slate-50",
@@ -976,7 +976,7 @@ function Bubble({
         {isUser ? (
           <div className="leading-relaxed">{text}</div>
         ) : (
-          <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 text-slate-900 md:leading-[1.78] dark:text-slate-50">
+          <div className="space-y-4 md:space-y-4 text-[16px] leading-[1.82] text-slate-900 md:text-[15px] md:leading-[1.78] dark:text-slate-50">
             {isComparisonPending ? (
               <ImageComparisonPicker
                 title={comparisonTitle}
@@ -1020,7 +1020,7 @@ function Bubble({
                 <span className="typing-dot typing-dot-delay-2" />
               </div>
             ) : (
-              <p className="leading-[1.72]">{String(text || "")}</p>
+              <p className="leading-[1.82] md:leading-[1.72]">{String(text || "")}</p>
             )}
             {streaming || isTypingAnim ? <span className="typing-caret">▌</span> : null}
           </div>
@@ -3707,7 +3707,19 @@ export default function NewChatLanding({
     const pendingAttachments = attachments;
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
-    const warmSimplePrompt = pendingAttachments.length === 0 && isInstitutionSimplePrompt(clean, pendingAttachments);
+    const earlyNormalizedInput = normalizeInput(clean);
+    const earlyFollowUpIntent = detectFollowUpIntent(earlyNormalizedInput.normalizedText || clean);
+    const earlyContinuationCandidate = clean
+      ? resolveContinuationPrompt(earlyNormalizedInput.normalizedText || clean, messages)
+      : "";
+    const hasStructuredContinuation =
+      Boolean(earlyContinuationCandidate) &&
+      earlyContinuationCandidate !== (earlyNormalizedInput.normalizedText || clean);
+    const warmSimplePrompt =
+      pendingAttachments.length === 0 &&
+      isInstitutionSimplePrompt(clean, pendingAttachments) &&
+      !earlyFollowUpIntent.followUp &&
+      !hasStructuredContinuation;
 
     if (warmSimplePrompt) {
       const messageText = clean;
@@ -3832,8 +3844,13 @@ export default function NewChatLanding({
         .find((message) => message?.role === "assistant")?.text || ""
     ).trim();
     const currentTopic = deriveActiveTopic(messages, activeChat?.activeTopic || "");
+    const continuationCandidate = clean
+      ? resolveContinuationPrompt(normalizedInput.normalizedText || clean, messages)
+      : "";
     const continuationPrompt =
-      clean && !followUpIntent.followUp ? resolveContinuationPrompt(normalizedInput.normalizedText || clean, messages) : "";
+      continuationCandidate && continuationCandidate !== (normalizedInput.normalizedText || clean)
+        ? continuationCandidate
+        : "";
     const latestAssistantText = String(
       [...(Array.isArray(messages) ? messages : [])]
         .reverse()
@@ -3845,14 +3862,15 @@ export default function NewChatLanding({
       isImageClarificationQuestion(latestAssistantText);
     const requestPrompt =
       continuationPrompt || (awaitingImageDescription ? `Generate an image of ${normalizedInput.normalizedText || clean}` : normalizedInput.normalizedText || clean);
+    const shouldReuseConversationContext = Boolean(continuationPrompt) || followUpIntent.followUp;
     const requestIntelligence = {
       originalMessage: clean,
       normalizedMessage: normalizedInput.changed ? normalizedInput.normalizedText : "",
-      topic: currentTopic,
-      followUp: followUpIntent.followUp,
+      topic: shouldReuseConversationContext ? currentTopic : "",
+      followUp: shouldReuseConversationContext ? followUpIntent.followUp : false,
       followUpType: followUpIntent.followUpType,
       targetLanguage: followUpIntent.targetLanguage,
-      previousAssistantMessage,
+      previousAssistantMessage: shouldReuseConversationContext ? previousAssistantMessage : "",
     };
     const simplePrompt = isInstitutionSimplePrompt(requestPrompt, pendingAttachments);
     const shouldExtractLinks = isLinkExtractionPrompt(requestPrompt);
@@ -4754,7 +4772,7 @@ export default function NewChatLanding({
               <Menu size={16} />
             </button>
             <div className="flex items-center gap-1.5 min-w-0">
-              <img src="/logo.png" alt="ElimuLink" className="h-11 w-auto object-contain shrink-0" />
+              <img src="/favicon.png" alt="ElimuLink" className="h-10 w-auto object-contain shrink-0" />
               <span className="relative px-3.5 py-1.5 rounded-full border border-cyan-100/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.62),rgba(236,249,255,0.5))] shadow-[0_8px_18px_rgba(14,30,63,0.05)] backdrop-blur-xl text-[14px] font-semibold text-[#1171c8] dark:border-white/[0.1] dark:bg-slate-900/66 dark:text-white">
                 University
               </span>

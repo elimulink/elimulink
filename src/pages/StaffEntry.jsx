@@ -168,7 +168,7 @@ export default function StaffEntry() {
             </div>
           ) : null}
           <div className="staff-entry-header">
-            <img src="/logo.png" alt="ElimuLink" className="staff-entry-logo" />
+            <img src="/favicon.png" alt="ElimuLink" className="staff-entry-logo" />
             <div>
               <div className="staff-entry-eyebrow">STAFF ACCESS</div>
               <h1>{view === "login" ? "Staff login" : activationToken ? "Complete staff entry" : "Staff entry"}</h1>

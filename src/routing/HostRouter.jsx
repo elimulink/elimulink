@@ -42,6 +42,8 @@ const DEV_AUTH_BYPASS_ENABLED =
 const BOOTSTRAP_TIMEOUT_MS = Math.max(getStartupVerifyTimeoutMs() + 15000, 60000);
 const BOOTSTRAP_RETRY_DELAY_MS = 4000;
 const BOOTSTRAP_MAX_TEMP_FAILURES = 3;
+const INSTITUTION_BOOTSTRAP_TIMEOUT_MS = 35000;
+const INSTITUTION_BOOTSTRAP_MAX_TEMP_FAILURES = 2;
 
 function hostLog(...args) {
   if (DEBUG_HOST_ROUTER) console.log(...args);
@@ -50,6 +52,13 @@ function hostLog(...args) {
 function hostDebug(step, payload = {}) {
   console.info(`[HOST_BOOT] ${step}`, payload);
   hostLog(`[HOST_BOOT] ${step}`, payload);
+}
+
+function entryTiming(marker, payload = {}) {
+  console.debug('[ENTRY_TIMING][frontend]', {
+    marker,
+    ...payload,
+  });
 }
 
 function profileDisplayName(profile, user) {
@@ -152,7 +161,7 @@ function LoadingScreen({ message = 'Verifying your workspace access and preparin
       <div className="mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-[30rem] items-center justify-center sm:min-h-[calc(100dvh-3rem)]">
         <div className="w-full px-4 py-6 text-center sm:px-8 sm:py-10">
           <img
-            src="/logo.png"
+            src="/favicon.png"
             alt="ElimuLink"
             className="mx-auto h-16 w-auto object-contain sm:h-20"
           />
@@ -367,6 +376,10 @@ export default function HostRouter() {
     hostMode === 'institution'
       ? 2000 * Math.max(1, failureCount)
       : BOOTSTRAP_RETRY_DELAY_MS * Math.max(1, failureCount);
+  const getBootstrapWatchdogMs = () =>
+    hostMode === 'institution' ? INSTITUTION_BOOTSTRAP_TIMEOUT_MS : BOOTSTRAP_TIMEOUT_MS;
+  const getBootstrapMaxTempFailures = () =>
+    hostMode === 'institution' ? INSTITUTION_BOOTSTRAP_MAX_TEMP_FAILURES : BOOTSTRAP_MAX_TEMP_FAILURES;
   const devAuthBypassActive = DEV_AUTH_BYPASS_ENABLED && hostMode === 'institution';
   const devBypassUser = useMemo(
     () =>
@@ -484,6 +497,11 @@ export default function HostRouter() {
   useEffect(() => {
     if (authStateLogged.current) return;
     if (!authReady) return;
+    entryTiming('firebase_auth_ready', {
+      hostMode,
+      uid: user?.uid || null,
+      anonymous: Boolean(user?.isAnonymous),
+    });
     hostDebug('auth:ready', {
       authReady,
       uid: user?.uid || null,
@@ -577,6 +595,13 @@ export default function HostRouter() {
       }
       const cachedSession = loadFamilySession(user.uid);
       const cachedReuse = resolveFamilySessionReuse(user, hostMode);
+      entryTiming('cached_session_loaded', {
+        hostMode,
+        uid: user.uid,
+        hasCachedSession: Boolean(cachedSession),
+        hasCachedProfile: Boolean(cachedSession?.profile),
+        reuseKind: cachedReuse.reuseKind,
+      });
       hostDebug('bootstrap:cache', {
         attempt,
         hasCachedSession: Boolean(cachedSession),
@@ -592,6 +617,11 @@ export default function HostRouter() {
       }
 
       if (canReuseCachedSession) {
+        entryTiming('session_reuse_hit', {
+          hostMode,
+          uid: user.uid,
+          reuseKind: 'startup',
+        });
         hostDebug('bootstrap:cache_reused', {
           attempt,
           uid: user.uid,
@@ -606,10 +636,20 @@ export default function HostRouter() {
         temporaryBootstrapFailureRef.current = 0;
         setBootState('ready');
         setProfileReady(true);
+        entryTiming('boot_ready', {
+          hostMode,
+          uid: user.uid,
+          source: 'startup_cache',
+        });
         return;
       }
 
       if (canDeferVerifyWithCachedSession) {
+        entryTiming('session_reuse_hit', {
+          hostMode,
+          uid: user.uid,
+          reuseKind: 'deferred',
+        });
         hostDebug('bootstrap:cache_deferred_reuse', {
           attempt,
           uid: user.uid,
@@ -626,6 +666,11 @@ export default function HostRouter() {
         temporaryBootstrapFailureRef.current = 0;
         setBootState('ready');
         setProfileReady(true);
+        entryTiming('boot_ready', {
+          hostMode,
+          uid: user.uid,
+          source: 'deferred_cache',
+        });
         return;
       }
 
@@ -656,6 +701,12 @@ export default function HostRouter() {
         setUsedCachedStartupSession(false);
         temporaryBootstrapFailureRef.current = 0;
         setBootState(allowed ? 'ready' : 'denied');
+        entryTiming('boot_ready', {
+          hostMode,
+          uid: user.uid,
+          source: 'verify_response',
+          allowed,
+        });
       } catch (err) {
         if (cancelled || attempt !== bootAttemptRef.current) {
           hostDebug('bootstrap:stale_error_ignored', {
@@ -690,7 +741,7 @@ export default function HostRouter() {
           setBackgroundVerifyMessage('Reconnecting to verify your workspace access.');
           temporaryBootstrapFailureRef.current = 0;
           setBootState(fallbackReuse.allowed ? 'ready' : 'denied');
-        } else if (temporaryFailure && temporaryBootstrapFailureRef.current < BOOTSTRAP_MAX_TEMP_FAILURES) {
+        } else if (temporaryFailure && temporaryBootstrapFailureRef.current < getBootstrapMaxTempFailures()) {
           temporaryBootstrapFailureRef.current += 1;
           setProfile(null);
           setAccessAllowed(true);
@@ -885,10 +936,10 @@ export default function HostRouter() {
         profileReady,
         bootState,
       });
-      setBootstrapError((prev) => prev || new Error(`Session restore timed out after ${Math.round(BOOTSTRAP_TIMEOUT_MS / 1000)}s.`));
+      setBootstrapError((prev) => prev || new Error(`Session restore timed out after ${Math.round(getBootstrapWatchdogMs() / 1000)}s.`));
       setBootState('error');
       setProfileReady(true);
-    }, BOOTSTRAP_TIMEOUT_MS);
+    }, getBootstrapWatchdogMs());
     return () => window.clearTimeout(timeoutId);
   }, [authReady, profileReady, bootState, user?.uid, hostMode, pathname, bootstrapNonce, devAuthBypassActive]);
 
@@ -917,12 +968,17 @@ export default function HostRouter() {
       pathname === '/' ||
       pathname === '/choose' ||
       ((hostMode === 'student' || hostMode === 'institution') && pathname === '/public');
-    if (shouldRedirectToModeHome) {
-      const suffix = window.location.search || '';
-      replacePath(`${expectedPrefix}${suffix}`, setPathname);
-      hostDebug('route:selected_after_bootstrap', { route: `${expectedPrefix}${suffix}`, hostMode, pathname });
-      handledInitialRedirect.current = true;
-      return;
+      if (shouldRedirectToModeHome) {
+        const suffix = window.location.search || '';
+        replacePath(`${expectedPrefix}${suffix}`, setPathname);
+        entryTiming('post_auth_target_resolved', {
+          hostMode,
+          targetPath: `${expectedPrefix}${suffix}`,
+          reason: 'mode-home',
+        });
+        hostDebug('route:selected_after_bootstrap', { route: `${expectedPrefix}${suffix}`, hostMode, pathname });
+        handledInitialRedirect.current = true;
+        return;
     }
 
     // Hard rule: never render onboarding when logged out.
@@ -977,6 +1033,11 @@ export default function HostRouter() {
       const returnTo = params.get('returnTo') || '';
       const target = resolvePostAuthTarget(profile, returnTo);
       hostLog("[REDIRECT]", { from: pathname, to: target.path });
+      entryTiming('post_auth_target_resolved', {
+        hostMode,
+        targetPath: target.path,
+        reason: 'post-auth',
+      });
       navigateToModePath(target.mode, target.path);
       hostDebug('route:selected_after_bootstrap', { route: target.path, hostMode, pathname });
       handledInitialRedirect.current = true;
@@ -1279,7 +1340,16 @@ export default function HostRouter() {
             displayName: resolveInstitutionDisplayName(profile, auth?.currentUser, { preferUsername: true, fallback: '' }),
             username: resolveInstitutionDisplayName(profile, auth?.currentUser, { preferUsername: true, fallback: '' }),
           };
+          setUser(auth?.currentUser || user);
           setProfile(merged);
+          setAccessAllowed(true);
+          setBootstrapError(null);
+          setBootstrapStatusMessage('');
+          setUsedCachedStartupSession(true);
+          setBackgroundVerifyState('idle');
+          setBackgroundVerifyMessage('');
+          setBootState('ready');
+          setProfileReady(true);
           const complete = isProfileComplete(merged, auth?.currentUser);
           const safeReturnTo = sanitizeReturnTo(returnTo, { mode: hostMode, isAuthenticated: true });
           if (!complete) {
@@ -1288,7 +1358,17 @@ export default function HostRouter() {
             return;
           }
           const target = resolvePostAuthTarget(merged, safeReturnTo);
+          entryTiming('post_auth_target_resolved', {
+            hostMode,
+            targetPath: target.path,
+            reason: 'institution_login_success',
+          });
           navigateToModePath(target.mode, target.path);
+          entryTiming('boot_ready', {
+            hostMode,
+            uid: auth?.currentUser?.uid || user?.uid || null,
+            source: 'institution_login_handoff',
+          });
           handledInitialRedirect.current = false;
         }}
       />

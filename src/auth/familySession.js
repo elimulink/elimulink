@@ -8,6 +8,8 @@ const STARTUP_VERIFY_TIMEOUT_MS = 45000;
 const BACKGROUND_VERIFY_TIMEOUT_MS = 45000;
 const SESSION_BOOTSTRAP_MAX_AGE_MS = 1000 * 60 * 60 * 12;
 const SESSION_DEFERRED_REUSE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
+const INSTITUTION_SESSION_BOOTSTRAP_MAX_AGE_MS = 1000 * 60 * 60 * 24;
+const INSTITUTION_SESSION_DEFERRED_REUSE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 14;
 const VERIFY_NETWORK_RETRY_DELAY_MS = 2500;
 const VERIFY_NETWORK_RETRY_COUNT = 2;
 const VERIFY_RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -49,6 +51,18 @@ function buildInFlightVerifyKey(firebaseUser, normalizedApp, forceRefreshToken) 
   ].join(":");
 }
 
+function getSessionBootstrapMaxAgeMs(appName) {
+  return resolveAppName(appName) === "institution"
+    ? INSTITUTION_SESSION_BOOTSTRAP_MAX_AGE_MS
+    : SESSION_BOOTSTRAP_MAX_AGE_MS;
+}
+
+function getDeferredSessionMaxAgeMs(appName) {
+  return resolveAppName(appName) === "institution"
+    ? INSTITUTION_SESSION_DEFERRED_REUSE_MAX_AGE_MS
+    : SESSION_DEFERRED_REUSE_MAX_AGE_MS;
+}
+
 async function runVerifyFamilySession(
   firebaseUser,
   normalizedApp,
@@ -61,7 +75,14 @@ async function runVerifyFamilySession(
     ? Math.max(0, Number(networkRetryDelayMs))
     : VERIFY_NETWORK_RETRY_DELAY_MS;
   const verifyUrl = apiUrl("/api/auth/verify-app-access");
+  const tokenStart = performance.now();
   let token = await getFirebaseIdToken(forceRefreshToken);
+  console.debug("[ENTRY_TIMING][frontend]", {
+    app: normalizedApp,
+    marker: "token_fetch_done",
+    durationMs: Math.round(performance.now() - tokenStart),
+    forceRefreshToken,
+  });
   if (!token) throw new Error("Missing Firebase ID token");
   let retriedWithFreshToken = false;
   let response;
@@ -73,6 +94,13 @@ async function runVerifyFamilySession(
       : null;
 
     try {
+      const requestStartedAt = performance.now();
+      console.debug("[ENTRY_TIMING][frontend]", {
+        app: normalizedApp,
+        marker: "verify_request_sent",
+        attempt: attempt + 1,
+        verifyUrl,
+      });
       response = await fetch(verifyUrl, {
         method: "POST",
         headers: {
@@ -81,6 +109,13 @@ async function runVerifyFamilySession(
         },
         body: JSON.stringify({ app: normalizedApp }),
         ...(controller ? { signal: controller.signal } : {}),
+      });
+      console.debug("[ENTRY_TIMING][frontend]", {
+        app: normalizedApp,
+        marker: "verify_response_received",
+        attempt: attempt + 1,
+        status: response.status,
+        durationMs: Math.round(performance.now() - requestStartedAt),
       });
       if (timeoutId) window.clearTimeout(timeoutId);
     } catch (error) {
@@ -301,7 +336,7 @@ export function isStartupSessionReusable(session, { firebaseUser, appName } = {}
   if (!verifiedAt) return false;
 
   const ageMs = Date.now() - verifiedAt;
-  return ageMs >= 0 && ageMs <= SESSION_BOOTSTRAP_MAX_AGE_MS;
+  return ageMs >= 0 && ageMs <= getSessionBootstrapMaxAgeMs(appName);
 }
 
 export function isDeferredSessionReusable(session, { firebaseUser, appName } = {}) {
@@ -313,7 +348,7 @@ export function isDeferredSessionReusable(session, { firebaseUser, appName } = {
   if (!verifiedAt) return false;
 
   const ageMs = Date.now() - verifiedAt;
-  return ageMs >= 0 && ageMs <= SESSION_DEFERRED_REUSE_MAX_AGE_MS;
+  return ageMs >= 0 && ageMs <= getDeferredSessionMaxAgeMs(appName);
 }
 
 export function resolveFamilySessionReuse(firebaseUser, appName) {

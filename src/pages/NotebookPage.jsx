@@ -3380,7 +3380,7 @@ export default function NotebookPage({
                     Workspace
                   </button>
                 ) : null}
-                <img src="/logo.png" alt="ElimuLink" className="h-7 w-auto object-contain shrink-0" />
+                <img src="/favicon.png" alt="ElimuLink" className="h-7 w-auto object-contain shrink-0" />
                 <span className="text-xs font-semibold tracking-wide text-white">ElimuLink</span>
               </div>
 

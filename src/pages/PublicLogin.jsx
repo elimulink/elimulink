@@ -243,7 +243,7 @@ export default function PublicLogin({ onAuthSuccess, profileDisplayName }) {
     <div className="public-auth-page">
       <section className="public-auth-brand-panel">
         <div className="public-auth-brand-inner">
-          <img src="/logo.png" alt="ElimuLink" className="h-12 w-auto object-contain" />
+          <img src="/favicon.png" alt="ElimuLink" className="h-12 w-auto object-contain" />
           <span className="public-auth-eyebrow">PUBLIC ACCESS PORTAL</span>
           <h1 className="public-auth-hero-title">Sign in to ElimuLink</h1>
           <p className="public-auth-hero-subtitle">

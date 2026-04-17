@@ -132,7 +132,7 @@ function renderLooseText(text, keyPrefix = "loose") {
   return (
     <div className="space-y-3.5">
       {paragraphs.map((paragraph, index) => (
-        <p key={`${keyPrefix}-${index}`} className="text-[14px] leading-7 text-slate-700 dark:text-slate-200">
+        <p key={`${keyPrefix}-${index}`} className="text-[15px] leading-[1.82] text-slate-800 md:text-[14px] md:leading-7 dark:text-slate-100">
           {parseInlineMarkdown(normalizeLooseLine(paragraph), `${keyPrefix}-${index}`)}
         </p>
       ))}
@@ -228,7 +228,7 @@ function renderMarkdownDocument(text) {
       index += 1;
     }
     nodes.push(
-      <p key={`p-${index}`} className="text-[14px] leading-7 text-slate-700 dark:text-slate-200">
+      <p key={`p-${index}`} className="text-[15px] leading-[1.82] text-slate-800 md:text-[14px] md:leading-7 dark:text-slate-100">
         {parseInlineMarkdown(paragraph.join(" "), `p-${index}`)}
       </p>
     );
@@ -278,7 +278,7 @@ export function ListBlock({ block, compact = false }) {
       {(block.items || []).map((item, index) => (
         <li
           key={`list-item-${index}`}
-          className="text-[14px] leading-7 text-slate-700 dark:text-slate-200"
+          className="text-[15px] leading-[1.82] text-slate-800 md:text-[14px] md:leading-7 dark:text-slate-100"
           style={{ marginLeft: `${Math.min(3, item.depth || 0) * 14}px` }}
         >
           {parseInlineMarkdown(item.text, `list-item-${index}`)}
@@ -356,7 +356,7 @@ export function ImageBlock({ block, onPreview }) {
         <img src={block.imageUrl} alt={block.caption || "Generated image"} className="max-h-[380px] w-full object-cover" />
       </button>
       {block.caption ? (
-        <p className="mt-3 text-sm leading-7 text-slate-700 dark:text-slate-200">{block.caption}</p>
+        <p className="mt-3 text-[15px] leading-[1.82] text-slate-800 md:text-sm md:leading-7 dark:text-slate-100">{block.caption}</p>
       ) : null}
     </ResponseBlockShell>
   );
@@ -460,7 +460,7 @@ export function NoteBlock({ block }) {
 export function WarningAlertBlock({ block }) {
   return (
     <ResponseBlockShell icon={AlertTriangle} label="Warning" tone="warning">
-      <div className="whitespace-pre-wrap text-sm leading-7 text-amber-900 dark:text-amber-100">{block.text}</div>
+      <div className="whitespace-pre-wrap text-[15px] leading-[1.82] text-amber-900 md:text-sm md:leading-7 dark:text-amber-100">{block.text}</div>
     </ResponseBlockShell>
   );
 }
@@ -468,7 +468,7 @@ export function WarningAlertBlock({ block }) {
 export function SuccessInfoBlock({ block }) {
   return (
     <ResponseBlockShell icon={CheckCircle2} label="Status" tone="success">
-      <div className="whitespace-pre-wrap text-sm leading-7 text-emerald-900 dark:text-emerald-100">{block.text}</div>
+      <div className="whitespace-pre-wrap text-[15px] leading-[1.82] text-emerald-900 md:text-sm md:leading-7 dark:text-emerald-100">{block.text}</div>
     </ResponseBlockShell>
   );
 }

@@ -1,5 +1,5 @@
 const FOLLOW_UP_ACCEPTANCE_PATTERN =
-  /^(yes|yeah|yep|okay|ok|sure|continue|continue please|go on|go ahead|proceed|do that|show me|explain more|tell me more)$/i;
+  /^(yes|yeah|yep|okay|ok|sure|continue|continue please|go on|go ahead|proceed|do that|explain more|tell me more)$/i;
 const FOLLOW_UP_DETAIL_PATTERN = /^(explain more|tell me more|more details|expand|go deeper)$/i;
 const FOLLOW_UP_LANGUAGE_PATTERN =
   /\b(?:continue|explain|say|reply|answer|write|translate|summari[sz]e|simplify)\s+(?:that\s+|this\s+)?(?:in|using)\s+(english|swahili|kiswahili)\b/i;
@@ -8,6 +8,14 @@ const FOLLOW_UP_TRIGGER_PATTERN =
 const FOLLOW_UP_PRONOUN_PATTERN = /\b(?:it|they|them|this|that|there|he|she|those|these)\b/i;
 const CONTINUATION_SENTENCE_PATTERN =
   /\b(?:next(?:,)?\s+)?(?:i can|i'll|i will|let me|next step is|the next useful step is)\s+([^.!?\n]+[.!?]?)/gi;
+const ASSISTANT_CONTINUATION_QUESTION_PATTERNS = [
+  /would you like (?:me to )?([^?.!]+)\?/i,
+  /do you want (?:me to )?([^?.!]+)\?/i,
+  /should i ([^?.!]+)\?/i,
+  /can i ([^?.!]+)\?/i,
+  /if you'd like,?\s*i can ([^.!?\n]+)/i,
+  /i can also ([^.!?\n]+?)(?: if you'd like| if you want)?[.!?]?$/i,
+];
 const ASSISTANT_ROLES = new Set(["assistant", "ai"]);
 const TOPIC_STOPWORDS = new Set([
   "the",
@@ -161,6 +169,12 @@ const TYPO_NORMALIZATIONS = [
   ["pls", "please"],
 ];
 
+const EXPLICIT_NEW_TOPIC_PATTERNS = [
+  /^(?:what is|what are|who is|who are|define|explain|describe|summari[sz]e|outline)\s+.+$/i,
+  /^(?:show|show me|find|find me|get|search|browse)\s+.+$/i,
+  /^(?:i need|i want)\s+(?:images?|pictures?|photos?|diagrams?|sources?|references?)\s+.+$/i,
+];
+
 export function normalizeInput(text = "") {
   const trimmed = String(text || "").replace(/\s+/g, " ").trim();
   if (!trimmed) {
@@ -186,6 +200,13 @@ export function normalizeInput(text = "") {
   };
 }
 
+function isExplicitNewTopicPrompt(text = "") {
+  const clean = String(text || "").trim();
+  if (!clean) return false;
+  if (/^(?:yes|yeah|yep|okay|ok|sure|continue|go on|go ahead|do that)$/i.test(clean)) return false;
+  return EXPLICIT_NEW_TOPIC_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
 export function detectFollowUpIntent(inputText = "") {
   const clean = String(inputText || "").replace(/\s+/g, " ").trim();
   if (!clean) {
@@ -208,6 +229,10 @@ export function detectFollowUpIntent(inputText = "") {
 
   if (/^(?:continue|go on|go ahead|proceed|keep going|continue please)$/i.test(clean)) {
     return { followUp: true, followUpType: "CONTINUE", targetLanguage: "" };
+  }
+
+  if (FOLLOW_UP_ACCEPTANCE_PATTERN.test(clean)) {
+    return { followUp: true, followUpType: "ACCEPT_CONTINUATION", targetLanguage: "" };
   }
 
   if (/^(?:simplify|simplify that|make it simpler|simpler|explain simply|put it simply)$/i.test(clean)) {
@@ -258,6 +283,29 @@ function isContextDependentFollowUp(cleanText = "") {
   return false;
 }
 
+function extractPendingAssistantIntent(text = "") {
+  const value = String(text || "").trim();
+  if (!value) return "";
+
+  for (const pattern of ASSISTANT_CONTINUATION_QUESTION_PATTERNS) {
+    const match = value.match(pattern);
+    const candidate = normalizeTopicCandidate(match?.[1] || "");
+    if (candidate && !isStopwordTopic(candidate)) {
+      return candidate.replace(/\b(for you|for me)\b/gi, "").replace(/\s+/g, " ").trim();
+    }
+  }
+
+  const trailingSentence = value
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(-2)
+    .find((sentence) => /\b(example|examples|break this down|steps?|expand|go deeper|more detail|summary|quiz|flashcards?)\b/i.test(sentence));
+  if (!trailingSentence) return "";
+
+  return trailingSentence.replace(/[.?!]+$/, "").trim();
+}
+
 function extractLastOfferedContinuation(text = "") {
   const value = String(text || "").trim();
   if (!value) return "";
@@ -283,15 +331,24 @@ function extractLastOfferedContinuation(text = "") {
 
 export function resolveContinuationPrompt(userText, items = []) {
   const clean = String(userText || "").trim();
+  if (isExplicitNewTopicPrompt(clean)) return clean;
   if (!isContextDependentFollowUp(clean)) return clean;
 
   const lastAssistantText = getLastAssistantMessageText(items);
+  const pendingAssistantIntent = extractPendingAssistantIntent(lastAssistantText);
+  const activeTopic = extractActiveTopic(items);
+
+  if (FOLLOW_UP_ACCEPTANCE_PATTERN.test(clean) && pendingAssistantIntent) {
+    return activeTopic
+      ? `Continue the same topic (${activeTopic}) by doing exactly what you just offered: ${pendingAssistantIntent}. Do not restart or ask the user to repeat the topic.`
+      : `Continue by doing exactly what you just offered in your previous answer: ${pendingAssistantIntent}. Do not restart the topic.`;
+  }
+
   const offeredStep = extractLastOfferedContinuation(lastAssistantText);
   if (offeredStep) {
     return `Please continue with the last suggested next step from your previous answer: ${offeredStep}`;
   }
 
-  const activeTopic = extractActiveTopic(items);
   if (activeTopic) {
     return [
       `Active topic: ${activeTopic}.`,

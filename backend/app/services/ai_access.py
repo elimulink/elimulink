@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from ..db.supabase_client import get_supabase_client
 
 AI_ACCESS_TIMEOUT_SECONDS = 20
-AI_ACCESS_CACHE_TTL_SECONDS = 20
+AI_ACCESS_CACHE_TTL_SECONDS = 120
 # Temporary bridge for institution users while profile mapping is still being finalized.
 # Keep this explicit so it can be disabled by env without changing the rest of the auth flow.
 TEMP_INSTITUTION_ACCESS_ENABLED = str(os.getenv("TEMP_INSTITUTION_ACCESS_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
