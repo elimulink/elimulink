@@ -43,6 +43,10 @@ Guidelines:
 16. Avoid empty filler such as "Okay", "Sure", or "I can't do that" as a full response. Move straight into the useful answer or next step.
 17. For concept questions, prefer one clear definition, one simple example, and one useful next option.
 18. Avoid repeating the same stock phrases across replies. Vary how you guide the next step.
+19. Treat ordinary conversation as ordinary conversation. For prompts like hello, how are you, what's your name, why don't you have feelings, or that's interesting, reply naturally and briefly without resetting into academic onboarding.
+20. If the user asks a clear question, answer it first. Do not jump into generic study-help intros before answering.
+21. For limitations, keep the limit to one short truthful line, then immediately offer useful help.
+22. Keep the tone supportive, clear, and human. Avoid robotic closers, repeated slogans, and repeated prompts like "What are you working on today?"
 """
 
 ADMIN_SYSTEM_PROMPT = """You are ElimuLink Administrative AI, an intelligent institutional assistant for university administration.
@@ -85,6 +89,20 @@ Important rules:
 17. Lead with the useful answer or interpretation first. Do not open with a compliance warning when the request can still be guided productively.
 18. For broad administrative questions, interpret likely intent, offer a short set of meaningful directions, and keep the narrowing question gentle.
 19. End with one practical next step, option, or decision-oriented question when useful.
+20. Handle ordinary conversational prompts naturally. If the user says hello, asks how you are, asks your name, or asks a simple philosophical question, respond warmly and briefly without switching into policy or workflow framing.
+21. If you cannot do something, state the limit in one short line and move immediately to the best useful help you can still provide.
+22. Avoid stiff fallback phrasing such as "Please clarify" or "Provide more details" as an opener. Give a helpful interpretation first whenever possible.
+"""
+
+INSTITUTION_CONVERSATION_SUPPLEMENT = """Institution conversation style:
+1. Sound like a warm, capable copilot rather than a validator or help-desk script.
+2. If the user asks a clear question, answer it in the first line before adding setup.
+3. Handle greetings, name questions, capability questions, and light curiosity naturally and briefly.
+4. Do not reset into student-study onboarding, admin workflow framing, or generic assistant intros unless the user clearly moves there.
+5. When the answer is broad, start with the most useful interpretation, then offer one gentle next step or narrowing question if needed.
+6. When you hit a limitation, keep it to one short truthful line and move straight to the best practical help you can still provide.
+7. Avoid repeated stock lines such as "What are you working on today?", "I can help with coursework", or "Please provide more details."
+8. Vary openings and closers so the conversation feels human, concise, and professional.
 """
 
 # Backward-compatible alias for existing imports/usages.
@@ -97,14 +115,19 @@ def resolve_system_prompt(
     assistant_style: str | None = None,
 ) -> str:
     normalized_mode = str(mode or "").strip().lower()
+    normalized_scope = str((workspace_context or {}).get("scope") or "").strip().lower()
+    institution_scope = str((workspace_context or {}).get("institutionScope") or "").strip().lower()
+    is_institution_scope = normalized_scope in {"institution", "admin"} or institution_scope == "institution"
 
     if normalized_mode == "admin":
-        return ADMIN_SYSTEM_PROMPT
+        return f"{ADMIN_SYSTEM_PROMPT}\n\n{INSTITUTION_CONVERSATION_SUPPLEMENT}"
 
-    if workspace_context and str(workspace_context.get("scope", "")).strip().lower() == "admin":
-        return ADMIN_SYSTEM_PROMPT
+    if workspace_context and normalized_scope == "admin":
+        return f"{ADMIN_SYSTEM_PROMPT}\n\n{INSTITUTION_CONVERSATION_SUPPLEMENT}"
 
     style_instruction = build_assistant_style_instruction(assistant_style)
+    if is_institution_scope:
+        return f"{STUDENT_SYSTEM_PROMPT}\n\n{INSTITUTION_CONVERSATION_SUPPLEMENT}\n\n{style_instruction}"
     return f"{STUDENT_SYSTEM_PROMPT}\n\n{style_instruction}"
 
 
@@ -118,15 +141,23 @@ def build_context_prefix(mode: str | None = None, workspace_context: dict[str, A
     department = workspace_context.get("department")
     role = workspace_context.get("role")
     institution = workspace_context.get("institution")
+    institution_scope = workspace_context.get("institutionScope")
+    department_routing = workspace_context.get("departmentRouting")
     is_admin_scope = str(scope or "").strip().lower() == "admin"
 
     if scope:
         lines.append(f"Scope: {scope}")
+    if institution_scope:
+        lines.append(f"Institution Scope: {institution_scope}")
     if institution:
         lines.append(f"Institution: {institution}")
     if department:
         lines.append(f"Department: {department}")
-    if role and not is_admin_scope:
+    if department_routing and str(department_routing).strip().lower() != str(department or "").strip().lower():
+        lines.append(f"Routed Department: {department_routing}")
+    if role and is_admin_scope:
+        lines.append(f"Actor Role: {role}")
+    elif role:
         lines.append(f"Role: {role}")
 
     if not lines:

@@ -143,8 +143,23 @@ async def admin_ai(request: Request, user: CurrentUser = Depends(get_current_use
     )
     context["graphContext"] = graph_context
 
+    workspace_context = {
+        "scope": "admin",
+        "institution": scoped_institution,
+        "department": scoped_department,
+        "role": requested_role or user.role,
+        "institutionScope": institution_scope or "university",
+        "departmentRouting": routed_department or "unmapped",
+        "graphContext": graph_context,
+    }
+
     try:
-        text = await call_gemini_text(prompt, context)
+        text = await call_gemini_text(
+            prompt,
+            context,
+            mode="admin",
+            workspace_context=workspace_context,
+        )
     except ProviderTimeoutError:
         return err_response("AI_TIMEOUT", 504)
     except RuntimeError as exc:

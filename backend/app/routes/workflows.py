@@ -18,15 +18,41 @@ from ..workflow_engine import Department, WorkflowStatus, workflow_engine
 from ..workflow_schemas import (
     CommunicationToggleIn,
     WorkflowActionIn,
+    WorkflowAssistIn,
+    WorkflowAssistOut,
     WorkflowCreateIn,
     WorkflowOut,
 )
+from ..services.workflow_service import assist_with_workflow
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
 
 def _out(item):
     return WorkflowOut.model_validate(asdict(item))
+
+
+@router.post("/assist", response_model=WorkflowAssistOut)
+def assist_workflow(payload: WorkflowAssistIn):
+    result = assist_with_workflow(
+        payload.message,
+        actor_id=payload.actor_id,
+        actor_role=payload.actor_role,
+        confirm_real_action=payload.confirm_real_action,
+    )
+    return WorkflowAssistOut.model_validate(
+        {
+            "text": result.text,
+            "detected": result.detected,
+            "workflow_kind": result.workflow_kind,
+            "scenario": result.scenario,
+            "safe_real_available": result.safe_real_available,
+            "confirmation_required": result.confirmation_required,
+            "preview_payload": result.preview_payload,
+            "created_workflow": result.created_workflow,
+            "integration_points": result.integration_points,
+        }
+    )
 
 
 @router.post("", response_model=WorkflowOut)

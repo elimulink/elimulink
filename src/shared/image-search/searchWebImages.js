@@ -16,6 +16,9 @@ function normalizeResult(item, index) {
 
 const WEB_IMAGE_SEARCH_PATTERNS = [
   /^(?:show|show me|search|find|browse|get)\s+(?:me\s+)?(?:the\s+)?(?:web\s+)?(?:images?|pictures?|photos?|visuals?|diagrams?|illustrations?)\s+(?:for|of|about)\s+(.+)$/i,
+  /^(?:show|show me|get|find|browse)\s+(?:me\s+)?images?\s+(.+)$/i,
+  /^(?:show|show me|get|find|browse)\s+(?:me\s+)?photos?\s+(.+)$/i,
+  /^(?:show|show me|get|find|browse)\s+(?:me\s+)?illustrations?\s+(.+)$/i,
   /^search\s+(?:the\s+)?web\s+for\s+(?:images?|pictures?|photos?|visuals?|diagrams?|illustrations?)\s+(?:of|about)\s+(.+)$/i,
   /^(?:web\s+)?image\s+search\s*(?:for|:)\s*(.+)$/i,
   /^(?:images?|pictures?|photos?|diagrams?)\s*:\s*(.+)$/i,

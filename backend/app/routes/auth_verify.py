@@ -69,4 +69,7 @@ async def verify_app_access(
         f"allowed={result.get('allowed')} access={result.get('app_access')} "
         f"duration_ms={(time.perf_counter() - started_at) * 1000:.1f}"
     )
+    result.setdefault("can_use_institution_ai", False)
+    result.setdefault("can_view_scoped_sources", False)
+    result.setdefault("can_access_live_institution_data", False)
     return result

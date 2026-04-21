@@ -616,12 +616,12 @@ export default function InstitutionCalendarPage({ onBack, onOpenMainMenu }) {
 
             <aside className="col-span-12 flex flex-col gap-5 lg:col-span-4">
               <section className="rounded-[28px] border border-slate-200/80 bg-white/92 px-5 py-5 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
-                <div className="flex items-start gap-4">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700">EL</div>
-                  <div>
-                    <div className="text-lg font-semibold text-slate-900">{landingWorkspaceSettings.linkedInstitution || "ElimuLink University"}</div>
-                    <div className="mt-1 text-sm leading-6 text-slate-600">Schedules, reminders, and institutional timing in one calm academic view.</div>
-                  </div>
+                <div className="flex items-center justify-end">
+                  <img
+                    src="/favicon.png"
+                    alt="ElimuLink"
+                    className="h-16 w-auto object-contain"
+                  />
                 </div>
               </section>
 

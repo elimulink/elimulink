@@ -2,6 +2,10 @@ function safeString(value) {
   return String(value || "").trim();
 }
 
+function isGroundedResearchSource(source) {
+  return Boolean(source?.sourceType === "research" || source?.grounded === true);
+}
+
 function isMeaningfulSource(source) {
   const url = safeString(source?.url || source?.link || source?.href);
   const domain = safeString(source?.domain || source?.provider || domainFromUrl(url));
@@ -45,10 +49,15 @@ export function detectTextSources(text) {
 }
 
 export function normalizeResearchSources(input = {}) {
+  const nestedPayload = input?.data || {};
   const directSources = Array.isArray(input?.sources)
     ? input.sources
     : Array.isArray(input?.citations)
       ? input.citations
+      : Array.isArray(nestedPayload?.sources)
+        ? nestedPayload.sources
+        : Array.isArray(nestedPayload?.citations)
+          ? nestedPayload.citations
       : [];
 
   const fromDirect = directSources
@@ -66,6 +75,8 @@ export function normalizeResearchSources(input = {}) {
         snippet,
         url,
         faviconUrl: safeString(source?.favicon_url || source?.faviconUrl || source?.favicon || ""),
+        sourceType: isGroundedResearchSource(source) ? "research" : safeString(source?.sourceType || ""),
+        grounded: Boolean(source?.grounded),
       };
     })
     .filter(Boolean);
@@ -85,6 +96,8 @@ export function normalizeResearchSources(input = {}) {
         snippet,
         url,
         faviconUrl: safeString(item?.faviconUrl || item?.favicon_url || ""),
+        sourceType: "web_image",
+        grounded: false,
       };
     })
     .filter(Boolean);

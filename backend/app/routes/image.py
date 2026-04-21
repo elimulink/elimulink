@@ -10,6 +10,19 @@ from ..utils import err_response, ok_response
 router = APIRouter()
 
 
+def _resolve_image_reply_text(raw_text: str, *, mode: str, comparison: bool = False) -> str:
+    text = str(raw_text or "").strip()
+    if comparison:
+        return text or "Here are two image options. Pick the one you prefer."
+    if mode == "edit":
+        if not text or text.lower().startswith("updated"):
+            return "Here is the updated image."
+        return text
+    if not text or text.lower().startswith("done"):
+        return "Here is your generated image."
+    return text
+
+
 @router.post("/api/ai/image")
 async def image(request: Request, user: CurrentUser = Depends(get_current_user)) -> object:
     body = await request.json()

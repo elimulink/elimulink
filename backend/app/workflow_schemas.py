@@ -63,3 +63,22 @@ class WorkflowOut(BaseModel):
     history: List[WorkflowActionOut]
     created_at: str
     updated_at: str
+
+
+class WorkflowAssistIn(BaseModel):
+    message: str = Field(min_length=3, max_length=4000)
+    actor_id: str = Field(default="assistant")
+    actor_role: str = Field(default="student")
+    confirm_real_action: bool = False
+
+
+class WorkflowAssistOut(BaseModel):
+    text: str
+    detected: bool
+    workflow_kind: str
+    scenario: str
+    safe_real_available: bool
+    confirmation_required: bool
+    preview_payload: Dict[str, Any]
+    created_workflow: Optional[Dict[str, Any]] = None
+    integration_points: List[str]

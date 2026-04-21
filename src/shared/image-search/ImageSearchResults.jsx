@@ -7,25 +7,31 @@ export default function ImageSearchResults({
   results = [],
   onPreview,
   onReuse,
+  layout = "grid",
+  eyebrow = "Web Image Search",
+  titlePrefix = "Image results for",
+  countLabel = "results",
+  showReuse = true,
 }) {
   const displayResults = (Array.isArray(results) ? results : []).filter(
     (result) => result?.thumbnail && result?.link
   );
   if (!displayResults.length) return null;
+  const isRow = layout === "row";
 
   return (
-    <div className="image-search-results">
+    <div className={`image-search-results ${isRow ? "image-search-results-row-mode" : ""}`}>
       <div className="image-search-results-header">
         <div>
-          <div className="image-search-results-eyebrow">Web Image Search</div>
+          <div className="image-search-results-eyebrow">{eyebrow}</div>
           <div className="image-search-results-title">
-            {query ? `Image results for "${query}"` : "Image results"}
+            {query ? `${titlePrefix} "${query}"` : "Image results"}
           </div>
         </div>
-        <div className="image-search-results-count">{displayResults.length} results</div>
+        <div className="image-search-results-count">{displayResults.length} {countLabel}</div>
       </div>
 
-      <div className="image-search-results-grid">
+      <div className={isRow ? "image-search-results-row" : "image-search-results-grid"}>
         {displayResults.map((result) => (
           <article key={result.id || result.link} className="image-search-card">
             <button
@@ -33,7 +39,7 @@ export default function ImageSearchResults({
               className="image-search-card-media"
               onClick={() => onPreview?.(result)}
             >
-              <img src={result.thumbnail} alt={result.title} className="image-search-card-image" />
+              <img src={result.thumbnail} alt={result.title} loading="lazy" className="image-search-card-image" />
             </button>
 
             <div className="image-search-card-body">
@@ -62,10 +68,12 @@ export default function ImageSearchResults({
                 <ExternalLink size={14} />
                 <span>Source</span>
               </a>
-              <button type="button" className="image-search-action" onClick={() => onReuse?.(result)}>
-                <FolderPlus size={14} />
-                <span>Reuse</span>
-              </button>
+              {showReuse ? (
+                <button type="button" className="image-search-action" onClick={() => onReuse?.(result)}>
+                  <FolderPlus size={14} />
+                  <span>Reuse</span>
+                </button>
+              ) : null}
             </div>
           </article>
         ))}

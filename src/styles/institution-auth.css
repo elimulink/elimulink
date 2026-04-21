@@ -260,6 +260,50 @@ body {
   color: #9f1239;
 }
 
+.inst-auth-password-wrap {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+}
+
+.inst-auth-password-wrap input {
+  grid-column: 1 / span 2;
+  grid-row: 1;
+  width: 100%;
+  padding-right: 52px;
+}
+
+.inst-auth-password-toggle {
+  grid-column: 2;
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0;
+  margin-right: 14px;
+  margin-left: -42px;
+  z-index: 1;
+  align-self: center;
+}
+
+.inst-auth-password-toggle:hover {
+  color: #334155;
+}
+
+.inst-auth-password-toggle:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
 .inst-auth-notice-dark {
   background: rgba(16, 185, 129, 0.12);
   border-color: rgba(52, 211, 153, 0.22);

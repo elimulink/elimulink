@@ -26,17 +26,24 @@ async function apiFetch(path, options = {}) {
 
 export async function analyzeVisualContext({
   imageDataUrl,
+  imageDataUrls,
   prompt,
   family,
   app,
 }) {
-  return apiFetch("/api/v1/vision/analyze", {
+  const result = await apiFetch("/api/v1/vision/analyze", {
     method: "POST",
     body: JSON.stringify({
       image_data_url: imageDataUrl,
+      image_data_urls: imageDataUrls,
       prompt,
       family,
       app,
     }),
   });
+  return {
+    ...result,
+    explanation: String(result?.answer || "").trim(),
+    highlights: Array.isArray(result?.highlights) ? result.highlights : [],
+  };
 }

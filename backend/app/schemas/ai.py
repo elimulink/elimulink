@@ -13,6 +13,10 @@ class AIChatRequest(BaseModel):
     followUpType: Optional[str] = None
     targetLanguage: Optional[str] = None
     previousAssistantMessage: Optional[str] = None
+    pendingAssistantIntent: Optional[str] = None
+    pendingAssistantMode: Optional[str] = None
+    newTopic: Optional[bool] = None
+    routeHint: Optional[str] = None
     session_id: Optional[str] = None
     app_type: Optional[str] = None
     stream: Optional[bool] = None

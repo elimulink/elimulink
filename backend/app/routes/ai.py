@@ -22,7 +22,10 @@ from ..services.compound_question import analyze_compound_question, build_compou
 from ..services.memory_service import get_recent_history
 from ..services.prompt_builder import build_context_prompt
 from ..repositories.chat_repository import create_session, get_session, save_message
+from ..services.chemistry_service import is_chemistry_prompt
 from ..services.intent_router import detect_intent
+from ..services.math_service import is_math_prompt
+from ..services.physics_service import is_physics_prompt
 from ..utils.ids import new_session_id
 from ..services.model_registry import get_chat_model
 from ..utils import (
@@ -45,16 +48,27 @@ INSTITUTION_FAST_STREAM_INTENTS = {
 }
 
 _ULTRA_SHORT_GREETING_REPLIES = {
-    "hello": "Hello! How can I help?",
-    "hi": "Hi! How can I help?",
-    "hey": "Hey! How can I help?",
-    "morning": "Good morning! How can I help?",
-    "good morning": "Good morning! How can I help?",
-    "afternoon": "Good afternoon! How can I help?",
-    "good afternoon": "Good afternoon! How can I help?",
-    "evening": "Good evening! How can I help?",
-    "good evening": "Good evening! How can I help?",
+    "hello": "Hello. What can I help with?",
+    "hi": "Hi. What can I help with?",
+    "hey": "Hey. What can I help with?",
+    "morning": "Good morning. What can I help with?",
+    "good morning": "Good morning. What can I help with?",
+    "afternoon": "Good afternoon. What can I help with?",
+    "good afternoon": "Good afternoon. What can I help with?",
+    "evening": "Good evening. What can I help with?",
+    "good evening": "Good evening. What can I help with?",
 }
+
+_FAST_STREAM_ADMIN_LIKE_ROLES = {"admin", "institution_admin", "department_head", "staff", "lecturer", "super_admin"}
+_FAST_STREAM_PERSONAL_SCOPE_PATTERN = re.compile(r"\b(?:my|me|mine|for me|my own)\b", re.IGNORECASE)
+_FAST_STREAM_STUDENT_ACTIVITY_PATTERN = re.compile(
+    r"\b(?:what are students doing|how are students doing|student update|student activity|students activity|recent student activity)\b",
+    re.IGNORECASE,
+)
+_FAST_STREAM_INSTITUTION_DATA_PATTERN = re.compile(
+    r"\b(?:fees?|attendance|results?|gpa|analytics)\b|\b(?:attendance|results?|fees?)\s+(?:trend|status|summary)\b|\b(?:student|students)\s+(?:update|activity|status|summary)\b",
+    re.IGNORECASE,
+)
 
 
 def _is_institution_request(body: dict) -> bool:
@@ -79,6 +93,28 @@ def _normalize_fast_prompt_text(message: str) -> str:
     return " ".join(re.findall(r"[a-z']+", str(message or "").strip().lower()))
 
 
+def _is_institution_data_sensitive_fast_stream(
+    message: str,
+    intent: str,
+    resolved_app_type: str,
+    user: CurrentUser,
+    workspace_context: dict | None = None,
+) -> bool:
+    if resolved_app_type != "institution":
+        return False
+    if str(getattr(user, "role", "") or "").strip().lower() not in _FAST_STREAM_ADMIN_LIKE_ROLES:
+        return False
+    normalized_message = str(message or "").strip()
+    if _FAST_STREAM_PERSONAL_SCOPE_PATTERN.search(normalized_message):
+        return False
+    normalized_intent = str(intent or "").strip().lower()
+    if normalized_intent in {"fee_balance", "attendance", "results", "institution_analytics"}:
+        return True
+    if _FAST_STREAM_STUDENT_ACTIVITY_PATTERN.search(normalized_message):
+        return True
+    return bool(_FAST_STREAM_INSTITUTION_DATA_PATTERN.search(normalized_message))
+
+
 def _get_ultra_short_greeting_reply(message: str) -> Optional[str]:
     normalized = _normalize_fast_prompt_text(message)
     if not normalized:
@@ -93,6 +129,12 @@ def _get_ultra_short_greeting_reply(message: str) -> Optional[str]:
 def _is_light_simple_prompt(message: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(message or "").strip().lower())
     if not normalized or "\n" in normalized:
+        return False
+    if is_chemistry_prompt(normalized):
+        return False
+    if is_physics_prompt(normalized):
+        return False
+    if is_math_prompt(normalized):
         return False
     if len(normalized) > 260:
         return False
@@ -120,7 +162,12 @@ def _is_light_simple_prompt(message: str) -> bool:
     return True
 
 
-def _stream_history_limit(message: str, session_exists: bool) -> int:
+def _stream_history_limit(message: str, session_exists: bool, request_metadata: dict | None = None) -> int:
+    meta = request_metadata or {}
+    if bool(meta.get("newTopic")):
+        return 0
+    if bool(meta.get("followUp")):
+        return 3 if session_exists else 2
     if not session_exists:
         return 0 if _is_light_simple_prompt(message) else 3
     return 2 if _is_light_simple_prompt(message) else 4
@@ -139,6 +186,10 @@ def _request_metadata_from_payload(payload: AIChatRequest, original_message: str
         "followUpType": str(payload.followUpType or "").strip(),
         "targetLanguage": str(payload.targetLanguage or "").strip(),
         "previousAssistantMessage": str(payload.previousAssistantMessage or "").strip(),
+        "pendingAssistantIntent": str(payload.pendingAssistantIntent or "").strip(),
+        "pendingAssistantMode": str(payload.pendingAssistantMode or "").strip(),
+        "newTopic": bool(payload.newTopic),
+        "routeHint": str(payload.routeHint or "").strip(),
     }
 
 
@@ -177,13 +228,20 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
         or bool(payload.stream)
     )
     current_session_id = payload.session_id or new_session_id()
-    intent = detect_intent(message)
+    intent = detect_intent(message, request_metadata=request_metadata)
     simple_fast_prompt = _is_light_simple_prompt(message)
     resolved_app_type = resolve_app_type(
         payload.app_type or ("institution" if _is_institution_request(body or {}) else None)
     )
+    skip_fast_stream_for_institution_data = _is_institution_data_sensitive_fast_stream(
+        message,
+        intent,
+        resolved_app_type,
+        user,
+        workspace_context if isinstance(workspace_context, dict) else {},
+    )
 
-    if stream_requested and (intent == "general_chat" or simple_fast_prompt):
+    if stream_requested and not skip_fast_stream_for_institution_data and (intent == "general_chat" or simple_fast_prompt):
         async def event_stream() -> object:
             started_at = perf_counter()
             first_chunk_at = None
@@ -195,7 +253,11 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
                 session_exists: bool | None = None
                 if not (ultra_short_greeting_reply or simple_fast_prompt):
                     session_exists = bool(get_session(db, current_session_id))
-                history_limit = 0 if (ultra_short_greeting_reply or simple_fast_prompt) else _stream_history_limit(message, bool(session_exists))
+                history_limit = 0 if (ultra_short_greeting_reply or simple_fast_prompt) else _stream_history_limit(
+                    message,
+                    bool(session_exists),
+                    request_metadata=request_metadata,
+                )
                 history_started = perf_counter()
                 history = get_recent_history(db, current_session_id, limit=history_limit) if history_limit else []
                 print(
@@ -326,7 +388,7 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
                     yield _sse_event("error", {"message": str(exc)})
                     return
 
-                final_text = accumulated_text.strip() or "I couldn't generate a response."
+                final_text = accumulated_text.strip() or "I couldn't finish that reply. Please try again."
                 ensure_session_and_user_saved()
                 save_message(
                     db,
@@ -363,7 +425,7 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
 
     try:
         with get_db() as db:
-            answer, session_id, intent, tool_used = await run_orchestrator(
+            answer, session_id, intent, tool_used, sources = await run_orchestrator(
                 db,
                 user,
                 message,
@@ -409,7 +471,7 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
                 await asyncio.sleep(0.01)
 
             payload_done = json.dumps(
-                {"text": text, "session_id": session_id, "intent": intent, "tool_used": tool_used},
+                {"text": text, "session_id": session_id, "intent": intent, "tool_used": tool_used, "sources": sources},
                 ensure_ascii=False,
             )
             print(
@@ -435,6 +497,7 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
             "session_id": session_id,
             "intent": intent,
             "tool_used": tool_used,
+            "sources": sources,
         },
     )
 
@@ -475,12 +538,13 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
     request_metadata = _request_metadata_from_payload(payload, original_message=str((body or {}).get("message") or ""))
     trace_id = getattr(request.state, "request_id", None)
     current_session_id = payload.session_id or new_session_id()
-    intent = detect_intent(message)
+    intent = detect_intent(message, request_metadata=request_metadata)
     stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}
 
     if (
         stream_requested
         and _is_institution_request(body or {})
+        and not skip_fast_stream_for_institution_data
         and intent in INSTITUTION_FAST_STREAM_INTENTS
     ):
         async def institution_event_stream() -> object:
@@ -624,7 +688,7 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
                         ensure_session_and_user_saved(db)
                     yield _sse_event("error", {"message": str(exc)})
                     return
-                final_text = accumulated_text.strip() or "I couldn't generate a response."
+                final_text = accumulated_text.strip() or "I couldn't finish that reply. Please try again."
                 ensure_session_and_user_saved(db)
                 save_message(
                     db,
@@ -652,13 +716,50 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
         )
 
     with get_db() as db:
-        answer, session_id, intent, tool_used = await run_orchestrator(
+        answer, session_id, intent, tool_used, sources = await run_orchestrator(
             db,
             user,
             message,
             payload.session_id,
             payload.app_type or "student",
             request_metadata=request_metadata,
+        )
+
+    if stream_requested:
+        async def event_stream() -> object:
+            yield "event: start\ndata: {\"ok\":true}\n\n"
+            text = str(answer or "")
+            if not text:
+                yield "event: done\ndata: {\"text\":\"\"}\n\n"
+                return
+
+            chunk_size = 40
+            for i in range(0, len(text), chunk_size):
+                chunk = text[i : i + chunk_size]
+                payload_chunk = json.dumps({"delta": chunk}, ensure_ascii=False)
+                yield f"event: chunk\ndata: {payload_chunk}\n\n"
+                await asyncio.sleep(0.01)
+
+            payload_done = json.dumps(
+                {
+                    "text": text,
+                    "session_id": session_id,
+                    "intent": intent,
+                    "tool_used": tool_used,
+                    "sources": sources,
+                },
+                ensure_ascii=False,
+            )
+            yield f"event: done\ndata: {payload_done}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     return ok_response(
@@ -668,5 +769,6 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
             "session_id": session_id,
             "intent": intent,
             "tool_used": tool_used,
+            "sources": sources,
         },
     )

@@ -9,6 +9,8 @@ from typing import Any
 import httpx
 
 from ..utils import ProviderTimeoutError, is_provider_quota_error, post_json_with_timeout
+from .diagram_style_engine import build_diagram_style_prompt, is_diagram_style_prompt
+from .math_graph_style_engine import build_math_graph_style_prompt, is_math_graph_prompt
 from .model_registry import get_image_edit_model_candidates, get_image_model_candidates, get_openai_image_edit_model_candidates, get_openai_image_model_candidates
 
 
@@ -43,6 +45,24 @@ def _extract_gemini_image_output(raw: dict[str, Any]) -> tuple[str | None, str]:
 
 def _build_data_url(image_b64: str, mime_type: str = "image/png") -> str:
     return f"data:{mime_type};base64,{image_b64}"
+
+
+def _normalize_image_text(text: str, fallback: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return fallback
+    return re.sub(r"\s+", " ", value)
+
+
+def _prepare_generation_prompt(prompt: str) -> str:
+    value = str(prompt or "").strip()
+    if not value:
+        return value
+    if is_math_graph_prompt(value):
+        return build_math_graph_style_prompt(value)
+    if is_diagram_style_prompt(value):
+        return build_diagram_style_prompt(value)
+    return value
 
 
 def _extract_openai_images_output(raw: dict[str, Any]) -> list[str]:
@@ -217,12 +237,19 @@ async def _generate_gemini_image(
     compare: bool,
     timeout_seconds: float,
 ) -> dict[str, Any]:
+    prepared_prompt = _prepare_generation_prompt(prompt)
     models = get_image_model_candidates()
     if compare:
-        variant_prompts = [
-            f"{prompt}\n\nVariation A: balanced, polished, and visually clear.",
-            f"{prompt}\n\nVariation B: slightly more expressive and visually distinct.",
-        ]
+        if prepared_prompt != prompt:
+            variant_prompts = [
+                f"{prepared_prompt}\n\nVariation A: keep the same academic diagram style, with especially balanced spacing and very clear labels.",
+                f"{prepared_prompt}\n\nVariation B: keep the same academic diagram style, with slightly different layout emphasis while staying thin-line and instructional.",
+            ]
+        else:
+            variant_prompts = [
+                f"{prepared_prompt}\n\nVariation A: balanced, polished, and visually clear.",
+                f"{prepared_prompt}\n\nVariation B: slightly more expressive and visually distinct.",
+            ]
         results = await asyncio.gather(
             *[
                 _generate_gemini_variant(
@@ -271,7 +298,7 @@ async def _generate_gemini_image(
                 "comparison": True,
                 "provider": "gemini",
                 "model": primary_model,
-                "text": "Which image do you like more?",
+                "text": "Here are two image options. Pick the one you prefer.",
             }
 
         if non_retryable_error:
@@ -283,7 +310,7 @@ async def _generate_gemini_image(
         raise ImageGenerationError("IMAGE_GENERATION_FAILED", "No image was returned by the provider.", 502)
 
     payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "contents": [{"role": "user", "parts": [{"text": prepared_prompt}]}],
         "generationConfig": {
             "responseModalities": ["TEXT", "IMAGE"],
         },
@@ -370,13 +397,14 @@ async def _generate_openai_image(
     compare: bool,
     timeout_seconds: float,
 ) -> dict[str, Any]:
+    prepared_prompt = _prepare_generation_prompt(prompt)
     models = get_openai_image_model_candidates()
     last_error = ""
     for model in models:
         try:
             payload = {
                 "model": model,
-                "prompt": prompt,
+                "prompt": prepared_prompt,
                 "n": 2 if compare else 1,
             }
             raw = await _openai_post_json(

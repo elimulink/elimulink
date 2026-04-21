@@ -11,7 +11,7 @@ import {
   signInWithPopup,
   updateProfile,
 } from "firebase/auth";
-import { ArrowRight, Building2, ShieldCheck, Smartphone } from "lucide-react";
+import { ArrowRight, Building2, Eye, EyeOff, ShieldCheck, Smartphone } from "lucide-react";
 import { auth } from "../lib/firebase";
 import {
   resolveAppName,
@@ -78,6 +78,7 @@ function PhoneIcon() {
 export default function InstitutionLogin({ hostMode = "institution", profileDisplayName = "", user, onAuthSuccess }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState(profileDisplayName || "");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -380,14 +381,25 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
 
                 <label className="inst-auth-field">
                   <span>Password</span>
-                  <input
-                    type="password"
-                    placeholder={signup ? "Create password" : "Enter your password"}
-                    autoComplete={signup ? "new-password" : "current-password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
+                  <div className="inst-auth-password-wrap">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder={signup ? "Create password" : "Enter your password"}
+                      autoComplete={signup ? "new-password" : "current-password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="inst-auth-password-toggle"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      aria-pressed={showPassword}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </label>
 
                 <button className="inst-auth-primary compact-primary" type="submit" disabled={pending}>

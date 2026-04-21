@@ -68,6 +68,9 @@ def _deny() -> Dict[str, Any]:
         "app_access": [],
         "default_app": None,
         "access_mode": "denied",
+        "can_use_institution_ai": False,
+        "can_view_scoped_sources": False,
+        "can_access_live_institution_data": False,
     }
 
 
@@ -132,6 +135,9 @@ def _temporary_institution_access(uid: str, email: str, reason: str) -> Dict[str
         "default_app": "institution",
         "access_mode": "temporary",
         "temporary_reason": reason,
+        "can_use_institution_ai": True,
+        "can_view_scoped_sources": False,
+        "can_access_live_institution_data": False,
     }
 
 
@@ -152,6 +158,8 @@ def _get_cached_access(uid: str, app_name: str) -> Dict[str, Any] | None:
 
 def _store_cached_access(uid: str, app_name: str, payload: Dict[str, Any]) -> None:
     if payload.get("allowed") is not True:
+        return
+    if str(payload.get("access_mode") or "").strip().lower() == "temporary":
         return
     _ACCESS_CACHE[_cache_key(uid, app_name)] = (
         time.monotonic() + AI_ACCESS_CACHE_TTL_SECONDS,
@@ -212,6 +220,9 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
                 "app_access": ["public"],
                 "default_app": "public",
                 "access_mode": "verified",
+                "can_use_institution_ai": False,
+                "can_view_scoped_sources": False,
+                "can_access_live_institution_data": False,
             }
             _store_cached_access(uid, app_name, payload)
             return payload
@@ -241,6 +252,9 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
             "app_access": app_access,
             "default_app": user.get("default_app") or "public",
             "access_mode": "verified",
+            "can_use_institution_ai": False,
+            "can_view_scoped_sources": False,
+            "can_access_live_institution_data": False,
         }
         _store_cached_access(uid, app_name, payload)
         return payload
@@ -265,6 +279,9 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[
         "app_access": app_access,
         "default_app": user.get("default_app") or app_name,
         "access_mode": "verified",
+        "can_use_institution_ai": app_name == "institution",
+        "can_view_scoped_sources": app_name == "institution" and bool(user.get("institution_id")),
+        "can_access_live_institution_data": app_name == "institution" and bool(user.get("institution_id")),
     }
     _store_cached_access(uid, app_name, payload)
     return payload

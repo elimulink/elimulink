@@ -17,9 +17,11 @@ import imageAPI from "../../services/imageAPI";
 import {
   isImageClarificationQuestion,
   getVagueImageRequestClarification,
-  isImageGenerationPrompt,
 } from "../../shared/image-generation/imageGenerationIntent";
 import { shouldOfferImageComparison } from "../../shared/image-generation/imageComparisonIntent";
+import { resolveVisualIntent } from "../../shared/visual-intent/visualIntentRouting.js";
+import { searchWebImages } from "../../shared/image-search/searchWebImages.js";
+import ImageSearchPreviewModal from "../../shared/image-search/ImagePreviewModal.jsx";
 import {
   deriveActiveTopic,
   detectFollowUpIntent,
@@ -33,6 +35,7 @@ import useCapturedMedia from "../../shared/chat-media/useCapturedMedia.js";
 import ImageComparisonPicker from "../../shared/chat-media/ImageComparisonPicker.jsx";
 import "../../shared/chat-media/chat-media.css";
 import { resolveInstitutionDisplayName } from "../../institution/institutionIdentity";
+import ResponseBlockRenderer from "../../shared/assistant-blocks/ResponseBlockRenderer.jsx";
 
 const LiveMultimodalSessionContainerV2 = React.lazy(() =>
   import("../../shared/live/LiveMultimodalSessionContainerV2.jsx")
@@ -218,6 +221,8 @@ const InstitutionMessageRow = React.memo(function InstitutionMessageRow({
   message,
   onPreview,
   onImageChoice,
+  onWebImagePreview,
+  onGeneratedImagePreview,
 }) {
   const isUser = message.role === "user";
   return (
@@ -244,20 +249,34 @@ const InstitutionMessageRow = React.memo(function InstitutionMessageRow({
           </div>
         ) : null}
         <InstitutionAttachmentGrid items={message.attachments} messageId={message.id} onPreview={onPreview} />
-        {message.role === "ai" && message.imageUrl ? (
-          <img
-            src={message.imageUrl}
-            alt={message.text || "Generated image"}
-            className="mb-3 w-full max-w-xl rounded-lg border border-slate-200 object-contain"
-            loading="lazy"
-            decoding="async"
-          />
-        ) : null}
-        <div className="text-sm whitespace-pre-wrap">{message.text}</div>
+        <div className="text-sm">
+          {isUser ? (
+            <div className="whitespace-pre-wrap">{message.text}</div>
+          ) : (
+            <ResponseBlockRenderer
+              text={message.text}
+              imageUrl={message.imageUrl || ""}
+              imageVariant={message.imageVariant || "image"}
+              diagramLabel={message.diagramLabel || ""}
+              diagramSubject={message.diagramSubject || ""}
+              diagramType={message.diagramType || ""}
+              webImageResults={message.imageSearchResults || []}
+              webImageQuery={message.imageSearchQuery || ""}
+              onWebImagePreview={onWebImagePreview}
+              onGeneratedImagePreview={onGeneratedImagePreview}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
-}, (prev, next) => prev.message === next.message && prev.onPreview === next.onPreview && prev.onImageChoice === next.onImageChoice);
+}, (prev, next) =>
+  prev.message === next.message &&
+  prev.onPreview === next.onPreview &&
+  prev.onImageChoice === next.onImageChoice &&
+  prev.onWebImagePreview === next.onWebImagePreview &&
+  prev.onGeneratedImagePreview === next.onGeneratedImagePreview
+);
 
 export default function InstitutionHome({
   user,
@@ -273,6 +292,7 @@ export default function InstitutionHome({
   const [status, setStatus] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState([]);
+  const [imageSearchPreview, setImageSearchPreview] = useState(null);
   const [activeTopic, setActiveTopic] = useState("");
   const [voiceOpen, setVoiceOpen] = useState(false);
   const fileInputRef = useRef(null);
@@ -350,6 +370,10 @@ export default function InstitutionHome({
           selectedImageIndex: choiceIndex,
           selectedImageUrl,
           imageUrl: selectedImageUrl,
+          imageVariant: message.imageVariant || "image",
+          diagramLabel: message.diagramLabel || "",
+          diagramSubject: message.diagramSubject || "",
+          diagramType: message.diagramType || "",
           type: "image",
           text: choiceIndex === 0 ? "Thanks — I’ll continue with image 1." : "Got it — using image 2.",
         };
@@ -392,8 +416,24 @@ export default function InstitutionHome({
     const effectiveRequestText = isImageClarificationQuestion(latestAssistantText)
       ? `Generate an image of ${normalizedInput.normalizedText || text}`
       : requestText;
-    const shouldGenerateImage = pendingAttachments.length === 0 && isImageGenerationPrompt(effectiveRequestText);
-    const imageGenerationClarification = shouldGenerateImage
+    const previousAssistantVisual = [...messages]
+      .reverse()
+      .find((message) => message?.role === "ai" && (message?.imageUrl || (Array.isArray(message?.imageSearchResults) && message.imageSearchResults.length)));
+    const visualIntent = resolveVisualIntent(effectiveRequestText, {
+      hasAttachments: pendingAttachments.length > 0,
+      shouldEditImage: false,
+      previousVisualMode: previousAssistantVisual?.imageSearchResults?.length
+        ? (previousAssistantVisual?.imageUrl ? "both" : "web_images")
+        : previousAssistantVisual?.imageVariant === "diagram"
+          ? (String(previousAssistantVisual?.diagramLabel || "").toLowerCase().includes("graph") ? "graph" : "diagram")
+          : "",
+      previousWebQuery: previousAssistantVisual?.imageSearchQuery || "",
+      previousDiagramType: previousAssistantVisual?.diagramType || "",
+      previousDiagramSubject: previousAssistantVisual?.diagramSubject || "",
+    });
+    const shouldGenerateImage = visualIntent.mode === "diagram" || visualIntent.mode === "graph";
+    const shouldGenerateBothVisuals = visualIntent.mode === "both";
+    const imageGenerationClarification = shouldGenerateImage || shouldGenerateBothVisuals
       ? getVagueImageRequestClarification(effectiveRequestText)
       : "";
 
@@ -419,8 +459,8 @@ export default function InstitutionHome({
         {
           id: assistantMessageId,
           role: "ai",
-        text: shouldGenerateImage ? "Generating image..." : "Typing...",
-          type: shouldGenerateImage ? "image" : "text",
+        text: shouldGenerateBothVisuals ? "Preparing visuals..." : shouldGenerateImage ? "Generating image..." : visualIntent.mode === "web_images" ? "Searching images..." : "Typing...",
+          type: shouldGenerateImage || shouldGenerateBothVisuals ? "image" : "text",
           imageUrl: "",
         },
     ]);
@@ -510,6 +550,12 @@ export default function InstitutionHome({
           idToken,
           compare: shouldCompareImage,
         });
+        const imagePresentation = {
+          imageVariant: visualIntent.imageVariant,
+          diagramLabel: visualIntent.diagramLabel,
+          diagramSubject: visualIntent.diagramSubject,
+          diagramType: visualIntent.diagramType,
+        };
         if (Array.isArray(imageResult.images) && imageResult.images.length >= 2) {
           setMessages((prev) =>
             prev.map((message) =>
@@ -523,6 +569,10 @@ export default function InstitutionHome({
                     selectedImageIndex: null,
                     selectedImageUrl: "",
                     imageUrl: "",
+                    imageVariant: imagePresentation.imageVariant,
+                    diagramLabel: imagePresentation.diagramLabel,
+                    diagramSubject: imagePresentation.diagramSubject,
+                    diagramType: imagePresentation.diagramType,
                     text: "",
                     imageOptions: imageResult.images.map((item, index) => ({
                       index: index + 1,
@@ -543,9 +593,89 @@ export default function InstitutionHome({
                     ...message,
                     type: "image",
                     imageUrl,
+                    imageVariant: imagePresentation.imageVariant,
+                    diagramLabel: imagePresentation.diagramLabel,
+                    diagramSubject: imagePresentation.diagramSubject,
+                    diagramType: imagePresentation.diagramType,
                     text: "Done ✅",
                   }
                 : message
+          )
+        );
+        return;
+      }
+
+      if (shouldGenerateBothVisuals) {
+        const idToken = await idTokenPromise;
+        if (imageGenerationClarification) {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    type: "text",
+                    imageUrl: "",
+                    text: imageGenerationClarification,
+                  }
+                : message
+            )
+          );
+          return;
+        }
+
+        const [webResult, diagramResult] = await Promise.allSettled([
+          searchWebImages(visualIntent.webQuery, { limit: 8 }),
+          imageAPI.generateImage(visualIntent.diagramPrompt || effectiveRequestText, {
+            idToken,
+            compare: false,
+          }),
+        ]);
+        const results = webResult.status === "fulfilled" ? webResult.value : [];
+        const imageUrl = diagramResult.status === "fulfilled" ? String(diagramResult.value?.image || "").trim() : "";
+
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? {
+                  ...message,
+                  type: "image",
+                  imageUrl,
+                  imageVariant: visualIntent.imageVariant,
+                  diagramLabel: visualIntent.diagramLabel,
+                  diagramSubject: visualIntent.diagramSubject,
+                  diagramType: visualIntent.diagramType,
+                  imageSearchResults: results,
+                  imageSearchQuery: visualIntent.webQuery,
+                  text: results.length && imageUrl
+                    ? `Here are real web images for "${visualIntent.webQuery}" plus an AI instructional diagram.`
+                    : imageUrl
+                      ? "I prepared an AI instructional diagram, but I could not find matching real web images right now."
+                      : results.length
+                        ? `Here are real web images for "${visualIntent.webQuery}". I could not generate the diagram right now.`
+                        : "I could not prepare the requested visuals right now.",
+                }
+              : message
+          )
+        );
+        return;
+      }
+
+      if (visualIntent.mode === "web_images" && visualIntent.webQuery) {
+        const results = await searchWebImages(visualIntent.webQuery, { limit: 8 });
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? {
+                  ...message,
+                  type: "text",
+                  imageUrl: "",
+                  imageSearchResults: results,
+                  imageSearchQuery: visualIntent.webQuery,
+                  text: results.length
+                    ? `Here are image results for "${visualIntent.webQuery}".`
+                    : `I couldn't find image results for "${visualIntent.webQuery}" right now.`,
+                }
+              : message
           )
         );
         return;
@@ -747,6 +877,16 @@ export default function InstitutionHome({
                 message={message}
                 onPreview={handlePreviewAttachment}
                 onImageChoice={handleImageComparisonChoice}
+                onWebImagePreview={setImageSearchPreview}
+                onGeneratedImagePreview={(imageUrl) =>
+                  handlePreviewAttachment({
+                    id: `generated-${message.id}`,
+                    name: message.text || "Generated image",
+                    url: imageUrl,
+                    previewUrl: imageUrl,
+                    type: "image/png",
+                  })
+                }
               />
             ))}
             {isThinking ? (
@@ -879,6 +1019,7 @@ export default function InstitutionHome({
         onChange={handleAttachmentUpload}
       />
       <ChatMediaPreviewModal item={previewItem} onClose={closePreview} />
+      <ImageSearchPreviewModal result={imageSearchPreview} onClose={() => setImageSearchPreview(null)} />
     </div>
   );
 }

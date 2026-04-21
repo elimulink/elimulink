@@ -12,7 +12,7 @@ const imageAPI = {
       image: data.image,
       images: Array.isArray(data.images) ? data.images : [],
       comparison: !!data.comparison,
-      text: data.text || 'Done ✅',
+      text: data.text || 'Here is your generated image.',
       provider: data.provider || data?.data?.provider || '',
       model: data.model || data?.data?.model || '',
     };
@@ -26,7 +26,7 @@ const imageAPI = {
     if (!data?.image) throw new Error(data?.error || 'Image editing failed');
     return {
       image: data.image,
-      text: data.text || 'Updated ✅',
+      text: data.text || 'Here is the updated image.',
       provider: data.provider || data?.data?.provider || '',
       model: data.model || data?.data?.model || '',
     };

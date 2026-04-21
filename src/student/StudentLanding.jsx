@@ -61,19 +61,16 @@ import { askStudentLiveChat } from "../lib/liveChatApi.js";
 import "../shared/audio/audio-ui.css";
 import LiveMultimodalSessionContainerV2 from "../shared/live/LiveMultimodalSessionContainerV2.jsx";
 import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
-import ImageSearchResults from "../shared/image-search/ImageSearchResults.jsx";
-import { getImageSearchQuery, searchWebImages } from "../shared/image-search/searchWebImages.js";
 import {
-  getVagueImageEditClarification,
-  getVagueImageRequestClarification,
-  isImageEditFollowUpPrompt,
-  isImageGenerationPrompt,
-} from "../shared/image-generation/imageGenerationIntent.js";
-import { shouldOfferImageComparison } from "../shared/image-generation/imageComparisonIntent.js";
-import {
+  deriveActiveTopic,
+  detectFollowUpIntent,
   formatAiServiceError,
+  normalizeInput,
   resolveContinuationPrompt,
 } from "../shared/chat/chatResponseBehavior.js";
+import { fetchAssistantReplyJson, streamAssistantReplySse } from "../shared/chat/aiChatClient.js";
+import { buildAiChatRequestBody } from "../shared/chat/aiRequestBody.js";
+import { buildVisualActionPlan, runVisualActionPlan } from "../shared/chat/visualActionEngine.js";
 import ResearchActionsContainer from "../shared/research/ResearchActionsContainer.jsx";
 import { normalizeResearchSources } from "../shared/research/researchUtils.js";
 import ResponseBlockRenderer from "../shared/assistant-blocks/ResponseBlockRenderer.jsx";
@@ -254,6 +251,8 @@ function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "") {
   return {
     id: makeChatId(),
     title,
+    sessionId: "",
+    activeTopic: "",
     updatedAt: Date.now(),
     messages: assistantText ? [{ role: "assistant", text: assistantText }] : [],
   };
@@ -313,6 +312,10 @@ function Bubble({
   role,
   text,
   imageUrl = "",
+  imageVariant = "image",
+  diagramLabel = "",
+  diagramSubject = "",
+  diagramType = "",
   comparisonImages = [],
   comparisonTitle = "Which image do you like more?",
   comparisonSelectedIndex = null,
@@ -353,17 +356,6 @@ function Bubble({
             : "max-w-[98%] md:max-w-[82%] bg-transparent px-0 py-0.5 text-slate-900 dark:text-slate-100",
         ].join(" ")}
       >
-        {!isUser && imageSearchResults.length ? (
-          <div className="mb-3">
-            <ImageSearchResults
-              query={imageSearchQuery}
-              results={imageSearchResults}
-              onPreview={onImagePreview}
-              onReuse={onImageReuse}
-            />
-          </div>
-        ) : null}
-
         {!isUser && isComparisonPending ? (
           <div className="mb-3">
             <ImageComparisonPicker
@@ -382,7 +374,15 @@ function Bubble({
           <ResponseBlockRenderer
             text={text}
             imageUrl={imageUrl}
+            imageVariant={imageVariant}
+            diagramLabel={diagramLabel}
+            diagramSubject={diagramSubject}
+            diagramType={diagramType}
+            webImageResults={imageSearchResults}
+            webImageQuery={imageSearchQuery}
             sources={researchSources}
+            onWebImagePreview={onImagePreview}
+            onWebImageReuse={onImageReuse}
             onGeneratedImagePreview={onGeneratedImagePreview}
           />
         )}
@@ -940,14 +940,40 @@ export default function StudentLanding() {
     setChats((prev) =>
       prev.map((chat) => {
         if (chat.id !== currentId) return chat;
-        const nextMessages = updater(chat.messages || []);
+        let cursor = Date.now();
+        const nextMessages = (updater(chat.messages || []) || []).map((message) => {
+          if (message?.createdAt) {
+            cursor = Math.max(cursor, Number(message.createdAt));
+            return message;
+          }
+          cursor += 1;
+          return { ...(message || {}), createdAt: cursor };
+        });
         const currentTitle = String(chat.title || "").trim();
         const nextTitle =
           isUntitledChatTitle(currentTitle) && titleHint
             ? titleHint.slice(0, 40)
             : currentTitle || nextUntitledChatTitle(prev);
-        return { ...chat, messages: nextMessages, title: nextTitle, updatedAt: Date.now() };
+        return {
+          ...chat,
+          messages: nextMessages,
+          activeTopic: deriveActiveTopic(nextMessages, chat?.activeTopic || ""),
+          title: nextTitle,
+          updatedAt: Date.now(),
+        };
       })
+    );
+  }
+
+  function updateActiveChatSessionId(sessionId) {
+    const nextSessionId = String(sessionId || "").trim();
+    if (!nextSessionId || !activeChat?.id) return;
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === activeChat.id && String(chat?.sessionId || "").trim() !== nextSessionId
+          ? { ...chat, sessionId: nextSessionId, updatedAt: Date.now() }
+          : chat
+      )
     );
   }
 
@@ -990,93 +1016,32 @@ export default function StudentLanding() {
     }, "Reply");
   }
 
-  async function streamAssistantReply({ token, messageText, streamId, timingStarted = 0 }) {
-    const response = await fetch(`${apiUrl("/api/chat")}?stream=1`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        message: String(messageText || "").trim(),
+  function buildStudentRequestBody({ messageText, requestIntelligence = null }) {
+    return buildAiChatRequestBody({
+      messageText,
+      appType: "student",
+      sessionId: activeChat?.sessionId,
+      requestIntelligence,
+      extras: {
         preferredLanguage: String(settingsPrefs?.language || "en"),
-      }),
+      },
     });
+  }
 
-    const contentType = String(response.headers.get("content-type") || "");
-    if (!response.ok || !response.body || !contentType.includes("text/event-stream")) {
-      return { ok: false, reason: "no_stream" };
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-    let streamedText = "";
-    let gotChunk = false;
-
-    const processEvent = (eventBlock) => {
-      const lines = eventBlock.split("\n");
-      let eventType = "message";
-      const dataLines = [];
-      for (const line of lines) {
-        if (line.startsWith("event:")) eventType = line.slice(6).trim();
-        if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-      }
-      const payloadRaw = dataLines.join("\n");
-      if (!payloadRaw) return false;
-      let payload = {};
-      try {
-        payload = JSON.parse(payloadRaw);
-      } catch {
-        payload = {};
-      }
-
-      if (eventType === "chunk") {
-        const delta = String(payload?.delta || "");
-        if (delta) {
-          gotChunk = true;
-          streamedText += delta;
-          updateStreamingAssistant(streamId, (prev) => `${prev}${delta}`);
-        }
-      }
-      if (eventType === "done") {
-        const finalText = String(payload?.text || streamedText).trim();
-        finalizeStreamingAssistant(streamId, finalText || streamedText || "Response received.");
-        return {
-          completed: true,
-          text: finalText || streamedText || "Response received.",
-        };
-      }
-      return { completed: false };
-    };
-
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let sepIndex = buffer.search(/\r?\n\r?\n/);
-        while (sepIndex >= 0) {
-          const delimiter = buffer.slice(sepIndex).startsWith("\r\n\r\n") ? 4 : 2;
-          const rawEvent = buffer.slice(0, sepIndex);
-          buffer = buffer.slice(sepIndex + delimiter);
-          const completed = processEvent(rawEvent);
-          if (completed?.completed) {
-            return { ok: true, text: completed.text };
-          }
-          sepIndex = buffer.search(/\r?\n\r?\n/);
-        }
-      }
-    } catch {
-      return { ok: false, reason: "stream_read_error", gotChunk, streamedText };
-    }
-
-    if (gotChunk) {
-      finalizeStreamingAssistant(streamId, streamedText || "Response received.");
-      return { ok: true, text: streamedText || "Response received." };
-    }
-    return { ok: false, reason: "empty_stream" };
+  async function streamAssistantReply({ token, messageText, streamId, timingStarted = 0, requestIntelligence = null }) {
+    return streamAssistantReplySse({
+      path: "/api/ai/student",
+      token,
+      body: buildStudentRequestBody({ messageText, requestIntelligence }),
+      timingStarted,
+      onChunk: (delta) => {
+        updateStreamingAssistant(streamId, (prev) => `${prev}${delta}`);
+      },
+      onComplete: ({ sessionId, text, sources }) => {
+        updateActiveChatSessionId(sessionId);
+        finalizeStreamingAssistant(streamId, text, { sources });
+      },
+    });
   }
 
   function openSettingsPanel(options = {}) {
@@ -1341,6 +1306,10 @@ export default function StudentLanding() {
           selectedImageIndex: choiceIndex,
           selectedImageUrl,
           imageUrl: selectedImageUrl,
+          imageVariant: message.imageVariant || "image",
+          diagramLabel: message.diagramLabel || "",
+          diagramSubject: message.diagramSubject || "",
+          diagramType: message.diagramType || "",
           type: "image",
           text: choiceIndex === 0 ? "Thanks — I’ll continue with image 1." : "Got it — using image 2.",
         };
@@ -1353,7 +1322,34 @@ export default function StudentLanding() {
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
 
-    const warmSimplePrompt = isWarmSimplePrompt(clean, pendingAttachments);
+    const normalizedInput = normalizeInput(clean);
+    const earlyFollowUpIntent = detectFollowUpIntent(normalizedInput.normalizedText || clean);
+    const earlyContinuationCandidate = clean
+      ? resolveContinuationPrompt(normalizedInput.normalizedText || clean, messages)
+      : "";
+    const hasStructuredContinuation =
+      Boolean(earlyContinuationCandidate) &&
+      earlyContinuationCandidate !== (normalizedInput.normalizedText || clean);
+    const warmSimplePrompt =
+      isWarmSimplePrompt(clean, pendingAttachments) &&
+      !earlyFollowUpIntent.followUp &&
+      !hasStructuredContinuation;
+    const previousAssistantMessage = String(
+      [...(Array.isArray(messages) ? messages : [])]
+        .reverse()
+        .find((message) => message?.role === "assistant")?.text || ""
+    ).trim();
+    const currentTopic = deriveActiveTopic(messages, activeChat?.activeTopic || "");
+    const shouldReuseConversationContext = hasStructuredContinuation || earlyFollowUpIntent.followUp;
+    const requestIntelligence = {
+      originalMessage: clean,
+      normalizedMessage: normalizedInput.changed ? normalizedInput.normalizedText : "",
+      topic: shouldReuseConversationContext ? currentTopic : "",
+      followUp: shouldReuseConversationContext ? earlyFollowUpIntent.followUp : false,
+      followUpType: earlyFollowUpIntent.followUpType,
+      targetLanguage: earlyFollowUpIntent.targetLanguage,
+      previousAssistantMessage: shouldReuseConversationContext ? previousAssistantMessage : "",
+    };
     if (warmSimplePrompt) {
       const streamId = `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       updateActiveChatMessages(
@@ -1387,58 +1383,43 @@ export default function StudentLanding() {
           token,
           messageText: clean,
           streamId,
+          requestIntelligence,
         });
-        if (streamResult.ok) return;
+        if (streamResult.ok) {
+          updateActiveChatSessionId(streamResult.sessionId);
+          return;
+        }
 
-        const response = await fetch(apiUrl("/api/chat"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            message: clean,
-            preferredLanguage: String(settingsPrefs?.language || "en"),
-          }),
+        const result = await fetchAssistantReplyJson({
+          path: "/api/ai/student",
+          token,
+          body: buildStudentRequestBody({ messageText: clean, requestIntelligence }),
         });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          const code = result?.code || result?.error || `HTTP_${response.status}`;
-          const message = result?.message || code;
+        if (!result.ok) {
+          const code = result?.result?.code || result?.result?.error || `HTTP_${result.status}`;
+          const message = result?.result?.message || code;
           finalizeStreamingAssistant(
             streamId,
-            formatAiServiceError({ backendHealthy: true, status: response.status, message })
+            formatAiServiceError({ backendHealthy: true, status: result.status, message })
           );
           return;
         }
-        const reply = result?.text || result?.reply || result?.data?.reply || "Response received.";
-        finalizeStreamingAssistant(streamId, reply, { sources: normalizeResearchSources(result) });
+        updateActiveChatSessionId(result.sessionId);
+        finalizeStreamingAssistant(streamId, result.text, { sources: result.sources });
       } catch {
         finalizeStreamingAssistant(streamId, formatAiServiceError({ backendHealthy: true }));
       }
       return;
     }
 
-    const requestText = resolveContinuationPrompt(clean, messages);
-    const shouldGenerateImage =
-      pendingAttachments.length === 0 && isImageGenerationPrompt(requestText);
-    const imageGenerationClarification = shouldGenerateImage
-      ? getVagueImageRequestClarification(requestText)
-      : "";
-    const shouldEditLatestImage =
-      pendingAttachments.length === 0 &&
-      !shouldGenerateImage &&
-      (isImageEditFollowUpPrompt(requestText) || Boolean(getVagueImageEditClarification(requestText)));
-    const imageEditClarification = shouldEditLatestImage
-      ? getVagueImageEditClarification(requestText)
-      : "";
-    const latestImageUrl = shouldEditLatestImage
-      ? imageAPI.getLatestImageFromMessages(messages)
-      : "";
-    const imageSearchQuery = getImageSearchQuery(requestText, {
-      hasAttachments: pendingAttachments.length > 0,
-      shouldGenerateImage,
-      shouldEditImage: shouldEditLatestImage,
+    const requestText = hasStructuredContinuation
+      ? earlyContinuationCandidate
+      : normalizedInput.normalizedText || clean;
+    const visualActionPlan = buildVisualActionPlan({
+      requestText,
+      messages,
+      pendingAttachmentCount: pendingAttachments.length,
+      imageAPI,
     });
 
     const attachSummary =
@@ -1454,172 +1435,23 @@ export default function StudentLanding() {
     setInput("");
     clearMedia();
 
-    if (shouldGenerateImage) {
-      if (imageGenerationClarification) {
-        updateActiveChatMessages(
-          (messages) => [
-            ...messages,
-            {
-              role: "assistant",
-              text: imageGenerationClarification,
-            },
-          ],
-          clean || "Image generation"
-        );
-        return;
-      }
-      try {
-        const shouldCompareImage = shouldOfferImageComparison(requestText, {
-          isNewChat: messages.length <= 1,
-          hasExistingDirection: Boolean(imageAPI.getLatestImageFromMessages(messages)),
-          hasShownComparison: messages.some(
-            (message) => Boolean(message?.comparison) || (Array.isArray(message?.imageOptions) && message.imageOptions.length >= 2)
-          ),
-        });
-        const imageResult = await imageAPI.generateImage(requestText, {
-          compare: shouldCompareImage,
-        });
-        if (Array.isArray(imageResult.images) && imageResult.images.length >= 2) {
-          updateActiveChatMessages(
-            (messages) => [
-              ...messages,
-              {
-                id: Date.now(),
-                role: "assistant",
-                text: "",
-                type: "image-comparison",
-                comparison: true,
-                comparisonTitle: imageResult.text || "Which image do you like more?",
-                comparisonSelectedIndex: null,
-                selectedImageIndex: null,
-                selectedImageUrl: "",
-                imageUrl: "",
-                imageOptions: imageResult.images.map((item, index) => ({
-                  index: index + 1,
-                  image: item.image,
-                  model: item.model || "",
-                })),
-              },
-            ],
-            clean || "Image generation"
-          );
-          return;
-        }
-        const imageUrl = imageResult.image;
-        updateActiveChatMessages(
-          (messages) => [
-            ...messages,
-            {
-              role: "assistant",
-              text: "Done ✅",
-              imageUrl,
-              type: "image",
-            },
-          ],
-          clean || "Image generation"
-        );
-      } catch (error) {
-        updateActiveChatMessages(
-          (messages) => [
-            ...messages,
-            {
-              role: "assistant",
-              text: String(error?.message || "Image generation is unavailable right now."),
-            },
-          ],
-          clean || "Image generation"
-        );
-      }
-      return;
-    }
-
-    if (shouldEditLatestImage) {
-      if (imageEditClarification && latestImageUrl) {
-        updateActiveChatMessages(
-          (chatMessages) => [
-            ...chatMessages,
-            {
-              role: "assistant",
-              text: imageEditClarification,
-            },
-          ],
-          clean || "Image editing"
-        );
-        return;
-      }
-      if (!latestImageUrl) {
-        updateActiveChatMessages(
-          (chatMessages) => [
-            ...chatMessages,
-            {
-              role: "assistant",
-              text: "Please generate or upload an image first, then tell me how you want it edited.",
-            },
-          ],
-          clean || "Image editing"
-        );
-        return;
-      }
-
-      try {
-        const result = await imageAPI.editImage({
-          imageDataUrl: latestImageUrl,
-          prompt: clean,
-        });
-        updateActiveChatMessages(
-          (chatMessages) => [
-            ...chatMessages,
-            {
-              role: "assistant",
-              text: result.text || "Updated ✅",
-              imageUrl: result.image,
-              type: "image",
-            },
-          ],
-          "Edited image"
-        );
-      } catch (error) {
-        updateActiveChatMessages(
-          (chatMessages) => [
-            ...chatMessages,
-            {
-              role: "assistant",
-              text: String(error?.message || "Image editing is unavailable right now."),
-            },
-          ],
-          "Edited image"
-        );
-      }
-      return;
-    }
-
-    if (imageSearchQuery) {
-      try {
-        const results = await searchWebImages(imageSearchQuery, { limit: 8 });
-        updateActiveChatMessages(
-          (messages) => [
-            ...messages,
-              {
-                role: "assistant",
-                text: results.length
-                  ? `Here are some web image results for "${imageSearchQuery}".`
-                  : `I couldn't find image results for "${imageSearchQuery}" right now.`,
-                imageSearchResults: results,
-                imageSearchQuery,
-                sources: normalizeResearchSources({ imageSearchResults: results }),
-              },
-          ],
-          clean || "Web image search"
-        );
-      } catch (error) {
-        updateActiveChatMessages(
-          (messages) => [
-            ...messages,
-            { role: "assistant", text: String(error?.message || "Web image search is unavailable right now.") },
-          ],
-          clean || "Web image search"
-        );
-      }
+    if (
+      await runVisualActionPlan({
+        plan: visualActionPlan,
+        requestText,
+        clean,
+        messages,
+        imageAPI,
+        updateMessages: updateActiveChatMessages,
+        labels: {
+          generateImage: "Image generation",
+          both: "Visual explanation",
+          edit: "Image editing",
+          search: "Web image search",
+          edited: "Edited image",
+        },
+      })
+    ) {
       return;
     }
 
@@ -1658,10 +1490,7 @@ export default function StudentLanding() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({
-            message: clean,
-            preferredLanguage: String(settingsPrefs?.language || "en"),
-          }),
+          body: JSON.stringify(buildStudentRequestBody({ messageText: requestText, requestIntelligence })),
         });
       }
 
@@ -1683,6 +1512,7 @@ export default function StudentLanding() {
       }
 
       const reply = result?.text || result?.reply || result?.data?.reply || "Response received.";
+      updateActiveChatSessionId(result?.data?.session_id || result?.session_id);
       updateActiveChatMessages(
         (m) => [...m, { role: "assistant", text: reply, sources: normalizeResearchSources(result) }],
         clean || "Reply"
@@ -2839,6 +2669,10 @@ export default function StudentLanding() {
                   role={m.role}
                   text={m.text}
                   imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
+                  imageVariant={m.imageVariant || "image"}
+                  diagramLabel={m.diagramLabel || ""}
+                  diagramSubject={m.diagramSubject || ""}
+                  diagramType={m.diagramType || ""}
                   comparisonImages={m.imageOptions || []}
                   comparisonTitle={m.comparisonTitle || "Which image do you like more?"}
                   comparisonSelectedIndex={m.comparisonSelectedIndex ?? null}
@@ -3146,6 +2980,10 @@ export default function StudentLanding() {
                   role={m.role}
                   text={m.text}
                      imageUrl={m.imageUrl || (m.type === "image" ? m.content || "" : "")}
+                     imageVariant={m.imageVariant || "image"}
+                     diagramLabel={m.diagramLabel || ""}
+                     diagramSubject={m.diagramSubject || ""}
+                     diagramType={m.diagramType || ""}
                      comparisonImages={m.imageOptions || []}
                      comparisonTitle={m.comparisonTitle || "Which image do you like more?"}
                      comparisonSelectedIndex={m.comparisonSelectedIndex ?? null}
