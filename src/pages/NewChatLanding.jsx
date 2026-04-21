@@ -3927,13 +3927,19 @@ export default function NewChatLanding({
       return;
     }
 
+    const visualActionNeedsToken =
+      visualActionPlan.shouldGenerateImage ||
+      visualActionPlan.shouldGenerateBothVisuals ||
+      visualActionPlan.shouldEditLatestImage;
+    const visualActionToken = visualActionNeedsToken ? await resolveWarmIdToken(auth) : null;
+
     if (
       await runVisualActionPlan({
         plan: visualActionPlan,
         requestText: requestPrompt,
         clean,
         messages,
-        idToken,
+        idToken: visualActionToken,
         imageAPI,
         updateMessages: updateActiveChatMessages,
         createAssistantMessage: (payload) => ({

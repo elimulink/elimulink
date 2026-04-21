@@ -1128,13 +1128,21 @@ function parseStructuredMathText(text) {
   };
 }
 
-function MathSection({ label, children, emphasize = false }) {
+function MathSection({ label, children, emphasize = false, compact = false }) {
   return (
-    <section className={emphasize ? "rounded-2xl border border-sky-200/80 bg-sky-50/80 px-4 py-3 shadow-[0_8px_20px_rgba(14,165,233,0.08)] dark:border-sky-300/20 dark:bg-sky-500/10" : "rounded-2xl border border-slate-200/70 bg-slate-50/50 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]"}>
+    <section
+      className={
+        emphasize
+          ? "rounded-2xl border border-sky-200/80 bg-sky-50/80 px-4 py-3 shadow-[0_8px_20px_rgba(14,165,233,0.08)] dark:border-sky-300/20 dark:bg-sky-500/10"
+          : compact
+            ? "px-0 py-0"
+            : "px-0 py-0"
+      }
+    >
       <div className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${emphasize ? "text-sky-700 dark:text-sky-300" : "text-slate-500 dark:text-slate-400"}`}>
         {label}
       </div>
-      <div className="mt-2">{children}</div>
+      <div className={emphasize ? "mt-2" : compact ? "mt-1.5" : "mt-2"}>{children}</div>
     </section>
   );
 }
@@ -1145,80 +1153,110 @@ function MathStepsBlockContent({ block }) {
     ? { ...block, ...fallbackStructured, type: "math_steps" }
     : block;
 
-  return (
-    <div className="space-y-4">
-      {data.problem ? (
-        <MathSection label="Problem">
-          <div className="text-[15px] leading-7 text-slate-800 dark:text-slate-100">
-            {renderMathAwareText(data.problem, "math-problem")}
-          </div>
-        </MathSection>
-      ) : null}
+  const supportSections = [
+    data.given
+      ? {
+          label: "Given",
+          content: (
+            <div className="space-y-1.5">
+              {String(data.given)
+                .split("\n")
+                .filter(Boolean)
+                .map((line, index) => (
+                  <div key={`given-${index}`} className="text-[14px] leading-6 text-slate-700 dark:text-slate-200">
+                    {renderMathAwareText(line, `math-given-${index}`)}
+                  </div>
+                ))}
+            </div>
+          ),
+        }
+      : null,
+    data.formula
+      ? {
+          label: "Formula / Principle",
+          content: (
+            <div className="text-[14px] leading-6 text-slate-700 dark:text-slate-200">
+              {renderMathAwareText(data.formula, "math-formula")}
+            </div>
+          ),
+        }
+      : null,
+    data.substitution
+      ? {
+          label: "Substitution",
+          content: (
+            <div className="text-[14px] leading-6 text-slate-700 dark:text-slate-200">
+              {renderMathAwareText(data.substitution, "math-substitution")}
+            </div>
+          ),
+        }
+      : null,
+  ].filter(Boolean);
 
+  return (
+    <div className="space-y-3">
       {data.intro ? (
         <div className="text-[14px] leading-6 text-slate-600 dark:text-slate-300">{renderMathAwareText(data.intro, "math-intro")}</div>
       ) : null}
 
-      {data.given ? (
-        <MathSection label="Given">
-          <div className="space-y-2">
-            {String(data.given)
-              .split("\n")
-              .filter(Boolean)
-              .map((line, index) => (
-                <div key={`given-${index}`} className="text-[14px] leading-6 text-slate-700 dark:text-slate-200">
-                  {renderMathAwareText(line, `math-given-${index}`)}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-0">
+        <div className="lg:min-w-0 lg:flex-[0.9] lg:pr-5">
+          {data.problem ? (
+            <MathSection label="Problem" compact>
+              <div className="text-[15px] leading-7 text-slate-800 dark:text-slate-100">
+                {renderMathAwareText(data.problem, "math-problem")}
+              </div>
+            </MathSection>
+          ) : null}
+
+          {supportSections.length ? (
+            <div className="mt-3 space-y-3">
+              {supportSections.map((section) => (
+                <MathSection key={section.label} label={section.label} compact>
+                  {section.content}
+                </MathSection>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="hidden lg:block lg:w-px lg:self-stretch lg:bg-slate-200/90 dark:lg:bg-white/10" />
+
+        <div className="lg:min-w-0 lg:flex-[1.3] lg:pl-5">
+          <MathSection label="Steps" compact>
+            <div className="space-y-2.5">
+              {(data.steps || []).map((step, index) => (
+                <div
+                  key={`step-${index}`}
+                  className={`pl-3 ${index === 0 ? "" : "border-t border-slate-200/80 pt-2.5 dark:border-white/10"} border-l border-slate-300/90 dark:border-slate-500/60`}
+                >
+                  <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    {step.title || `Step ${index + 1}`}
+                  </div>
+                  {step.explanation ? (
+                    <div className="mt-1 text-[14px] leading-6 text-slate-700 dark:text-slate-200">
+                      {renderMathAwareText(step.explanation, `math-step-text-${index}`)}
+                    </div>
+                  ) : null}
+                  {step.equation ? (
+                    <div className="mt-1">{renderStandaloneMathText(step.equation, `math-step-eq-${index}`, true)}</div>
+                  ) : null}
+                  {Array.isArray(step.items) && step.items.length ? (
+                    <ul className="mt-1.5 space-y-1 text-[14px] leading-6 text-slate-700 dark:text-slate-200">
+                      {step.items.map((item, itemIndex) => (
+                        <li key={`step-${index}-item-${itemIndex}`} className="flex gap-2">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300 dark:bg-slate-500" />
+                          <span>{renderMathAwareText(item, `math-step-item-${index}-${itemIndex}`)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               ))}
-          </div>
-        </MathSection>
-      ) : null}
-
-      {data.formula ? (
-        <MathSection label="Formula / Principle">
-          <div className="text-[14px] leading-6 text-slate-700 dark:text-slate-200">
-            {renderMathAwareText(data.formula, "math-formula")}
-          </div>
-        </MathSection>
-      ) : null}
-
-      {data.substitution ? (
-        <MathSection label="Substitution">
-          <div className="text-[14px] leading-6 text-slate-700 dark:text-slate-200">
-            {renderMathAwareText(data.substitution, "math-substitution")}
-          </div>
-        </MathSection>
-      ) : null}
-
-      <MathSection label="Steps">
-        <div className="space-y-3">
-          {(data.steps || []).map((step, index) => (
-            <div key={`step-${index}`} className="rounded-2xl border border-slate-200/70 bg-white/75 px-3 py-3 dark:border-white/10 dark:bg-white/[0.04]">
-              <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
-                {step.title || `Step ${index + 1}`}
-              </div>
-              {step.explanation ? (
-                <div className="mt-1.5 text-[14px] leading-6 text-slate-700 dark:text-slate-200">
-                  {renderMathAwareText(step.explanation, `math-step-text-${index}`)}
-                </div>
-              ) : null}
-              {step.equation ? (
-                <div className="mt-1.5">{renderStandaloneMathText(step.equation, `math-step-eq-${index}`, true)}</div>
-              ) : null}
-              {Array.isArray(step.items) && step.items.length ? (
-                <ul className="mt-2 space-y-1 text-[14px] leading-6 text-slate-700 dark:text-slate-200">
-                  {step.items.map((item, itemIndex) => (
-                    <li key={`step-${index}-item-${itemIndex}`} className="flex gap-2">
-                      <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300 dark:bg-slate-500" />
-                      <span>{renderMathAwareText(item, `math-step-item-${index}-${itemIndex}`)}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
             </div>
-          ))}
+          </MathSection>
         </div>
-      </MathSection>
+      </div>
 
       {data.finalAnswer ? (
         <MathSection label="Final Answer" emphasize>
