@@ -63,8 +63,11 @@ import LiveMultimodalSessionContainerV2 from "../shared/live/LiveMultimodalSessi
 import ImageSearchPreviewModal from "../shared/image-search/ImagePreviewModal.jsx";
 import {
   deriveActiveTopic,
+  derivePendingAssistantContext,
+  detectInstitutionRouteHint,
   detectFollowUpIntent,
   formatAiServiceError,
+  isExplicitNewTopicPrompt,
   normalizeInput,
   resolveContinuationPrompt,
 } from "../shared/chat/chatResponseBehavior.js";
@@ -121,6 +124,8 @@ const STUDENT_CHAT_MODEL_OPTIONS = [
     description: "Current Student assistant model",
   },
 ];
+
+const STUDENT_AI_PATH = "/api/ai/chat";
 
 function timeGreeting(date = new Date()) {
   const hour = date.getHours();
@@ -1030,7 +1035,7 @@ export default function StudentLanding() {
 
   async function streamAssistantReply({ token, messageText, streamId, timingStarted = 0, requestIntelligence = null }) {
     return streamAssistantReplySse({
-      path: "/api/ai/student",
+      path: STUDENT_AI_PATH,
       token,
       body: buildStudentRequestBody({ messageText, requestIntelligence }),
       timingStarted,
@@ -1324,6 +1329,7 @@ export default function StudentLanding() {
 
     const normalizedInput = normalizeInput(clean);
     const earlyFollowUpIntent = detectFollowUpIntent(normalizedInput.normalizedText || clean);
+    const earlyNewTopic = isExplicitNewTopicPrompt(normalizedInput.normalizedText || clean);
     const earlyContinuationCandidate = clean
       ? resolveContinuationPrompt(normalizedInput.normalizedText || clean, messages)
       : "";
@@ -1339,8 +1345,25 @@ export default function StudentLanding() {
         .reverse()
         .find((message) => message?.role === "assistant")?.text || ""
     ).trim();
+    const pendingAssistantContext = derivePendingAssistantContext(messages);
     const currentTopic = deriveActiveTopic(messages, activeChat?.activeTopic || "");
     const shouldReuseConversationContext = hasStructuredContinuation || earlyFollowUpIntent.followUp;
+    const continuationRouteHint =
+      shouldReuseConversationContext && !earlyNewTopic
+        ? detectInstitutionRouteHint(normalizedInput.normalizedText || clean, {
+            followUp: false,
+            newTopic: false,
+          }) || (
+            ["research_with_sources", "math_solver", "physics_solver", "chemistry_solver"].includes(
+              String(pendingAssistantContext.pendingAssistantMode || "")
+            )
+              ? String(pendingAssistantContext.pendingAssistantMode || "")
+              : "general_chat"
+          )
+        : detectInstitutionRouteHint(normalizedInput.normalizedText || clean, {
+            followUp: earlyFollowUpIntent.followUp,
+            newTopic: earlyNewTopic,
+          });
     const requestIntelligence = {
       originalMessage: clean,
       normalizedMessage: normalizedInput.changed ? normalizedInput.normalizedText : "",
@@ -1349,6 +1372,10 @@ export default function StudentLanding() {
       followUpType: earlyFollowUpIntent.followUpType,
       targetLanguage: earlyFollowUpIntent.targetLanguage,
       previousAssistantMessage: shouldReuseConversationContext ? previousAssistantMessage : "",
+      pendingAssistantIntent: shouldReuseConversationContext ? pendingAssistantContext.pendingAssistantIntent : "",
+      pendingAssistantMode: shouldReuseConversationContext ? pendingAssistantContext.pendingAssistantMode : "",
+      newTopic: earlyNewTopic,
+      routeHint: continuationRouteHint,
     };
     if (warmSimplePrompt) {
       const streamId = `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1391,7 +1418,7 @@ export default function StudentLanding() {
         }
 
         const result = await fetchAssistantReplyJson({
-          path: "/api/ai/student",
+          path: STUDENT_AI_PATH,
           token,
           body: buildStudentRequestBody({ messageText: clean, requestIntelligence }),
         });
@@ -1484,7 +1511,7 @@ export default function StudentLanding() {
           body: formData,
         });
       } else {
-        response = await fetch(apiUrl("/api/chat"), {
+        response = await fetch(apiUrl(STUDENT_AI_PATH), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
