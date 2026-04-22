@@ -3,6 +3,7 @@ import re
 from typing import Any, Dict, Optional, Tuple
 
 from ..repositories.chat_repository import create_session, get_session, save_message
+from ..services.compound_question import analyze_compound_question
 from ..services.chemistry_service import solve_chemistry_problem
 from ..services.auth_service import resolve_app_type, resolve_role
 from ..services.gemini_client import generate_answer
@@ -34,6 +35,11 @@ _INSTITUTION_DATA_SCOPE_PATTERN = re.compile(
     r"\b(?:fees?|attendance|results?|gpa|analytics)\b|\b(?:attendance|results?|fees?)\s+(?:trend|status|summary)\b|\b(?:student|students)\s+(?:update|activity|status|summary)\b",
     re.IGNORECASE,
 )
+_QUESTION_START_PATTERN = re.compile(
+    r"^(?:solve|simplify|differentiate|integrate|find|calculate|determine|evaluate|compute|what is|what's|how many|how much|give)\b",
+    re.IGNORECASE,
+)
+_CONTEXT_ONLY_PATTERN = re.compile(r"^(?:a|an|the)\b.*(?:\.$|:$)", re.IGNORECASE)
 
 
 def _is_admin_like_role(role: str) -> bool:
@@ -117,6 +123,70 @@ def _institution_data_unavailable_response(message: str, intent: str) -> tuple[s
     return text, metadata
 
 
+def _is_question_like_part(text: str) -> bool:
+    return bool(_QUESTION_START_PATTERN.search(str(text or "").strip()))
+
+
+def _is_context_only_part(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value or _is_question_like_part(value):
+        return False
+    return bool(_CONTEXT_ONLY_PATTERN.search(value))
+
+
+def _merge_compound_context_parts(parts: list[str]) -> list[str]:
+    merged: list[str] = []
+    index = 0
+    while index < len(parts):
+        current = str(parts[index] or "").strip()
+        next_part = str(parts[index + 1] or "").strip() if index + 1 < len(parts) else ""
+        if current and next_part and _is_context_only_part(current) and _is_question_like_part(next_part):
+            merged.append(f"{current} {next_part}".strip())
+            index += 2
+            continue
+        if current:
+            merged.append(current)
+        index += 1
+    return merged
+
+
+async def _solve_compound_message(
+    message: str,
+    context_payload: Dict[str, Any],
+    *,
+    mode: Optional[str] = None,
+    workspace_context: Optional[Dict[str, Any]] = None,
+    assistant_style: Optional[str] = None,
+) -> tuple[str, str]:
+    parts = _merge_compound_context_parts(list(analyze_compound_question(message).parts))
+    rendered_parts: list[str] = []
+
+    for index, part in enumerate(parts, start=1):
+        part_intent = detect_intent(part)
+        if part_intent == "math_solver":
+            result = solve_math_problem(part)
+            body = f"Final answer: \\[{result.final_answer}\\]" if result.solved and result.final_answer else result.text
+        elif part_intent == "physics_solver":
+            result = solve_physics_problem(part)
+            body = f"Final answer: \\[{result.final_answer}\\]" if result.solved and result.final_answer else result.text
+        elif part_intent == "chemistry_solver":
+            result = solve_chemistry_problem(part)
+            body = f"Final answer: \\[{result.final_answer}\\]" if result.solved and result.final_answer else result.text
+        else:
+            answer, _ = await generate_answer(
+                part,
+                {**context_payload, "history": []},
+                mode=mode,
+                workspace_context=workspace_context,
+                assistant_style=assistant_style,
+            )
+            body = answer
+
+        rendered_parts.append(f"{index}. {part}\n{body}".strip())
+
+    return "\n\n".join(rendered_parts).strip(), "compound_executor"
+
+
 async def run_orchestrator(
     db,
     user,
@@ -179,9 +249,19 @@ async def run_orchestrator(
         "history": history,
         "assistantStyle": assistant_style,
     }
+    compound_analysis = analyze_compound_question(message)
 
     if institution_data_gap:
         answer, sources = _institution_data_unavailable_response(message, intent)
+        error_code = None
+    elif compound_analysis.is_compound:
+        answer, tool_used = await _solve_compound_message(
+            message,
+            context_payload,
+            mode=mode,
+            workspace_context=workspace_context,
+            assistant_style=assistant_style,
+        )
         error_code = None
     elif resolved_app == "institution" and intent == "research_with_sources" and is_research_prompt(message):
         tool_used = "research_sources_lookup"

@@ -296,6 +296,7 @@ export default function InstitutionHome({
   const [activeTopic, setActiveTopic] = useState("");
   const [voiceOpen, setVoiceOpen] = useState(false);
   const fileInputRef = useRef(null);
+  const inputRef = useRef(null);
   const {
     mediaItems: attachments,
     previewItem,
@@ -390,6 +391,22 @@ export default function InstitutionHome({
     void sendMessage(query);
   };
 
+  const handleQueryChange = useCallback((event) => {
+    const nextValue = event.target.value;
+    setQuery(nextValue);
+    event.target.style.height = "auto";
+    event.target.style.height = `${Math.min(event.target.scrollHeight, 220)}px`;
+  }, []);
+
+  const handleQueryKeyDown = useCallback((event) => {
+    if (event.key !== "Enter") return;
+    if (event.shiftKey) return;
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      void sendMessage(query);
+    }
+  }, [query]);
+
   const sendMessage = async (rawText) => {
     const pendingAttachments = attachments;
     const text = String(rawText || "").trim();
@@ -465,6 +482,9 @@ export default function InstitutionHome({
         },
     ]);
     setQuery("");
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+    }
 
     try {
       if (!user) throw new Error("Please sign in");
@@ -820,12 +840,14 @@ export default function InstitutionHome({
             <div className="flex items-start gap-3">
               <SearchIcon className="mt-1 h-5 w-5 text-slate-400" />
               <textarea
+                ref={inputRef}
                 id="institution-ai-input"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={handleQueryChange}
+                onKeyDown={handleQueryKeyDown}
                 onPaste={handlePaste}
                 rows={1}
-                className="flex-1 resize-none outline-none text-sm sm:text-base placeholder:text-slate-400 bg-transparent pt-0.5 min-h-[34px]"
+                className="flex-1 resize-none overflow-y-auto outline-none text-sm sm:text-base placeholder:text-slate-400 bg-transparent pt-0.5 min-h-[34px] max-h-[220px]"
                 placeholder="Ask about policies, draft a memo, generate report..."
               />
             </div>
@@ -867,6 +889,7 @@ export default function InstitutionHome({
           {mediaNotice ? (
             <div className="mt-2 text-xs font-medium text-sky-700">{mediaNotice}</div>
           ) : null}
+          <div className="mt-2 text-xs text-slate-500">Press Enter for a new line. Press Ctrl+Enter to send.</div>
         </form>
 
         {messages.length > 0 ? (

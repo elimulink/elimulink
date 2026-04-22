@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from .compound_question import analyze_compound_question
 from .chemistry_service import is_chemistry_prompt
 from .math_service import is_math_prompt
 from .physics_service import is_physics_prompt
@@ -177,6 +178,10 @@ def detect_intent(message: str, request_metadata: Mapping[str, Any] | None = Non
 
     if route_hint == "research_with_sources" or is_research_prompt(normalized):
         return "research_with_sources"
+
+    compound = analyze_compound_question(normalized)
+    if compound.is_compound:
+        return "general_chat"
 
     if is_chemistry_prompt(normalized):
         return "chemistry_solver"

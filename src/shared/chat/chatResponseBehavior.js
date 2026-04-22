@@ -534,6 +534,9 @@ export function formatAiServiceError({ backendHealthy = true, status = null, mes
   if (!backendHealthy) {
     return "I can't reach the AI service right now, but this should be temporary. Please try again in a moment.";
   }
+  if (cleanMessage === "MISSING_PROVIDER_KEY" || cleanMessage === "MISSINGPROVIDERKEY") {
+    return "This request tried to use image generation, but no image provider key is configured on the server right now.";
+  }
   if (status) {
     return `I hit a temporary problem while generating that reply (status ${status}). Please try again in a moment.`;
   }

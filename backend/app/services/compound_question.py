@@ -6,6 +6,7 @@ from typing import List
 
 
 _NUMBERED_LINE_RE = re.compile(r"^\s*(?:\d+[.)]|[-*•])\s+(.*\S)\s*$")
+_INLINE_NUMBERED_ITEM_RE = re.compile(r"(?<!^)(?<!\n)\s+(?=(?:\d+[.)])\s+\S)")
 _SHORTNESS_RE = re.compile(r"\b(brief|short|concise|keep it short|keep it brief|in short|just the)\b", re.IGNORECASE)
 _LIVE_LIMITATION_RE = re.compile(
     r"\b(current|today|latest|live|news|update|updates|recent|real[- ]time|right now)\b",
@@ -25,8 +26,12 @@ def _clean_text(value: str) -> str:
     return str(value or "").replace("\r\n", "\n").strip()
 
 
+def _normalize_inline_numbering(value: str) -> str:
+    return _INLINE_NUMBERED_ITEM_RE.sub("\n", str(value or ""))
+
+
 def _split_clause_parts(message: str) -> List[str]:
-    text = _clean_text(message)
+    text = _clean_text(_normalize_inline_numbering(message))
     if not text:
         return []
 
@@ -82,7 +87,8 @@ def build_compound_request_context(message: str) -> str:
             "COMPOUND_RULES:\n"
             "- Answer every requested part in order.\n"
             "- Do not stop after the first easy part.\n"
-            "- Keep the same numbering when helpful.\n"
+            "- Keep the same numbering.\n"
+            "- Render each answer in a separate downward numbered block.\n"
             "- If a part cannot be verified here, say so briefly on that exact item."
         )
 

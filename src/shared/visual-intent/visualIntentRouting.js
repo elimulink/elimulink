@@ -34,6 +34,7 @@ const CHEMISTRY_REAL_IMAGE_PATTERN = /\b(?:lab equipment|apparatus|beaker|flask|
 const CHEMISTRY_DIAGRAM_PATTERN = /\b(?:process|atom|bonding|reaction|distillation|water purification|setup)\b/i;
 const MATH_GRAPH_PATTERN = /\b(?:graph|plot|curve|triangle|vector|coordinate|axes|geometry)\b/i;
 const DIAGRAM_STRUCTURE_PATTERN = /\b(?:process|flow|cycle|structure|setup|system|labeled|labelled)\b/i;
+const VISUAL_ACTION_PATTERN = /\b(?:draw|diagram|sketch|illustrate|render|create|make|generate|plot|graph|show)\b/i;
 const DEFINITION_STYLE_PATTERN =
   /^(?:what is|define|explain|tell me about|describe|give me a definition of)\b/i;
 const CASUAL_TEXT_PATTERN = /^(?:hi|hello|hey|thanks|thank you|ok|okay)\b/i;
@@ -217,7 +218,7 @@ export function resolveVisualIntent(
   const subjectSafeDiagram =
     !explicitRealImages &&
     (
-      (diagramSubject === "biology" && BIOLOGY_STRUCTURE_PATTERN.test(value)) ||
+      (diagramSubject === "biology" && BIOLOGY_STRUCTURE_PATTERN.test(value) && (VISUAL_ACTION_PATTERN.test(value) || DIAGRAM_STRUCTURE_PATTERN.test(value))) ||
       (diagramSubject === "physics" && PHYSICS_DIAGRAM_ONLY_PATTERN.test(value)) ||
       (diagramSubject === "chemistry" && CHEMISTRY_DIAGRAM_ONLY_PATTERN.test(value)) ||
       (diagramSubject === "math" && MATH_VISUAL_PATTERN.test(value))
