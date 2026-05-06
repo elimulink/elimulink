@@ -4,6 +4,7 @@ import {
   OAuthProvider,
   RecaptchaVerifier,
   createUserWithEmailAndPassword,
+  getAdditionalUserInfo,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -11,7 +12,7 @@ import {
   signInWithPopup,
   updateProfile,
 } from "firebase/auth";
-import { ArrowRight, Building2, Eye, EyeOff, ShieldCheck, Smartphone } from "lucide-react";
+import { ArrowRight, Building2, Eye, EyeOff, KeyRound, ShieldCheck, Smartphone } from "lucide-react";
 import { auth } from "../lib/firebase";
 import {
   resolveAppName,
@@ -144,13 +145,14 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
     return message || "Authentication failed.";
   };
 
-  const verifyAccess = async (firebaseUser) => {
+  const verifyAccess = async (firebaseUser, { isNewUser = false } = {}) => {
     const appName = resolveAppName(hostMode);
     const session = await verifyFamilySession(firebaseUser, appName, {
-      timeoutMs: 20000,
-      networkRetryCount: 1,
+      timeoutMs: isNewUser ? 10000 : 20000,
+      networkRetryCount: isNewUser ? 0 : 1,
       networkRetryDelayMs: 1200,
       forceRefreshToken: false,
+      isNewUser,
     });
     if (!session?.allowed) {
       throw new Error("You do not have access to this workspace.");
@@ -177,12 +179,14 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
         if (fullName.trim()) {
           await updateProfile(credential.user, { displayName: fullName.trim() });
         }
-        await sendEmailVerification(credential.user);
+        sendEmailVerification(credential.user).catch((err) => {
+          console.warn("Institution email verification send failed:", err?.message || err);
+        });
         setNotice("Check your email to verify your account.");
       } else {
         credential = await signInWithEmailAndPassword(auth, email.trim(), password);
       }
-      const synced = await verifyAccess(credential.user);
+      const synced = await verifyAccess(credential.user, { isNewUser: signup });
       if (signup) requestPostSignupLock(credential.user.uid, "ai");
       await onAuthSuccess(synced, returnTo);
     } catch (err) {
@@ -198,7 +202,8 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
     setNotice("");
     try {
       const credential = await signInWithPopup(auth, provider);
-      const synced = await verifyAccess(credential.user);
+      const info = getAdditionalUserInfo(credential);
+      const synced = await verifyAccess(credential.user, { isNewUser: info?.isNewUser === true });
       await onAuthSuccess(synced, returnTo);
     } catch (err) {
       setError(normalizeAuthError(err));
@@ -300,11 +305,11 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
         <div className="inst-auth-card">
           <div className="inst-auth-card-top">
             <div>
-              <h2>{signup ? "Create your ElimuLink account" : "Sign in to ElimuLink"}</h2>
+              <h2>{signup ? "Create an institution account" : "Institution sign-in"}</h2>
               <p>
                 {signup
-                  ? "Create your account to access institutional tools and collaboration features."
-                  : "Access your institution workspace, AI tools, and academic operations in one place."}
+                  ? "Create an account for approved institutional access."
+                  : "Use your staff account, activation key, or approved institution identity."}
               </p>
             </div>
             <span className="inst-auth-chip">Secure sign-in</span>
@@ -315,6 +320,25 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
 
           {!phoneMode ? (
             <>
+              <button
+                type="button"
+                className="inst-auth-staff-cta"
+                onClick={() => window.location.replace("/institution/activate")}
+              >
+                <span className="inst-auth-staff-icon">
+                  <KeyRound size={18} />
+                </span>
+                <span className="inst-auth-staff-copy">
+                  <strong>Staff / admin entry</strong>
+                  <small>Activate access or sign in with a department key</small>
+                </span>
+                <ArrowRight size={17} />
+              </button>
+
+              <div className="inst-auth-divider inst-auth-divider-tight">
+                <span>OR USE APPROVED ACCOUNT</span>
+              </div>
+
               <div className="inst-auth-socials compact-two-col">
                 <button type="button" className="inst-auth-social-btn" onClick={() => handleProviderPopup(new GoogleAuthProvider())} disabled={pending}>
                   <GoogleIcon />
@@ -362,8 +386,8 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
                 </button>
               </div>
 
-              <div className="inst-auth-divider">
-                <span>OR</span>
+              <div className="inst-auth-divider inst-auth-divider-tight">
+                <span>OR EMAIL</span>
               </div>
 
               <form className="inst-auth-form compact-form" onSubmit={handleEmailAuth}>
@@ -478,12 +502,9 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
             </button>
           </div>
 
-          <div className="inst-auth-sub-actions compact-links">
-            <button type="button" className="inst-auth-secondary-link" onClick={() => window.location.replace("/institution/activate")}>
-              Staff / admin entry
-            </button>
-            <button type="button" className="inst-auth-secondary-link" onClick={() => window.location.replace("/institution/activate")}>
-              First-time activation
+          <div className="inst-auth-sub-actions compact-links inst-auth-single-action">
+            <button type="button" className="inst-auth-secondary-link" onClick={() => window.location.replace("/login?returnTo=%2Fpublic")}>
+              Public portal
             </button>
           </div>
         </div>

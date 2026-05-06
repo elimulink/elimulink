@@ -371,7 +371,17 @@ export default function HostRouter() {
     () => getResolvedHostMode(window.location.hostname, window.location.pathname),
     [],
   );
-  const isLocalDevHost = useMemo(() => isLocalHostname(window.location.hostname), []);
+  const localHostname = useMemo(() => String(window.location.hostname || '').toLowerCase(), []);
+  const isLocalDevHost = useMemo(() => isLocalHostname(localHostname), [localHostname]);
+  const isLanDevInstitutionHost = useMemo(
+    () =>
+      import.meta.env.DEV &&
+      hostMode === 'institution' &&
+      isLocalDevHost &&
+      localHostname !== 'localhost' &&
+      localHostname !== '127.0.0.1',
+    [hostMode, isLocalDevHost, localHostname],
+  );
   const getBootstrapRetryDelayMs = (failureCount) =>
     hostMode === 'institution'
       ? 2000 * Math.max(1, failureCount)
@@ -380,7 +390,8 @@ export default function HostRouter() {
     hostMode === 'institution' ? INSTITUTION_BOOTSTRAP_TIMEOUT_MS : BOOTSTRAP_TIMEOUT_MS;
   const getBootstrapMaxTempFailures = () =>
     hostMode === 'institution' ? INSTITUTION_BOOTSTRAP_MAX_TEMP_FAILURES : BOOTSTRAP_MAX_TEMP_FAILURES;
-  const devAuthBypassActive = DEV_AUTH_BYPASS_ENABLED && hostMode === 'institution';
+  const devAuthBypassActive =
+    hostMode === 'institution' && (DEV_AUTH_BYPASS_ENABLED || isLanDevInstitutionHost);
   const devBypassUser = useMemo(
     () =>
       devAuthBypassActive
@@ -1160,11 +1171,6 @@ export default function HostRouter() {
       {flashMessage ? (
         <div className="fixed top-3 left-1/2 z-50 -translate-x-1/2 rounded border border-amber-500/40 bg-amber-900/60 px-4 py-2 text-xs text-amber-100">
           {flashMessage}
-        </div>
-      ) : null}
-      {devAuthBypassActive ? (
-        <div className="fixed bottom-3 right-3 z-50 rounded-full border border-amber-300/80 bg-amber-50/95 px-3 py-1.5 text-[10px] font-semibold text-amber-900 shadow-[0_12px_26px_rgba(120,53,15,0.12)] md:bottom-auto md:top-3 md:text-[11px]">
-          Dev Mode: Auth Bypass Active
         </div>
       ) : null}
       {backgroundVerifyState === 'error' && backgroundVerifyMessage ? (

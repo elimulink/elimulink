@@ -43,6 +43,11 @@ export default function StaffEntry() {
   const canRedeem = !pending && accessKey.trim().length > 0 && !activationToken;
   const canComplete = !pending && Boolean(activationToken) && String(password).length >= 8 && password === confirmPassword;
   const canLogin = !pending && String(staffPassword).length >= 8 && String(staffUsername).trim().length > 0 && String(departmentKey).trim().length > 0;
+  const isLocalDevHost =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1" ||
+      window.location.hostname.endsWith(".local"));
 
   async function handleSubmit(event) {
     event.preventDefault();

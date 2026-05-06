@@ -1032,7 +1032,7 @@ function renderMathAwareText(text, keyPrefix = "math-aware") {
       return (
         <div
           key={`${keyPrefix}-display-${index}`}
-          className="my-2.5 overflow-x-auto px-1 py-1.5 text-slate-900 dark:text-white"
+          className="my-2.5 w-full px-0 py-1 text-slate-900 dark:text-white"
         >
           {renderKatexExpression(part, { displayMode: true, keyPrefix: `${keyPrefix}-display-${index}` })}
         </div>
@@ -1042,7 +1042,7 @@ function renderMathAwareText(text, keyPrefix = "math-aware") {
       return (
         <span
           key={`${keyPrefix}-inline-${index}`}
-          className="mx-0.5 inline-flex max-w-full overflow-x-auto align-middle text-slate-900 dark:text-white"
+          className="mx-0.5 inline-flex min-w-0 max-w-full align-middle text-slate-900 dark:text-white"
         >
           {renderKatexExpression(part, { displayMode: false, keyPrefix: `${keyPrefix}-inline-${index}` })}
         </span>
@@ -1067,7 +1067,7 @@ function renderStandaloneMathText(text, keyPrefix = "standalone-math", displayMo
   const expression = hasDelimiter ? rawText : `\\(${rawText}\\)`;
   if (displayMode) {
     return (
-      <div className="overflow-x-auto px-1 py-1 text-slate-900 dark:text-white">
+      <div className="w-full px-0 py-1 text-slate-900 dark:text-white">
         {renderKatexExpression(expression, {
           displayMode: true,
           keyPrefix,
@@ -1199,8 +1199,8 @@ function MathStepsBlockContent({ block }) {
         <div className="text-[14px] leading-6 text-slate-600 dark:text-slate-300">{renderMathAwareText(data.intro, "math-intro")}</div>
       ) : null}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-0">
-        <div className="lg:min-w-0 lg:flex-[0.9] lg:pr-5">
+      <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-start lg:gap-0">
+        <div className="min-w-0 lg:flex-[0.95] lg:pr-5">
           {data.problem ? (
             <MathSection label="Problem" compact>
               <div className="text-[15px] leading-7 text-slate-800 dark:text-slate-100">
@@ -1222,9 +1222,9 @@ function MathStepsBlockContent({ block }) {
 
         <div className="hidden lg:block lg:w-px lg:self-stretch lg:bg-slate-200/90 dark:lg:bg-white/10" />
 
-        <div className="lg:min-w-0 lg:flex-[1.3] lg:pl-5">
+        <div className="min-w-0 lg:flex-[1.55] lg:pl-5">
           <MathSection label="Steps" compact>
-            <div className="space-y-2.5">
+          <div className="space-y-2.5">
               {(data.steps || []).map((step, index) => (
                 <div
                   key={`step-${index}`}
@@ -1307,7 +1307,7 @@ export function MathBlock({ block }) {
             .map((line, index) => (
               <div
                 key={`math-line-${index}`}
-                className={/^\s*(Final Answer|Answer)\s*:/i.test(line) ? "rounded-2xl border border-sky-200/80 bg-sky-50/80 px-3 py-2.5 shadow-[0_8px_20px_rgba(14,165,233,0.08)] dark:border-sky-300/20 dark:bg-sky-500/10" : "overflow-x-auto"}
+                className={/^\s*(Final Answer|Answer)\s*:/i.test(line) ? "rounded-2xl border border-sky-200/80 bg-sky-50/80 px-3 py-2.5 shadow-[0_8px_20px_rgba(14,165,233,0.08)] dark:border-sky-300/20 dark:bg-sky-500/10" : ""}
               >
                 {renderMathAwareText(line, `math-line-${index}`)}
               </div>

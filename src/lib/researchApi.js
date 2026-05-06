@@ -1,5 +1,6 @@
 import { apiUrl } from "./apiUrl";
 import { auth } from "./firebase";
+import { resolveWarmIdToken } from "../shared/auth/idTokenCache.js";
 
 function logInstitutionBackgroundTiming(label, startedAt, meta = {}) {
   console.debug("[AI_TIMING][institution][background]", {
@@ -64,8 +65,11 @@ async function apiFetch(path, options = {}) {
 }
 
 async function apiFetchWithAuth(path, options = {}) {
-  const currentUser = auth?.currentUser || null;
-  const token = currentUser ? await currentUser.getIdToken(true).catch(() => "") : "";
+  let token = await resolveWarmIdToken(auth).catch(() => null);
+  if (!token) {
+    const currentUser = auth?.currentUser || null;
+    token = currentUser ? await currentUser.getIdToken(true).catch(() => "") : "";
+  }
   return apiFetch(path, {
     ...options,
     headers: {
@@ -76,8 +80,11 @@ async function apiFetchWithAuth(path, options = {}) {
 }
 
 async function apiFetchBlobWithAuth(path, options = {}) {
-  const currentUser = auth?.currentUser || null;
-  const token = currentUser ? await currentUser.getIdToken(true).catch(() => "") : "";
+  let token = await resolveWarmIdToken(auth).catch(() => null);
+  if (!token) {
+    const currentUser = auth?.currentUser || null;
+    token = currentUser ? await currentUser.getIdToken(true).catch(() => "") : "";
+  }
   const response = await fetch(apiUrl(path), {
     headers: {
       ...(options.headers || {}),

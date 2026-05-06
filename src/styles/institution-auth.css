@@ -326,6 +326,66 @@ body {
   gap: 8px;
 }
 
+.inst-auth-staff-cta {
+  width: 100%;
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 64, 175, 0.96));
+  color: #ffffff;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    filter 0.18s ease;
+}
+
+.inst-auth-staff-cta:hover {
+  filter: brightness(1.03);
+  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.22);
+}
+
+.inst-auth-staff-cta:active {
+  transform: translateY(1px);
+}
+
+.inst-auth-staff-icon {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.13);
+  color: #bfdbfe;
+}
+
+.inst-auth-staff-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.inst-auth-staff-copy strong {
+  font-size: 15px;
+  line-height: 1.15;
+}
+
+.inst-auth-staff-copy small {
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(226, 232, 240, 0.82);
+}
+
 .inst-auth-social-btn {
   width: 100%;
   min-height: 44px;
@@ -385,6 +445,11 @@ body {
   font-size: 11px;
   color: #94a3b8;
   letter-spacing: 0.16em;
+}
+
+.inst-auth-divider-tight {
+  margin: 10px 0;
+  letter-spacing: 0.12em;
 }
 
 .inst-auth-divider::before,
@@ -549,6 +614,11 @@ body {
 .compact-links {
   margin-top: 12px;
   gap: 10px 14px;
+}
+
+.inst-auth-single-action {
+  justify-content: center;
+  margin-top: 12px;
 }
 
 .inst-auth-link-button,
@@ -747,6 +817,12 @@ body {
     gap: 10px;
   }
 
+  .inst-auth-staff-cta {
+    min-height: 76px;
+    padding: 15px;
+    border-radius: 20px;
+  }
+
   .inst-auth-social-btn {
     min-height: 50px;
     height: 50px;
@@ -904,6 +980,14 @@ body {
     box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
   }
 
+  .inst-auth-staff-copy strong {
+    font-size: 15px;
+  }
+
+  .inst-auth-staff-copy small {
+    font-size: 12px;
+  }
+
   .inst-auth-field span {
     color: #42556f;
     font-weight: 700;
@@ -947,6 +1031,14 @@ body {
     padding: 0 12px;
     font-size: 14px;
     color: #122238;
+  }
+
+  .inst-auth-staff-cta {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .inst-auth-staff-cta > svg {
+    display: none;
   }
 
   .inst-auth-field input {

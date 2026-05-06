@@ -13,6 +13,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 class VerifyAccessRequest(BaseModel):
     app: str
+    is_new_user: bool = False
 
 
 @router.post("/verify-app-access")
@@ -59,6 +60,7 @@ async def verify_app_access(
         uid=uid,
         email=email,
         app_name=app_name,
+        is_new_user=payload.is_new_user,
     )
     print(
         f"[ENTRY_TIMING][backend] marker=ai_access_done app={app_name} uid={uid} "

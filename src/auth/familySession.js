@@ -66,7 +66,7 @@ function getDeferredSessionMaxAgeMs(appName) {
 async function runVerifyFamilySession(
   firebaseUser,
   normalizedApp,
-  { timeoutMs, forceRefreshToken, networkRetryCount, networkRetryDelayMs }
+  { timeoutMs, forceRefreshToken, networkRetryCount, networkRetryDelayMs, isNewUser }
 ) {
   const maxRetries = Number.isFinite(networkRetryCount)
     ? Math.max(0, Number(networkRetryCount))
@@ -107,7 +107,10 @@ async function runVerifyFamilySession(
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ app: normalizedApp }),
+        body: JSON.stringify({
+          app: normalizedApp,
+          is_new_user: isNewUser === true,
+        }),
         ...(controller ? { signal: controller.signal } : {}),
       });
       console.debug("[ENTRY_TIMING][frontend]", {
@@ -411,12 +414,14 @@ export async function verifyFamilySession(firebaseUser, appName, options = {}) {
   const networkRetryDelayMs = Number.isFinite(options.networkRetryDelayMs)
     ? Math.max(0, Number(options.networkRetryDelayMs))
     : VERIFY_NETWORK_RETRY_DELAY_MS;
+  const isNewUser = options.isNewUser === true;
   console.info("[FAMILY_SESSION] verify:start", {
     uid: firebaseUser.uid,
     email: firebaseUser.email || null,
     app: normalizedApp,
     timeoutMs,
     forceRefreshToken,
+    isNewUser,
   });
   const inFlightKey = buildInFlightVerifyKey(firebaseUser, normalizedApp, forceRefreshToken);
   if (inFlightVerifyRequests.has(inFlightKey)) {
@@ -428,6 +433,7 @@ export async function verifyFamilySession(firebaseUser, appName, options = {}) {
     forceRefreshToken,
     networkRetryCount,
     networkRetryDelayMs,
+    isNewUser,
   }).finally(() => {
     inFlightVerifyRequests.delete(inFlightKey);
   });

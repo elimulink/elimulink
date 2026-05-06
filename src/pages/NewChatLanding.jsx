@@ -15,6 +15,7 @@ import {
   GraduationCap,
   IdCard,
   Image,
+  Link2,
   LayoutGrid,
   Menu,
   MessagesSquare,
@@ -119,6 +120,7 @@ import CoursesDashboard from "./CoursesDashboard";
 import AssignmentsPage from "./AssignmentsPage";
 import ResultsPage from "./ResultsPage";
 import StudentAttendancePage from "../student/StudentAttendancePage";
+import InstitutionConnectedAppsPage from "./InstitutionConnectedAppsPage";
 
 const AdminAnalyticsLanding = lazy(() => import("./AdminAnalyticsLanding"));
 
@@ -138,6 +140,7 @@ const COLLABORATION_ITEMS = [
 
 const SETTINGS_ITEM = { key: "settings", label: "Settings", icon: Settings };
 const MORE_ITEMS_BASE = [
+  { key: "connected-apps", label: "Connected Apps", icon: Link2 },
   { key: "attendance", label: "Attendance", icon: BarChart3 },
   { key: "fees", label: "Fees Portal", icon: Wallet },
   { key: "profile", label: "Profile", icon: IdCard },
@@ -589,7 +592,7 @@ function isInstitutionSimplePrompt(text, attachments = []) {
   if (clean.length > 260) return false;
   if (/\n/.test(clean)) return false;
   if (/[/:]/.test(clean)) return false;
-  if (/\b(?:http|www\.|attach|upload|image|photo|diagram|chart|pdf|file|citation|source|sources|research paper|references?)\b/i.test(clean)) return false;
+  if (/\b(?:http|www\.|attach|upload|image|photo|diagram|chart|pdf|file|citation|source|sources|research paper|references?|draw|sketch|illustrate|illustration|labeled|labelled|process|flow|circuit|structure|graph|plot|vector|triangle|geometry)\b/i.test(clean)) return false;
   if (/\b(?:compare|contrast|versus|vs|difference between|analyze critically|with citations|latest research|journal|scholar|dataset|table|markdown|code block|bibliography|peer reviewed|literature review|case study|methodology|research questions?|tool|workflow|generate a report)\b/i.test(clean)) return false;
   const wordCount = clean.split(/\s+/).filter(Boolean).length;
   if (wordCount > 36) return false;
@@ -1329,6 +1332,7 @@ export default function NewChatLanding({
   const [isNewChatMenuOpen, setIsNewChatMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationsMenuOpen, setIsNotificationsMenuOpen] = useState(false);
+  const [isConnectedAppsDetailOpen, setIsConnectedAppsDetailOpen] = useState(false);
   const [isDesktopSettingsLauncherOpen, setIsDesktopSettingsLauncherOpen] = useState(false);
   const [selectedDesktopSettingsSection, setSelectedDesktopSettingsSection] = useState("general");
   const [useDesktopSettingsWorkspace, setUseDesktopSettingsWorkspace] = useState(false);
@@ -3640,6 +3644,7 @@ export default function NewChatLanding({
     const clean = text.trim();
     if (!clean && pendingAttachments.length === 0) return;
     const earlyNormalizedInput = normalizeInput(clean);
+    const earlyRequestText = earlyNormalizedInput.normalizedText || clean;
     const earlyFollowUpIntent = detectFollowUpIntent(earlyNormalizedInput.normalizedText || clean);
     const earlyNewTopic = isExplicitNewTopicPrompt(earlyNormalizedInput.normalizedText || clean);
     const earlyContinuationCandidate = clean
@@ -3657,17 +3662,28 @@ export default function NewChatLanding({
       targetLanguage: "",
       previousAssistantMessage: "",
       newTopic: earlyNewTopic,
-      routeHint: detectInstitutionRouteHint(earlyNormalizedInput.normalizedText || clean, {
+      routeHint: detectInstitutionRouteHint(earlyRequestText, {
         followUp: false,
         newTopic: earlyNewTopic,
       }),
     };
     const warmAcademicContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
+    const earlyShouldExtractLinks = isLinkExtractionPrompt(earlyRequestText);
+    const earlyVisualActionPlan = buildVisualActionPlan({
+      requestText: earlyRequestText,
+      messages,
+      pendingAttachmentCount: pendingAttachments.length,
+      disableVisualRouting: earlyShouldExtractLinks,
+      imageAPI,
+    });
     const warmSimplePrompt =
       pendingAttachments.length === 0 &&
       isInstitutionSimplePrompt(clean, pendingAttachments) &&
       !earlyFollowUpIntent.followUp &&
-      !hasStructuredContinuation;
+      !hasStructuredContinuation &&
+      earlyVisualActionPlan.visualIntent.mode === "text" &&
+      !earlyVisualActionPlan.shouldEditLatestImage &&
+      !earlyVisualActionPlan.imageSearchQuery;
 
     if (warmSimplePrompt) {
       const messageText = clean;
@@ -4786,7 +4802,7 @@ export default function NewChatLanding({
         </>
       ) : null}
 
-      {!isAdminShellEmbed ? (
+      {!isAdminShellEmbed && active !== "connected-apps" && !isConnectedAppsDetailOpen ? (
       <div className="pointer-events-none fixed inset-x-0 top-0 z-20 hidden w-full px-4 pt-2 md:block md:px-5">
           <div className="flex h-12 items-center gap-2 px-2.5 md:px-3">
           <button
@@ -6018,7 +6034,7 @@ export default function NewChatLanding({
             </div>
           ) : null}
 
-          {active !== "newchat" ? (
+          {active !== "newchat" && active !== "connected-apps" ? (
             <div className="md:hidden flex-1 overflow-y-auto bg-slate-50 px-4 pt-20 pb-24 dark:bg-slate-950">
               <PlaceholderPanel
                 title={activePlaceholder?.title || "Coming soon"}
@@ -6401,7 +6417,22 @@ export default function NewChatLanding({
             </div>
           ) : null}
 
-          {active !== "newchat" ? (
+          {active === "connected-apps" ? (
+            <div className="flex flex-1 min-h-0">
+              <InstitutionConnectedAppsPage
+                onDetailViewChange={setIsConnectedAppsDetailOpen}
+                onBack={() => {
+                  setIsConnectedAppsDetailOpen(false);
+                  setActive("newchat");
+                }}
+                onPromptPrefill={(prompt) => {
+                  setInput(prompt);
+                  setIsConnectedAppsDetailOpen(false);
+                  setActive("newchat");
+                }}
+              />
+            </div>
+          ) : active !== "newchat" ? (
             <div className="hidden md:flex flex-1 min-h-0 rounded-2xl bg-slate-50/80 border border-slate-200/80 shadow-[0_10px_24px_rgba(15,23,42,0.05)] p-6">
               <div className="w-full max-w-2xl">
                 <PlaceholderPanel

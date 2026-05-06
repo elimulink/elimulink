@@ -167,11 +167,20 @@ def _store_cached_access(uid: str, app_name: str, payload: Dict[str, Any]) -> No
     )
 
 
-async def resolve_ai_family_access(uid: str, email: str, app_name: str) -> Dict[str, Any]:
+async def resolve_ai_family_access(uid: str, email: str, app_name: str, is_new_user: bool = False) -> Dict[str, Any]:
     cached_payload = _get_cached_access(uid, app_name)
     if cached_payload is not None:
         print(f"[AI_ACCESS] resolve:cache_hit uid={uid} app={app_name}")
         return cached_payload
+
+    if (
+        is_new_user
+        and app_name == "institution"
+        and TEMP_INSTITUTION_ACCESS_ENABLED
+        and _can_use_temporary_institution_access(email)
+    ):
+        reason = _temporary_institution_reason(email, "new_institution_user")
+        return _temporary_institution_access(uid, email, reason)
 
     supabase = get_supabase_client()
     if supabase is None:

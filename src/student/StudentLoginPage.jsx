@@ -11,19 +11,23 @@ import {
   signInWithPopup,
   updateProfile,
 } from 'firebase/auth';
+import { ArrowRight, BookOpenText, Eye, EyeOff, GraduationCap, ShieldCheck, Smartphone } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { verifyFamilySession } from '../auth/familySession';
 import { requestPostSignupLock } from '../auth/secureLock';
+import '../styles/institution-auth.css';
 
 function sanitizeReturnTo(returnToRaw) {
   const raw = String(returnToRaw || '').trim();
   if (!raw || raw === '/' || raw === 'null' || raw === 'undefined') return '/student';
+
   let value = raw;
   try {
     value = decodeURIComponent(raw);
   } catch (_) {
     value = raw;
   }
+
   if (!value.startsWith('/')) return '/student';
   if (value.startsWith('//')) return '/student';
   if (value.includes('://')) return '/student';
@@ -34,7 +38,7 @@ function sanitizeReturnTo(returnToRaw) {
 
 function GoogleIcon() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="inst-auth-social-icon">
       <path fill="#4285F4" d="M21.6 12.23c0-.78-.07-1.53-.2-2.25H12v4.26h5.4a4.62 4.62 0 0 1-2 3.03v2.52h3.24c1.9-1.75 2.96-4.34 2.96-7.56Z" />
       <path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.44l-3.24-2.52c-.9.6-2.05.96-3.38.96-2.6 0-4.8-1.76-5.58-4.12H3.07v2.6A10 10 0 0 0 12 22Z" />
       <path fill="#FBBC05" d="M6.42 13.88A6 6 0 0 1 6.1 12c0-.65.11-1.28.32-1.88v-2.6H3.07A10 10 0 0 0 2 12c0 1.61.39 3.13 1.07 4.48l3.35-2.6Z" />
@@ -45,7 +49,7 @@ function GoogleIcon() {
 
 function AppleIcon() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-current">
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="inst-auth-social-icon inst-auth-social-icon-fill">
       <path d="M15.1 3.5c.8-1 1.3-2.3 1.2-3.5-1.2.1-2.6.8-3.5 1.8-.8.9-1.4 2.2-1.2 3.4 1.3.1 2.6-.7 3.5-1.7Zm4.4 14.8c-.6 1.4-.9 2-1.7 3.2-1.1 1.6-2.6 3.6-4.4 3.6-1.6 0-2-.9-4.2-.9s-2.7.9-4.3.9c-1.8 0-3.2-1.8-4.4-3.4C-2.9 16.8-.8 8.3 4.2 8.1c1.5 0 2.8 1 3.7 1 1 0 2.8-1.3 4.8-1.1.8 0 3 .3 4.4 2.4-3.9 2.1-3.3 7.6 2.4 9.9Z" />
     </svg>
   );
@@ -53,7 +57,7 @@ function AppleIcon() {
 
 function MicrosoftIcon() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="inst-auth-social-icon">
       <path fill="#F25022" d="M2 2h9.5v9.5H2z" />
       <path fill="#7FBA00" d="M12.5 2H22v9.5h-9.5z" />
       <path fill="#00A4EF" d="M2 12.5h9.5V22H2z" />
@@ -63,32 +67,13 @@ function MicrosoftIcon() {
 }
 
 function PhoneIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-current">
-      <path d="M7 2.75A2.75 2.75 0 0 0 4.25 5.5v13A2.75 2.75 0 0 0 7 21.25h10a2.75 2.75 0 0 0 2.75-2.75v-13A2.75 2.75 0 0 0 17 2.75H7Zm5 16.5a1.12 1.12 0 1 1 0-2.24 1.12 1.12 0 0 1 0 2.24Zm4.25-4.5h-8.5V5.75h8.5v9Z" />
-    </svg>
-  );
-}
-
-function SocialButton({ icon, children, onClick, disabled }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="group flex h-12 w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white/88 px-4 text-sm font-semibold text-slate-800 shadow-[0_10px_26px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-    >
-      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-        {icon}
-      </span>
-      <span>{children}</span>
-    </button>
-  );
+  return <Smartphone size={18} className="inst-auth-social-icon inst-auth-social-icon-fill" />;
 }
 
 export default function StudentLoginPage({ onAuthSuccess, profileDisplayName }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState(profileDisplayName || '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -112,10 +97,30 @@ export default function StudentLoginPage({ onAuthSuccess, profileDisplayName }) 
 
   useEffect(() => {
     const root = document.getElementById('root');
-    document.documentElement.classList.add('login-viewport-lock');
-    document.body.classList.add('login-viewport-lock');
-    root?.classList.add('login-viewport-lock');
+    const desktopLockQuery = window.matchMedia('(min-width: 981px)');
+
+    const applyViewportLock = () => {
+      const shouldLock = desktopLockQuery.matches;
+      document.documentElement.classList.toggle('login-viewport-lock', shouldLock);
+      document.body.classList.toggle('login-viewport-lock', shouldLock);
+      root?.classList.toggle('login-viewport-lock', shouldLock);
+    };
+
+    applyViewportLock();
+
+    const handleChange = () => applyViewportLock();
+    if (desktopLockQuery.addEventListener) {
+      desktopLockQuery.addEventListener('change', handleChange);
+    } else if (desktopLockQuery.addListener) {
+      desktopLockQuery.addListener(handleChange);
+    }
+
     return () => {
+      if (desktopLockQuery.removeEventListener) {
+        desktopLockQuery.removeEventListener('change', handleChange);
+      } else if (desktopLockQuery.removeListener) {
+        desktopLockQuery.removeListener(handleChange);
+      }
       document.documentElement.classList.remove('login-viewport-lock');
       document.body.classList.remove('login-viewport-lock');
       root?.classList.remove('login-viewport-lock');
@@ -125,24 +130,12 @@ export default function StudentLoginPage({ onAuthSuccess, profileDisplayName }) 
   const normalizeAuthError = (err) => {
     const code = String(err?.code || '');
     const message = String(err?.message || '');
-    if (code.includes('auth/operation-not-allowed')) {
-      return 'This sign-in method is currently unavailable for the student portal.';
-    }
-    if (code.includes('auth/popup-closed-by-user')) {
-      return 'Sign-in was cancelled.';
-    }
-    if (code.includes('auth/invalid-phone-number')) {
-      return 'Enter a valid phone number in international format, for example +2547XXXXXXXX.';
-    }
-    if (code.includes('auth/missing-phone-number')) {
-      return 'Enter your phone number first.';
-    }
-    if (code.includes('auth/invalid-verification-code')) {
-      return 'The verification code is invalid. Try again.';
-    }
-    if (code.includes('auth/code-expired')) {
-      return 'The verification code expired. Request a new one.';
-    }
+    if (code.includes('auth/operation-not-allowed')) return 'This sign-in method is currently unavailable for the student portal.';
+    if (code.includes('auth/popup-closed-by-user')) return 'Sign-in was cancelled.';
+    if (code.includes('auth/invalid-phone-number')) return 'Enter a valid phone number in international format, for example +2547XXXXXXXX.';
+    if (code.includes('auth/missing-phone-number')) return 'Enter your phone number first.';
+    if (code.includes('auth/invalid-verification-code')) return 'The verification code is invalid. Try again.';
+    if (code.includes('auth/code-expired')) return 'The verification code expired. Request a new one.';
     return message || 'Authentication failed.';
   };
 
@@ -199,9 +192,7 @@ export default function StudentLoginPage({ onAuthSuccess, profileDisplayName }) 
   const getRecaptchaVerifier = () => {
     if (!auth) throw new Error('Firebase Auth is not ready.');
     if (recaptchaVerifierRef.current) return recaptchaVerifierRef.current;
-    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaContainerId, {
-      size: 'invisible',
-    });
+    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
     return recaptchaVerifierRef.current;
   };
 
@@ -255,255 +246,247 @@ export default function StudentLoginPage({ onAuthSuccess, profileDisplayName }) 
   };
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(20,184,166,0.14),_transparent_24%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.16),_transparent_30%),linear-gradient(135deg,#f8fbff_0%,#ecfeff_38%,#eef2ff_100%)] text-slate-900">
-      <div className="mx-auto grid h-full max-w-7xl grid-cols-1 overflow-hidden lg:grid-cols-[1.02fr_0.98fr]">
-        <section className="relative hidden h-[100dvh] overflow-hidden lg:flex lg:items-center lg:px-14 lg:py-12">
-          <div className="absolute inset-0 bg-[linear-gradient(160deg,rgba(255,255,255,0.82),rgba(236,254,255,0.36))]" />
-          <div className="absolute left-10 top-10 h-40 w-40 rounded-full bg-teal-300/20 blur-3xl" />
-          <div className="absolute bottom-10 right-12 h-56 w-56 rounded-full bg-blue-300/20 blur-3xl" />
-          <div className="relative z-10 max-w-xl">
-            <div className="inline-flex items-center gap-4">
-              <img src="/favicon.png" alt="ElimuLink" className="h-14 w-auto object-contain shrink-0" />
+    <div className="inst-auth-page">
+      <section className="inst-auth-brand">
+        <div className="inst-auth-brand-inner">
+          <div className="inst-auth-logo-row">
+            <img src="/favicon.png" alt="ElimuLink" className="h-11 w-auto object-contain shrink-0" />
+            <div>
+              <div className="inst-auth-brand-name">ElimuLink</div>
+              <div className="inst-auth-brand-sub">Student Portal</div>
+            </div>
+          </div>
+
+          <div className="inst-auth-eyebrow">CONNECTED STUDENT WORKSPACE</div>
+          <h1 className="inst-auth-title">One clean entry point for your learning journey.</h1>
+          <p className="inst-auth-subtitle">
+            ElimuLink keeps your courses, timetable, results, and academic support in one polished student workspace.
+          </p>
+
+          <div className="inst-auth-trust-grid">
+            <div className="inst-auth-trust-card">
+              <GraduationCap className="inst-auth-trust-icon" />
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/80">Student Portal</div>
-                <div className="text-3xl font-semibold tracking-tight text-slate-950">ElimuLink</div>
+                <h3>Student-first</h3>
+                <p>Built for coursework, revision, schedules, and everyday academic progress.</p>
               </div>
             </div>
-            <div className="mt-10">
-              <div className="inline-flex items-center rounded-full border border-white/70 bg-white/70 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-700 shadow-sm backdrop-blur">
-                STUDENT PORTAL
+
+            <div className="inst-auth-trust-card">
+              <BookOpenText className="inst-auth-trust-icon" />
+              <div>
+                <h3>Everything together</h3>
+                <p>Your learning tools, updates, and support stay connected in one calm portal.</p>
               </div>
-              <h1 className="mt-6 max-w-lg text-5xl font-semibold leading-[1.02] tracking-tight text-slate-950">
-                Sign in to ElimuLink
-              </h1>
-              <p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">
-                Access your courses, results, timetable, and academic journey in one place.
-              </p>
             </div>
-            <div className="mt-10 grid max-w-lg gap-4">
-              <div className="rounded-3xl border border-white/70 bg-white/65 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur-xl">
-                <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Student access</div>
-                <div className="mt-2 text-sm leading-6 text-slate-700">
-                  Your learning tools, timetable, results, and academic updates stay connected in one student workspace.
-                </div>
-              </div>
-              <div className="rounded-3xl border border-white/70 bg-white/65 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur-xl">
-                <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Student-only sign-in</div>
-                <div className="mt-2 text-sm leading-6 text-slate-700">
-                  This portal is intended for students only.
-                </div>
+
+            <div className="inst-auth-trust-card">
+              <ShieldCheck className="inst-auth-trust-icon" />
+              <div>
+                <h3>Secure access</h3>
+                <p>Sign in safely across student services, AI support, and your academic workspace.</p>
               </div>
             </div>
           </div>
-        </section>
 
-        <section className="flex h-[100dvh] min-h-0 items-center justify-center overflow-hidden px-4 py-4 sm:px-6 lg:px-10 lg:py-8">
-          <div className="w-full max-w-[29rem] overflow-hidden rounded-[30px] border border-white/70 bg-white/58 p-3 shadow-[0_30px_80px_rgba(15,23,42,0.14)] backdrop-blur-2xl lg:max-w-[31rem]">
-            <div className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-[26px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.78))] px-5 py-5 sm:px-6 sm:py-6 lg:max-h-none lg:overflow-visible">
-              <div className="mb-4 flex items-center gap-3 lg:hidden">
-                <img src="/favicon.png" alt="ElimuLink" className="h-11 w-auto object-contain shrink-0" />
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-700/80">Student Portal</div>
-                  <div className="text-lg font-semibold text-slate-950">ElimuLink</div>
-                </div>
+          <div className="inst-auth-footer-note">Student access for student.elimulink.co.ke</div>
+        </div>
+      </section>
+
+      <section className="inst-auth-panel">
+        <div className="inst-auth-card">
+          <div className="inst-auth-card-top">
+            <div>
+              <h2>{signup ? 'Create your student account' : 'Sign in to ElimuLink'}</h2>
+              <p>
+                {signup
+                  ? 'Create your account to access student tools, learning support, and your academic workspace.'
+                  : 'Sign in to continue with your student dashboard, timetable, results, and study tools.'}
+              </p>
+            </div>
+            <span className="inst-auth-chip">Students only</span>
+          </div>
+
+          {notice ? <div className="inst-auth-notice">{notice}</div> : null}
+          {error ? <div className="inst-auth-error">{error}</div> : null}
+
+          {!phoneMode ? (
+            <>
+              <div className="inst-auth-notice">This sign-in is for students only.</div>
+
+              <div className="inst-auth-socials compact-two-col">
+                <button type="button" className="inst-auth-social-btn" onClick={() => handleProviderPopup(new GoogleAuthProvider())} disabled={pending}>
+                  <GoogleIcon />
+                  <span>Continue with Google</span>
+                </button>
+                <button
+                  type="button"
+                  className="inst-auth-social-btn"
+                  onClick={() => {
+                    const provider = new OAuthProvider('apple.com');
+                    provider.addScope('email');
+                    provider.addScope('name');
+                    handleProviderPopup(provider);
+                  }}
+                  disabled={pending}
+                >
+                  <AppleIcon />
+                  <span>Continue with Apple</span>
+                </button>
+                <button
+                  type="button"
+                  className="inst-auth-social-btn"
+                  onClick={() => {
+                    const provider = new OAuthProvider('microsoft.com');
+                    provider.setCustomParameters({ prompt: 'select_account' });
+                    handleProviderPopup(provider);
+                  }}
+                  disabled={pending}
+                >
+                  <MicrosoftIcon />
+                  <span>Continue with Microsoft</span>
+                </button>
+                <button
+                  type="button"
+                  className="inst-auth-social-btn"
+                  onClick={() => {
+                    setPhoneMode(true);
+                    setError('');
+                    setNotice('');
+                  }}
+                  disabled={pending}
+                >
+                  <PhoneIcon />
+                  <span>Continue with Phone Number</span>
+                </button>
               </div>
 
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal-700">STUDENT PORTAL</div>
-                  <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Welcome back</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">Sign in to continue your learning.</p>
-                </div>
-                <div className="hidden rounded-2xl bg-slate-100/90 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 sm:block">
-                  Students only
-                </div>
+              <div className="inst-auth-divider">
+                <span>OR</span>
               </div>
 
-              <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-900">
-                This sign-in is for students only.
-              </div>
+              <form className="inst-auth-form compact-form" onSubmit={handleEmailAuth}>
+                {signup ? (
+                  <label className="inst-auth-field">
+                    <span>Full name</span>
+                    <input type="text" placeholder="Enter your full name" autoComplete="name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+                  </label>
+                ) : null}
 
-              {notice ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/95 px-4 py-3 text-sm text-amber-900">{notice}</div> : null}
-              {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50/95 px-4 py-3 text-sm text-rose-900">{error}</div> : null}
+                <label className="inst-auth-field">
+                  <span>Student email</span>
+                  <input type="email" placeholder="Enter your student email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                </label>
 
-              {!phoneMode ? (
-                <>
-                  <div className="mt-4 space-y-2.5">
-                    <SocialButton icon={<GoogleIcon />} onClick={() => handleProviderPopup(new GoogleAuthProvider())} disabled={pending}>
-                      Continue with Google
-                    </SocialButton>
-                    <SocialButton
-                      icon={<AppleIcon />}
-                      onClick={() => {
-                        const provider = new OAuthProvider('apple.com');
-                        provider.addScope('email');
-                        provider.addScope('name');
-                        handleProviderPopup(provider);
-                      }}
-                      disabled={pending}
-                    >
-                      Continue with Apple
-                    </SocialButton>
-                    <SocialButton
-                      icon={<MicrosoftIcon />}
-                      onClick={() => {
-                        const provider = new OAuthProvider('microsoft.com');
-                        provider.setCustomParameters({ prompt: 'select_account' });
-                        handleProviderPopup(provider);
-                      }}
-                      disabled={pending}
-                    >
-                      Continue with Microsoft
-                    </SocialButton>
-                    <SocialButton
-                      icon={<PhoneIcon />}
-                      onClick={() => {
-                        setPhoneMode(true);
-                        setError('');
-                        setNotice('');
-                      }}
-                      disabled={pending}
-                    >
-                      Continue with phone
-                    </SocialButton>
-                  </div>
-
-                  <div className="my-4 flex items-center gap-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                    <div className="h-px flex-1 bg-slate-200" />
-                    <span>OR</span>
-                    <div className="h-px flex-1 bg-slate-200" />
-                  </div>
-
-                  <form className="space-y-2.5" onSubmit={handleEmailAuth}>
-                    {signup ? (
-                      <input
-                        className="h-11 w-full rounded-2xl border border-slate-200 bg-white/90 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                        placeholder="Full name"
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        required
-                      />
-                    ) : null}
+                <label className="inst-auth-field">
+                  <span>Password</span>
+                  <div className="inst-auth-password-wrap">
                     <input
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white/90 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                      placeholder="Student email"
-                      type="email"
-                      autoComplete="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                    />
-                    <input
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white/90 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                      placeholder="Password"
-                      type="password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder={signup ? 'Create password' : 'Enter your password'}
                       autoComplete={signup ? 'new-password' : 'current-password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
                     />
                     <button
-                      className="h-11 w-full rounded-2xl bg-gradient-to-r from-sky-600 via-blue-600 to-teal-500 px-4 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(14,116,144,0.24)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-                      type="submit"
-                      disabled={pending}
+                      type="button"
+                      className="inst-auth-password-toggle"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-pressed={showPassword}
                     >
-                      {pending ? 'Please wait...' : signup ? 'Create account' : 'Sign in'}
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
-                  </form>
-                </>
-              ) : (
-                <div className="mt-4 rounded-[26px] border border-slate-200 bg-slate-50/90 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-600 via-blue-600 to-teal-500 text-white">
-                      <PhoneIcon />
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900">Continue with phone</div>
-                      <div className="text-xs text-slate-500">Use your student number and verification code.</div>
-                    </div>
                   </div>
-                  <form className="mt-4 space-y-3" onSubmit={handlePhoneVerify}>
-                    <input
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white/90 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                      placeholder="+2547XXXXXXXX"
-                      type="tel"
-                      autoComplete="tel"
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value)}
-                      required
-                    />
-                    {phoneConfirmation ? (
-                      <input
-                        className="h-11 w-full rounded-2xl border border-slate-200 bg-white/90 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                        placeholder="Enter verification code"
-                        inputMode="numeric"
-                        value={phoneOtp}
-                        onChange={(e) => setPhoneOtp(e.target.value)}
-                        required
-                      />
-                    ) : null}
-                    <button
-                      className="h-11 w-full rounded-2xl bg-gradient-to-r from-sky-600 via-blue-600 to-teal-500 px-4 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(14,116,144,0.24)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-                      type={phoneConfirmation ? 'submit' : 'button'}
-                      onClick={phoneConfirmation ? undefined : handlePhoneRequest}
-                      disabled={pending}
-                    >
-                      {pending ? 'Please wait...' : phoneConfirmation ? 'Verify and continue' : 'Send verification code'}
-                    </button>
-                  </form>
-                  <button
-                    className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
-                    type="button"
-                    onClick={resetPhoneFlow}
-                    disabled={pending}
-                  >
-                    Back to student sign-in
-                  </button>
-                  <div id={recaptchaContainerId} />
-                </div>
-              )}
+                </label>
 
-              <div className="mt-4 space-y-2.5 text-center text-sm">
-                {!signup ? (
-                  <button
-                    className="block w-full text-slate-600 underline decoration-slate-300 underline-offset-4 transition hover:text-slate-900"
-                    type="button"
-                    onClick={async () => {
-                      setError('');
-                      setNotice('');
-                      try {
-                        if (!email.trim()) throw new Error('Enter your email first.');
-                        await sendPasswordResetEmail(auth, email.trim());
-                        setNotice('Password reset email sent. Check your inbox.');
-                      } catch (err) {
-                        setError(normalizeAuthError(err));
-                      }
-                    }}
-                  >
-                    Forgot password?
-                  </button>
-                ) : null}
-                <button
-                  className="block w-full text-slate-600 underline decoration-slate-300 underline-offset-4 transition hover:text-slate-900"
-                  type="button"
-                  onClick={() => {
-                    setSignup((prev) => !prev);
-                    setPhoneMode(false);
-                    setError('');
-                    setNotice('');
-                  }}
-                >
-                  {signup ? 'Already have an account? Sign in' : 'Create account'}
+                <button className="inst-auth-primary compact-primary" type="submit" disabled={pending}>
+                  <span>{pending ? 'Please wait...' : signup ? 'Create account' : 'Sign in'}</span>
+                  {!pending ? <ArrowRight size={16} /> : null}
                 </button>
+              </form>
+            </>
+          ) : (
+            <div className="inst-auth-phone-panel">
+              <div className="inst-auth-phone-head">
+                <div className="inst-auth-phone-icon">
+                  <PhoneIcon />
+                </div>
+                <div>
+                  <div className="inst-auth-phone-title">Continue with Phone Number</div>
+                  <div className="inst-auth-phone-subtitle">Use your student number and verification code.</div>
+                </div>
               </div>
 
-              <p className="mt-3 text-center text-xs leading-5 text-slate-400">
-                Staff and administrators should use their dedicated workspace sign-in.
-              </p>
+              <form className="inst-auth-form inst-auth-phone-form" onSubmit={handlePhoneVerify}>
+                <label className="inst-auth-field">
+                  <span>Phone number</span>
+                  <input type="tel" placeholder="+2547XXXXXXXX" autoComplete="tel" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} required />
+                </label>
+                {phoneConfirmation ? (
+                  <label className="inst-auth-field">
+                    <span>Verification code</span>
+                    <input type="text" placeholder="Enter verification code" inputMode="numeric" value={phoneOtp} onChange={(e) => setPhoneOtp(e.target.value)} required />
+                  </label>
+                ) : null}
+                <button className="inst-auth-primary inst-auth-phone-primary" type={phoneConfirmation ? 'submit' : 'button'} onClick={phoneConfirmation ? undefined : handlePhoneRequest} disabled={pending}>
+                  <span>{pending ? 'Please wait...' : phoneConfirmation ? 'Verify and continue' : 'Send verification code'}</span>
+                  {!pending ? <ArrowRight size={16} /> : null}
+                </button>
+              </form>
+
+              <button className="inst-auth-secondary-btn" type="button" onClick={resetPhoneFlow} disabled={pending}>
+                Back to student sign-in
+              </button>
+              <div id={recaptchaContainerId} />
             </div>
+          )}
+
+          <div className="inst-auth-links compact-links">
+            {!signup ? (
+              <button
+                type="button"
+                className="inst-auth-link-button"
+                onClick={async () => {
+                  setError('');
+                  setNotice('');
+                  try {
+                    if (!email.trim()) throw new Error('Enter your email first.');
+                    await sendPasswordResetEmail(auth, email.trim());
+                    setNotice('Password reset email sent. Check your inbox.');
+                  } catch (err) {
+                    setError(normalizeAuthError(err));
+                  }
+                }}
+              >
+                Forgot password?
+              </button>
+            ) : <span />}
+            <button
+              type="button"
+              className="inst-auth-link-button"
+              onClick={() => {
+                setSignup((prev) => !prev);
+                setPhoneMode(false);
+                setNotice('');
+                setError('');
+              }}
+            >
+              {signup ? 'Already have an account? Sign in' : 'Create account'}
+            </button>
           </div>
-        </section>
-      </div>
+
+          <div className="inst-auth-sub-actions compact-links">
+            <button type="button" className="inst-auth-secondary-link" onClick={() => window.location.replace('/public')}>
+              Public access
+            </button>
+            <button type="button" className="inst-auth-secondary-link" onClick={() => window.location.replace('/institution/activate')}>
+              Staff / admin entry
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
