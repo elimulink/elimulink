@@ -210,9 +210,15 @@ async def resolve_ai_family_access(uid: str, email: str, app_name: str, is_new_u
         )
     except TimeoutError as exc:
         print(f"[AI_ACCESS] resolve:timeout uid={uid} app={app_name}")
+        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _can_use_temporary_institution_access(email):
+            reason = _temporary_institution_reason(email, "profile_lookup_timeout")
+            return _temporary_institution_access(uid, email, reason)
         raise HTTPException(status_code=504, detail="AI family access lookup timed out") from exc
     except Exception as exc:  # noqa: BLE001
         print(f"[AI_ACCESS] resolve:error uid={uid} app={app_name} error={exc}")
+        if app_name == "institution" and TEMP_INSTITUTION_ACCESS_ENABLED and _can_use_temporary_institution_access(email):
+            reason = _temporary_institution_reason(email, "profile_lookup_failed")
+            return _temporary_institution_access(uid, email, reason)
         raise HTTPException(status_code=500, detail="AI family access lookup failed") from exc
 
     rows = response.data or []
