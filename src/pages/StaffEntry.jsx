@@ -42,7 +42,7 @@ export default function StaffEntry() {
 
   const canRedeem = !pending && accessKey.trim().length > 0 && !activationToken;
   const canComplete = !pending && Boolean(activationToken) && String(password).length >= 8 && password === confirmPassword;
-  const canLogin = !pending && String(staffPassword).length >= 8 && String(staffUsername).trim().length > 0 && String(departmentKey).trim().length > 0;
+  const canLogin = !pending && String(staffPassword).length >= 8 && String(loginEmail).trim().length > 0 && String(departmentKey).trim().length > 0;
   const isLocalDevHost =
     typeof window !== "undefined" &&
     (window.location.hostname === "localhost" ||
@@ -87,7 +87,7 @@ export default function StaffEntry() {
       });
       setSuccess("Activation complete. Use the staff login form below to continue.");
       setStaffEmail(String(activationData?.email || staffEmail || "").trim());
-      setStaffUsername(fullName.trim());
+      setStaffUsername(String(activationData?.email || staffEmail || "").trim());
       setStaffPassword(password);
       setDepartmentKey(String(activationData?.departmentName || activationData?.departmentId || "").trim());
       setConfirmPassword("");
@@ -101,11 +101,11 @@ export default function StaffEntry() {
 
   async function handleStaffLogin(event) {
     event.preventDefault();
-    const usernameValue = String(staffUsername || "").trim();
+    const emailValue = String(loginEmail || staffUsername || "").trim();
     const passwordValue = String(staffPassword || "").trim();
     const departmentValue = String(departmentKey || "").trim();
-    if (!usernameValue) {
-      setError("Enter your username.");
+    if (!emailValue || !emailValue.includes("@")) {
+      setError("Enter your activation email.");
       return;
     }
     if (!passwordValue || passwordValue.length < 8) {
@@ -121,12 +121,7 @@ export default function StaffEntry() {
     setError("");
     setSuccess("");
     try {
-      const emailToUse = loginEmail || (usernameValue.includes("@") ? usernameValue : "");
-      if (!emailToUse) {
-        throw new Error("We need the activation email to sign you in. Please complete activation first.");
-      }
-
-      const credential = await signInWithEmailAndPassword(auth, emailToUse, passwordValue);
+      const credential = await signInWithEmailAndPassword(auth, emailValue, passwordValue);
       const token = await credential.user.getIdToken();
       const response = await fetch(apiUrl("/api/auth/verify-staff-code"), {
         method: "POST",
@@ -179,7 +174,7 @@ export default function StaffEntry() {
               <h1>{view === "login" ? "Staff login" : activationToken ? "Complete staff entry" : "Staff entry"}</h1>
               <p>
                 {view === "login"
-                  ? "Use your username, password, and department key to enter the admin workspace."
+                  ? "Use your activation email, password, and department key to enter the admin workspace."
                   : "Continue with secure institutional access for staff, department leads, and administrators."}
               </p>
             </div>
@@ -253,8 +248,8 @@ export default function StaffEntry() {
 
               <form className="staff-entry-form" onSubmit={handleStaffLogin}>
                 <label className="inst-auth-field">
-                  <span>Username</span>
-                  <input type="text" placeholder="Enter your username" value={staffUsername} onChange={(e) => setStaffUsername(e.target.value)} required />
+                  <span>Activation email</span>
+                  <input type="email" placeholder="Enter your activation email" autoComplete="email" value={staffUsername} onChange={(e) => setStaffUsername(e.target.value)} required />
                 </label>
 
                 <label className="inst-auth-field">

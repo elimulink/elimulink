@@ -358,6 +358,11 @@ body {
   transform: translateY(1px);
 }
 
+.inst-auth-activation-cta {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
 .inst-auth-staff-icon {
   width: 42px;
   height: 42px;

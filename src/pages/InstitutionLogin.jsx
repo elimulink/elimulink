@@ -1,24 +1,18 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   GoogleAuthProvider,
   OAuthProvider,
-  RecaptchaVerifier,
-  createUserWithEmailAndPassword,
   getAdditionalUserInfo,
-  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
-  signInWithPhoneNumber,
   signInWithPopup,
-  updateProfile,
 } from "firebase/auth";
-import { ArrowRight, Building2, Eye, EyeOff, KeyRound, ShieldCheck, Smartphone } from "lucide-react";
+import { ArrowRight, Building2, Eye, EyeOff, KeyRound, ShieldCheck } from "lucide-react";
 import { auth } from "../lib/firebase";
 import {
   resolveAppName,
   verifyFamilySession,
 } from "../auth/familySession";
-import { requestPostSignupLock } from "../auth/secureLock";
 import "../styles/institution-auth.css";
 
 function sanitizeReturnTo(returnToRaw, mode = "institution", isAuthenticated = false) {
@@ -53,14 +47,6 @@ function GoogleIcon() {
   );
 }
 
-function AppleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="inst-auth-social-icon inst-auth-social-icon-fill">
-      <path d="M15.1 3.5c.8-1 1.3-2.3 1.2-3.5-1.2.1-2.6.8-3.5 1.8-.8.9-1.4 2.2-1.2 3.4 1.3.1 2.6-.7 3.5-1.7Zm4.4 14.8c-.6 1.4-.9 2-1.7 3.2-1.1 1.6-2.6 3.6-4.4 3.6-1.6 0-2-.9-4.2-.9s-2.7.9-4.3.9c-1.8 0-3.2-1.8-4.4-3.4C-2.9 16.8-.8 8.3 4.2 8.1c1.5 0 2.8 1 3.7 1 1 0 2.8-1.3 4.8-1.1.8 0 3 .3 4.4 2.4-3.9 2.1-3.3 7.6 2.4 9.9Z" />
-    </svg>
-  );
-}
-
 function MicrosoftIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="inst-auth-social-icon">
@@ -72,26 +58,15 @@ function MicrosoftIcon() {
   );
 }
 
-function PhoneIcon() {
-  return <Smartphone size={18} className="inst-auth-social-icon inst-auth-social-icon-fill" />;
-}
-
-export default function InstitutionLogin({ hostMode = "institution", profileDisplayName = "", user, onAuthSuccess }) {
+export default function InstitutionLogin({ hostMode = "institution", user, onAuthSuccess }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [fullName, setFullName] = useState(profileDisplayName || "");
   const [pending, setPending] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [signup, setSignup] = useState(false);
   const [returnTo, setReturnTo] = useState("");
-  const [phoneMode, setPhoneMode] = useState(false);
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [phoneOtp, setPhoneOtp] = useState("");
-  const [phoneConfirmation, setPhoneConfirmation] = useState(null);
-  const recaptchaVerifierRef = useRef(null);
-  const recaptchaContainerId = "institution-login-phone-recaptcha";
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -142,6 +117,9 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
     if (code.includes("auth/missing-phone-number")) return "Enter your phone number first.";
     if (code.includes("auth/invalid-verification-code")) return "The verification code is invalid. Try again.";
     if (code.includes("auth/code-expired")) return "The verification code expired. Request a new one.";
+    if (/AI family access lookup failed|workspace verification|verify app access/i.test(message)) {
+      return "We couldn't verify your institution access yet. Please retry, or use Staff / admin entry if you have an activation key.";
+    }
     return message || "Authentication failed.";
   };
 
@@ -160,105 +138,42 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
     return session.profile;
   };
 
-  const getRecaptchaVerifier = () => {
-    if (!auth) throw new Error("Firebase Auth is not ready.");
-    if (recaptchaVerifierRef.current) return recaptchaVerifierRef.current;
-    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaContainerId, { size: "invisible" });
-    return recaptchaVerifierRef.current;
-  };
-
   const handleEmailAuth = async (event) => {
     event.preventDefault();
     setPending(true);
+    setPendingMessage("Signing in...");
     setError("");
     setNotice("");
     try {
-      let credential = null;
-      if (signup) {
-        credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        if (fullName.trim()) {
-          await updateProfile(credential.user, { displayName: fullName.trim() });
-        }
-        sendEmailVerification(credential.user).catch((err) => {
-          console.warn("Institution email verification send failed:", err?.message || err);
-        });
-        setNotice("Check your email to verify your account.");
-      } else {
-        credential = await signInWithEmailAndPassword(auth, email.trim(), password);
-      }
-      const synced = await verifyAccess(credential.user, { isNewUser: signup });
-      if (signup) requestPostSignupLock(credential.user.uid, "ai");
-      await onAuthSuccess(synced, returnTo);
-    } catch (err) {
-      setError(normalizeAuthError(err));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const handleProviderPopup = async (provider) => {
-    setPending(true);
-    setError("");
-    setNotice("");
-    try {
-      const credential = await signInWithPopup(auth, provider);
-      const info = getAdditionalUserInfo(credential);
-      const synced = await verifyAccess(credential.user, { isNewUser: info?.isNewUser === true });
-      await onAuthSuccess(synced, returnTo);
-    } catch (err) {
-      setError(normalizeAuthError(err));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const handlePhoneRequest = async () => {
-    setPending(true);
-    setError("");
-    setNotice("");
-    try {
-      const verifier = getRecaptchaVerifier();
-      const confirmation = await signInWithPhoneNumber(auth, phoneNumber.trim(), verifier);
-      setPhoneConfirmation(confirmation);
-      setNotice(`Verification code sent to ${phoneNumber.trim()}.`);
-    } catch (err) {
-      if (recaptchaVerifierRef.current) {
-        recaptchaVerifierRef.current.clear();
-        recaptchaVerifierRef.current = null;
-      }
-      setError(normalizeAuthError(err));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const handlePhoneVerify = async (event) => {
-    event.preventDefault();
-    if (!phoneConfirmation) {
-      setError("Request a verification code first.");
-      return;
-    }
-    setPending(true);
-    setError("");
-    setNotice("");
-    try {
-      const credential = await phoneConfirmation.confirm(phoneOtp.trim());
+      const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+      setPendingMessage("Verifying institution access...");
       const synced = await verifyAccess(credential.user);
       await onAuthSuccess(synced, returnTo);
     } catch (err) {
       setError(normalizeAuthError(err));
     } finally {
       setPending(false);
+      setPendingMessage("");
     }
   };
 
-  const resetPhoneFlow = () => {
-    setPhoneMode(false);
-    setPhoneNumber("");
-    setPhoneOtp("");
-    setPhoneConfirmation(null);
-    setNotice("");
+  const handleProviderPopup = async (provider) => {
+    setPending(true);
+    setPendingMessage("Opening secure sign-in...");
     setError("");
+    setNotice("");
+    try {
+      const credential = await signInWithPopup(auth, provider);
+      const info = getAdditionalUserInfo(credential);
+      setPendingMessage("Verifying institution access...");
+      const synced = await verifyAccess(credential.user, { isNewUser: info?.isNewUser === true });
+      await onAuthSuccess(synced, returnTo);
+    } catch (err) {
+      setError(normalizeAuthError(err));
+    } finally {
+      setPending(false);
+      setPendingMessage("");
+    }
   };
 
   return (
@@ -305,12 +220,8 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
         <div className="inst-auth-card">
           <div className="inst-auth-card-top">
             <div>
-              <h2>{signup ? "Create an institution account" : "Institution sign-in"}</h2>
-              <p>
-                {signup
-                  ? "Create an account for approved institutional access."
-                  : "Use your staff account, activation key, or approved institution identity."}
-              </p>
+              <h2>Institution sign-in</h2>
+              <p>Use an approved institution account. New staff should activate their access first.</p>
             </div>
             <span className="inst-auth-chip">Secure sign-in</span>
           </div>
@@ -318,192 +229,99 @@ export default function InstitutionLogin({ hostMode = "institution", profileDisp
           {notice ? <div className="inst-auth-notice">{notice}</div> : null}
           {error ? <div className="inst-auth-error">{error}</div> : null}
 
-          {!phoneMode ? (
-            <>
-              <button
-                type="button"
-                className="inst-auth-staff-cta"
-                onClick={() => window.location.replace("/institution/activate")}
-              >
-                <span className="inst-auth-staff-icon">
-                  <KeyRound size={18} />
-                </span>
-                <span className="inst-auth-staff-copy">
-                  <strong>Staff / admin entry</strong>
-                  <small>Activate access or sign in with a department key</small>
-                </span>
-                <ArrowRight size={17} />
-              </button>
+          <form className="inst-auth-form compact-form" onSubmit={handleEmailAuth}>
+            <label className="inst-auth-field">
+              <span>Email address</span>
+              <input type="email" placeholder="Enter your work email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            </label>
 
-              <div className="inst-auth-divider inst-auth-divider-tight">
-                <span>OR USE APPROVED ACCOUNT</span>
-              </div>
-
-              <div className="inst-auth-socials compact-two-col">
-                <button type="button" className="inst-auth-social-btn" onClick={() => handleProviderPopup(new GoogleAuthProvider())} disabled={pending}>
-                  <GoogleIcon />
-                  <span>Continue with Google</span>
-                </button>
+            <label className="inst-auth-field">
+              <span>Password</span>
+              <div className="inst-auth-password-wrap">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
                 <button
                   type="button"
-                  className="inst-auth-social-btn"
-                  onClick={() => {
-                    const provider = new OAuthProvider("apple.com");
-                    provider.addScope("email");
-                    provider.addScope("name");
-                    handleProviderPopup(provider);
-                  }}
-                  disabled={pending}
+                  className="inst-auth-password-toggle"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
                 >
-                  <AppleIcon />
-                  <span>Continue with Apple</span>
-                </button>
-                <button
-                  type="button"
-                  className="inst-auth-social-btn"
-                  onClick={() => {
-                    const provider = new OAuthProvider("microsoft.com");
-                    provider.setCustomParameters({ prompt: "select_account" });
-                    handleProviderPopup(provider);
-                  }}
-                  disabled={pending}
-                >
-                  <MicrosoftIcon />
-                  <span>Continue with Microsoft</span>
-                </button>
-                <button
-                  type="button"
-                  className="inst-auth-social-btn"
-                  onClick={() => {
-                    setPhoneMode(true);
-                    setError("");
-                    setNotice("");
-                  }}
-                  disabled={pending}
-                >
-                  <PhoneIcon />
-                  <span>Continue with Phone Number</span>
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+            </label>
 
-              <div className="inst-auth-divider inst-auth-divider-tight">
-                <span>OR EMAIL</span>
-              </div>
+            <button className="inst-auth-primary compact-primary" type="submit" disabled={pending}>
+              <span>{pending ? pendingMessage || "Please wait..." : "Sign in to institution"}</span>
+              {!pending ? <ArrowRight size={16} /> : null}
+            </button>
+          </form>
 
-              <form className="inst-auth-form compact-form" onSubmit={handleEmailAuth}>
-                {signup ? (
-                  <label className="inst-auth-field">
-                    <span>Full name</span>
-                    <input type="text" placeholder="Enter your full name" autoComplete="name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
-                  </label>
-                ) : null}
+          <div className="inst-auth-divider inst-auth-divider-tight">
+            <span>APPROVED SSO</span>
+          </div>
 
-                <label className="inst-auth-field">
-                  <span>Email address</span>
-                  <input type="email" placeholder="Enter your work email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                </label>
-
-                <label className="inst-auth-field">
-                  <span>Password</span>
-                  <div className="inst-auth-password-wrap">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      placeholder={signup ? "Create password" : "Enter your password"}
-                      autoComplete={signup ? "new-password" : "current-password"}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="inst-auth-password-toggle"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                      aria-label={showPassword ? "Hide password" : "Show password"}
-                      aria-pressed={showPassword}
-                    >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
-                </label>
-
-                <button className="inst-auth-primary compact-primary" type="submit" disabled={pending}>
-                  <span>{pending ? "Please wait..." : signup ? "Create account" : "Sign in"}</span>
-                  {!pending ? <ArrowRight size={16} /> : null}
-                </button>
-              </form>
-            </>
-          ) : (
-            <div className="inst-auth-phone-panel">
-              <div className="inst-auth-phone-head">
-                <div className="inst-auth-phone-icon">
-                  <PhoneIcon />
-                </div>
-                <div>
-                  <div className="inst-auth-phone-title">Continue with Phone Number</div>
-                  <div className="inst-auth-phone-subtitle">Use your number and verification code.</div>
-                </div>
-              </div>
-
-              <form className="inst-auth-form inst-auth-phone-form" onSubmit={handlePhoneVerify}>
-                <label className="inst-auth-field">
-                  <span>Phone number</span>
-                  <input type="tel" placeholder="+2547XXXXXXXX" autoComplete="tel" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} required />
-                </label>
-                {phoneConfirmation ? (
-                  <label className="inst-auth-field">
-                    <span>Verification code</span>
-                    <input type="text" placeholder="Enter verification code" inputMode="numeric" value={phoneOtp} onChange={(e) => setPhoneOtp(e.target.value)} required />
-                  </label>
-                ) : null}
-                <button className="inst-auth-primary inst-auth-phone-primary" type={phoneConfirmation ? "submit" : "button"} onClick={phoneConfirmation ? undefined : handlePhoneRequest} disabled={pending}>
-                  <span>{pending ? "Please wait..." : phoneConfirmation ? "Verify and continue" : "Send verification code"}</span>
-                  {!pending ? <ArrowRight size={16} /> : null}
-                </button>
-              </form>
-
-              <button className="inst-auth-secondary-btn" type="button" onClick={resetPhoneFlow} disabled={pending}>
-                Back to other sign-in methods
-              </button>
-              <div id={recaptchaContainerId} />
-            </div>
-          )}
-
-          <div className="inst-auth-links compact-links">
-            {!signup ? (
-              <button
-                type="button"
-                className="inst-auth-link-button"
-                onClick={async () => {
-                  setError("");
-                  setNotice("");
-                  try {
-                    if (!email.trim()) throw new Error("Enter your email first.");
-                    await sendPasswordResetEmail(auth, email.trim());
-                    setNotice("Password reset email sent. Check your inbox.");
-                  } catch (err) {
-                    setError(normalizeAuthError(err));
-                  }
-                }}
-              >
-                Forgot password?
-              </button>
-            ) : <span />}
+          <div className="inst-auth-socials compact-two-col">
+            <button type="button" className="inst-auth-social-btn" onClick={() => handleProviderPopup(new GoogleAuthProvider())} disabled={pending}>
+              <GoogleIcon />
+              <span>Google</span>
+            </button>
             <button
               type="button"
-              className="inst-auth-link-button"
+              className="inst-auth-social-btn"
               onClick={() => {
-                setSignup((prev) => !prev);
-                setPhoneMode(false);
-                setNotice("");
-                setError("");
+                const provider = new OAuthProvider("microsoft.com");
+                provider.setCustomParameters({ prompt: "select_account" });
+                handleProviderPopup(provider);
               }}
+              disabled={pending}
             >
-              {signup ? "Already have an account? Sign in" : "Create account"}
+              <MicrosoftIcon />
+              <span>Microsoft</span>
             </button>
           </div>
 
-          <div className="inst-auth-sub-actions compact-links inst-auth-single-action">
-            <button type="button" className="inst-auth-secondary-link" onClick={() => window.location.replace("/login?returnTo=%2Fpublic")}>
+          <button
+            type="button"
+            className="inst-auth-staff-cta inst-auth-activation-cta"
+            onClick={() => window.location.replace("/institution/activate")}
+          >
+            <span className="inst-auth-staff-icon">
+              <KeyRound size={18} />
+            </span>
+            <span className="inst-auth-staff-copy">
+              <strong>New staff or admin?</strong>
+              <small>Activate access or sign in with your department key</small>
+            </span>
+            <ArrowRight size={17} />
+          </button>
+
+          <div className="inst-auth-links compact-links">
+            <button
+              type="button"
+              className="inst-auth-link-button"
+              onClick={async () => {
+                setError("");
+                setNotice("");
+                try {
+                  if (!email.trim()) throw new Error("Enter your email first.");
+                  await sendPasswordResetEmail(auth, email.trim());
+                  setNotice("Password reset email sent. Check your inbox.");
+                } catch (err) {
+                  setError(normalizeAuthError(err));
+                }
+              }}
+            >
+              Forgot password?
+            </button>
+            <button type="button" className="inst-auth-link-button" onClick={() => window.location.replace("/login?returnTo=%2Fpublic")}>
               Public portal
             </button>
           </div>
